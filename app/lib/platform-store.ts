@@ -13,7 +13,11 @@ function idPart(value: string) {
 
 function identity(request: Request) {
   const forwarded = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
-  const development = process.env.NODE_ENV !== "production" ? request.headers.get("x-wenqu-dev-user")?.trim().toLowerCase() : null;
+  const development = process.env.NODE_ENV === "development"
+    ? request.headers.get("x-wenqu-dev-user")?.trim().toLowerCase()
+      ?? process.env.DEV_USER_EMAIL?.trim().toLowerCase()
+      ?? "dev@wenqu.local"
+    : null;
   const email = forwarded ?? development;
   if (!email) throw new Error("authentication_required");
   let displayName = email.split("@")[0];
