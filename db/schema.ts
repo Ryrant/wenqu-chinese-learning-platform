@@ -1,0 +1,88 @@
+import { sql } from "drizzle-orm";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+const createdAt = () => text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`);
+
+export const tenants = sqliteTable("tenants", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  region: text("region").notNull().default("sg"),
+  status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+  createdAt: createdAt(),
+});
+
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  displayName: text("display_name").notNull(),
+  locale: text("locale").notNull().default("zh-CN"),
+  createdAt: createdAt(),
+}, (table) => [uniqueIndex("users_email_idx").on(table.email)]);
+
+export const roleMemberships = sqliteTable("role_memberships", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull(),
+  userId: text("user_id").notNull(),
+  role: text("role", { enum: ["student", "teacher", "guardian", "admin", "reviewer"] }).notNull(),
+  createdAt: createdAt(),
+}, (table) => [index("memberships_tenant_idx").on(table.tenantId), uniqueIndex("membership_unique_idx").on(table.tenantId, table.userId, table.role)]);
+
+export const guardianStudentLinks = sqliteTable("guardian_student_links", {
+  id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), guardianUserId: text("guardian_user_id").notNull(), studentUserId: text("student_user_id").notNull(), verifiedAt: text("verified_at"), createdAt: createdAt(),
+}, (table) => [index("guardian_links_tenant_idx").on(table.tenantId)]);
+
+export const classes = sqliteTable("classes", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), name: text("name").notNull(), level: text("level").notNull(), teacherUserId: text("teacher_user_id").notNull(), academicYear: text("academic_year").notNull(), createdAt: createdAt(),
+}, (table) => [index("classes_tenant_idx").on(table.tenantId)]);
+
+export const enrollments = sqliteTable("enrollments", {
+  id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(), studentUserId: text("student_user_id").notNull(), status: text("status").notNull().default("active"), createdAt: createdAt(),
+}, (table) => [index("enrollments_tenant_idx").on(table.tenantId), uniqueIndex("enrollment_unique_idx").on(table.tenantId, table.classId, table.studentUserId)]);
+
+export const learningObjectives = sqliteTable("learning_objectives", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), code: text("code").notNull(), title: text("title").notNull(), skill: text("skill").notNull(), level: text("level").notNull(), createdAt: createdAt(),
+}, (table) => [index("objectives_tenant_idx").on(table.tenantId)]);
+
+export const assignments = sqliteTable("assignments", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(), title: text("title").notNull(), activityType: text("activity_type").notNull(), status: text("status", { enum: ["draft", "review", "published", "closed"] }).notNull().default("draft"), dueAt: text("due_at"), createdBy: text("created_by").notNull(), publishedAt: text("published_at"), createdAt: createdAt(),
+}, (table) => [index("assignments_tenant_idx").on(table.tenantId), index("assignments_class_idx").on(table.classId)]);
+
+export const submissions = sqliteTable("submissions", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), assignmentId: text("assignment_id").notNull(), studentUserId: text("student_user_id").notNull(), textAnswer: text("text_answer"), assetKey: text("asset_key"), score: real("score"), confidence: real("confidence"), reviewStatus: text("review_status").notNull().default("auto"), submittedAt: createdAt(),
+}, (table) => [index("submissions_tenant_idx").on(table.tenantId), index("submissions_assignment_idx").on(table.assignmentId)]);
+
+export const masterySnapshots = sqliteTable("mastery_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), studentUserId: text("student_user_id").notNull(), objectiveId: text("objective_id").notNull(), mastery: real("mastery").notNull(), evidenceCount: integer("evidence_count").notNull().default(0), measuredAt: createdAt(),
+}, (table) => [index("mastery_student_idx").on(table.tenantId, table.studentUserId)]);
+
+export const sourceDocuments = sqliteTable("source_documents", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), objectKey: text("object_key"), mediaType: text("media_type").notNull(), rightsStatus: text("rights_status").notNull().default("pending"), processingStatus: text("processing_status").notNull().default("uploaded"), version: integer("version").notNull().default(1), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+}, (table) => [index("source_documents_tenant_idx").on(table.tenantId)]);
+
+export const knowledgeChunks = sqliteTable("knowledge_chunks", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), sourceDocumentId: text("source_document_id").notNull(), content: text("content").notNull(), metadataJson: text("metadata_json").notNull().default("{}"), published: integer("published", { mode: "boolean" }).notNull().default(false), createdAt: createdAt(),
+}, (table) => [index("chunks_tenant_source_idx").on(table.tenantId, table.sourceDocumentId)]);
+
+export const knowledgeEntities = sqliteTable("knowledge_entities", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), name: text("name").notNull(), entityType: text("entity_type").notNull(), description: text("description").notNull().default(""), createdAt: createdAt(),
+}, (table) => [index("entities_tenant_idx").on(table.tenantId)]);
+
+export const citations = sqliteTable("citations", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), aiSessionId: text("ai_session_id").notNull(), knowledgeChunkId: text("knowledge_chunk_id").notNull(), quote: text("quote").notNull(), createdAt: createdAt(),
+}, (table) => [index("citations_session_idx").on(table.tenantId, table.aiSessionId)]);
+
+export const aiSessions = sqliteTable("ai_sessions", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), purpose: text("purpose").notNull(), provider: text("provider").notNull(), model: text("model").notNull(), status: text("status").notNull(), inputTokens: integer("input_tokens").notNull().default(0), outputTokens: integer("output_tokens").notNull().default(0), createdAt: createdAt(),
+}, (table) => [index("ai_sessions_tenant_idx").on(table.tenantId)]);
+
+export const consentRecords = sqliteTable("consent_records", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), studentUserId: text("student_user_id").notNull(), guardianUserId: text("guardian_user_id").notNull(), scope: text("scope").notNull(), status: text("status").notNull(), expiresAt: text("expires_at"), createdAt: createdAt(),
+}, (table) => [index("consent_student_idx").on(table.tenantId, table.studentUserId)]);
+
+export const feedback = sqliteTable("feedback", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), targetType: text("target_type").notNull(), targetId: text("target_id").notNull(), rating: integer("rating").notNull(), correction: text("correction"), createdAt: createdAt(),
+}, (table) => [index("feedback_tenant_idx").on(table.tenantId)]);
+
+export const auditLogs = sqliteTable("audit_logs", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), actorUserId: text("actor_user_id").notNull(), action: text("action").notNull(), targetType: text("target_type").notNull(), targetId: text("target_id").notNull(), detailJson: text("detail_json").notNull().default("{}"), createdAt: createdAt(),
+}, (table) => [index("audit_tenant_created_idx").on(table.tenantId, table.createdAt)]);
