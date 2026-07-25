@@ -86,3 +86,14 @@ export const feedback = sqliteTable("feedback", {
 export const auditLogs = sqliteTable("audit_logs", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), actorUserId: text("actor_user_id").notNull(), action: text("action").notNull(), targetType: text("target_type").notNull(), targetId: text("target_id").notNull(), detailJson: text("detail_json").notNull().default("{}"), createdAt: createdAt(),
 }, (table) => [index("audit_tenant_created_idx").on(table.tenantId, table.createdAt)]);
+export const lessonPlans = sqliteTable("lesson_plans", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), topic: text("topic").notNull(), level: text("level").notNull(), durationMinutes: integer("duration_minutes").notNull(), objectivesJson: text("objectives_json").notNull().default("[]"), activitiesJson: text("activities_json").notNull().default("[]"), citationsJson: text("citations_json").notNull().default("[]"), status: text("status").notNull().default("draft"), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+}, (table) => [index("lesson_plans_tenant_idx").on(table.tenantId, table.createdAt)]);
+
+export const notifications = sqliteTable("notifications", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), title: text("title").notNull(), detail: text("detail").notNull(), kind: text("kind").notNull().default("info"), readAt: text("read_at"), scheduledFor: text("scheduled_for"), createdAt: createdAt(),
+}, (table) => [index("notifications_user_idx").on(table.tenantId, table.userId, table.createdAt)]);
+
+export const invitations = sqliteTable("invitations", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), email: text("email").notNull(), role: text("role").notNull(), token: text("token").notNull(), status: text("status").notNull().default("pending"), invitedBy: text("invited_by").notNull(), expiresAt: text("expires_at").notNull(), createdAt: createdAt(),
+}, (table) => [index("invitations_tenant_idx").on(table.tenantId, table.createdAt), uniqueIndex("invitations_token_idx").on(table.token)]);
