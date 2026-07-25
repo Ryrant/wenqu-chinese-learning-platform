@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 export type PlatformRole = "student" | "teacher" | "guardian" | "admin";
 export type PlatformContext = { db: D1Database; tenantId: string; userId: string; userEmail: string; displayName: string; roles: PlatformRole[] };
 const ROLE_SET = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
+let schemaReady: Promise<void> | null = null;
 
 function idPart(value: string) {
   let hash = 2166136261;
@@ -23,6 +24,49 @@ function identity(request: Request) {
   return { email, displayName };
 }
 
+async function ensureCoreSchema(db: D1Database) {
+  await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, region TEXT NOT NULL DEFAULT 'sg', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL, locale TEXT NOT NULL DEFAULT 'zh-CN', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS role_memberships (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS memberships_tenant_idx ON role_memberships (tenant_id)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS membership_unique_idx ON role_memberships (tenant_id,user_id,role)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS guardian_student_links (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, guardian_user_id TEXT NOT NULL, student_user_id TEXT NOT NULL, verified_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS guardian_links_tenant_idx ON guardian_student_links (tenant_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS classes (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL, level TEXT NOT NULL, teacher_user_id TEXT NOT NULL, academic_year TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS classes_tenant_idx ON classes (tenant_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS enrollments (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, student_user_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS enrollments_tenant_idx ON enrollments (tenant_id)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS enrollment_unique_idx ON enrollments (tenant_id,class_id,student_user_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS learning_objectives (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, code TEXT NOT NULL, title TEXT NOT NULL, skill TEXT NOT NULL, level TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS objectives_tenant_idx ON learning_objectives (tenant_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, title TEXT NOT NULL, activity_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', due_at TEXT, created_by TEXT NOT NULL, published_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS assignments_tenant_idx ON assignments (tenant_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS assignments_class_idx ON assignments (class_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS submissions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, assignment_id TEXT NOT NULL, student_user_id TEXT NOT NULL, text_answer TEXT, asset_key TEXT, score REAL, confidence REAL, review_status TEXT NOT NULL DEFAULT 'auto', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS submissions_tenant_idx ON submissions (tenant_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS submissions_assignment_idx ON submissions (assignment_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS mastery_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, objective_id TEXT NOT NULL, mastery REAL NOT NULL, evidence_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS mastery_student_idx ON mastery_snapshots (tenant_id,student_user_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS source_documents (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, object_key TEXT, media_type TEXT NOT NULL, rights_status TEXT NOT NULL DEFAULT 'pending', processing_status TEXT NOT NULL DEFAULT 'uploaded', version INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS source_documents_tenant_idx ON source_documents (tenant_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS knowledge_chunks (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_document_id TEXT NOT NULL, content TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', published INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS chunks_tenant_source_idx ON knowledge_chunks (tenant_id,source_document_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS knowledge_entities (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL, entity_type TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS entities_tenant_idx ON knowledge_entities (tenant_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS ai_sessions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, purpose TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS ai_sessions_tenant_idx ON ai_sessions (tenant_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS citations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, ai_session_id TEXT NOT NULL, knowledge_chunk_id TEXT NOT NULL, quote TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS citations_session_idx ON citations (tenant_id,ai_session_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS consent_records (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, guardian_user_id TEXT NOT NULL, scope TEXT NOT NULL, status TEXT NOT NULL, expires_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS consent_student_idx ON consent_records (tenant_id,student_user_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS feedback (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, rating INTEGER NOT NULL, correction TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS feedback_tenant_idx ON feedback (tenant_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, actor_user_id TEXT NOT NULL, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, detail_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS audit_tenant_created_idx ON audit_logs (tenant_id,created_at)"),
+  ]);
+}
 async function ensureExtendedSchema(db: D1Database) {
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS lesson_plans (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, topic TEXT NOT NULL, level TEXT NOT NULL, duration_minutes INTEGER NOT NULL, objectives_json TEXT NOT NULL DEFAULT '[]', activities_json TEXT NOT NULL DEFAULT '[]', citations_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft', created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -64,6 +108,7 @@ async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
     db.prepare("INSERT OR IGNORE INTO consent_records (id,tenant_id,student_user_id,guardian_user_id,scope,status) VALUES (?,?,?,?,?,?)").bind(`${tenantId}-consent-learning`, tenantId, userId, userId, "learning_analytics", "granted"),
     db.prepare("INSERT OR IGNORE INTO notifications (id,tenant_id,user_id,title,detail,kind) VALUES (?,?,?,?,?,?)").bind(`${tenantId}-notice-welcome`, tenantId, userId, "试用工作区已就绪", "这里的课程、作业、审核与上传操作都会真实保存。", "success"),
   ]);
+
   const mastery = await db.prepare("SELECT COUNT(*) AS count FROM mastery_snapshots WHERE tenant_id=? AND student_user_id=?").bind(tenantId, userId).first<{ count: number }>();
   if (!mastery?.count) await db.batch(objectives.map(([id,,, , score], index) => db.prepare("INSERT INTO mastery_snapshots (tenant_id,student_user_id,objective_id,mastery,evidence_count) VALUES (?,?,?,?,?)").bind(tenantId, userId, id, score, index + 3)));
 }
@@ -71,7 +116,10 @@ async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
 export async function platformContext(request: Request, requiredRole?: PlatformRole): Promise<PlatformContext> {
   const db = (env as unknown as { DB?: D1Database }).DB;
   if (!db) throw new Error("database_unavailable");
-  await ensureExtendedSchema(db);
+  if (!schemaReady) {
+    schemaReady = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); })().catch((error) => { schemaReady = null; throw error; });
+  }
+  await schemaReady;
   const { email, displayName } = identity(request);
   const userId = `usr_${idPart(email)}`;
   const memberships = await db.prepare(`SELECT rm.tenant_id AS tenantId, rm.role AS role FROM role_memberships rm JOIN users u ON u.id=rm.user_id WHERE lower(u.email)=? ORDER BY rm.created_at ASC`).bind(email).all<{ tenantId: string; role: string }>();
@@ -99,5 +147,6 @@ export async function platformContext(request: Request, requiredRole?: PlatformR
 export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
   const status = message === "authentication_required" ? 401 : message === "forbidden" ? 403 : 500;
+  if (status >= 500) console.error("platform_api_error", { message });
   return Response.json({ error: message }, { status });
 }
