@@ -8,6 +8,13 @@
       "when": 1784956270874,
       "tag": "0000_dusty_mesmero",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784962417555,
+      "tag": "0001_condemned_lester",
+      "breakpoints": true
     }
   ]
 }
