@@ -1,4 +1,4 @@
-﻿import { env } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { platformApiError, platformContext } from "../../../lib/platform-store";
 
 export const dynamic = "force-dynamic";
@@ -10,16 +10,16 @@ export async function GET(request: Request) {
     const admin = roles.includes("admin");
     const classClauses: string[] = [];
     const classArgs: unknown[] = [tenantId];
-    if (roles.includes("teacher")) { classClauses.push("c.teacher_user_id=?"); classArgs.push(userId); }
-    if (roles.includes("student")) { classClauses.push("EXISTS (SELECT 1 FROM enrollments ea WHERE ea.tenant_id=c.tenant_id AND ea.class_id=c.id AND ea.student_user_id=? AND ea.status='active')"); classArgs.push(userId); }
-    if (roles.includes("guardian")) { classClauses.push("EXISTS (SELECT 1 FROM enrollments eg JOIN guardian_student_links gl ON gl.tenant_id=eg.tenant_id AND gl.student_user_id=eg.student_user_id WHERE eg.tenant_id=c.tenant_id AND eg.class_id=c.id AND gl.guardian_user_id=?)"); classArgs.push(userId); }
+    if (!admin && roles.includes("teacher")) { classClauses.push("c.teacher_user_id=?"); classArgs.push(userId); }
+    if (!admin && roles.includes("student")) { classClauses.push("EXISTS (SELECT 1 FROM enrollments ea WHERE ea.tenant_id=c.tenant_id AND ea.class_id=c.id AND ea.student_user_id=? AND ea.status='active')"); classArgs.push(userId); }
+    if (!admin && roles.includes("guardian")) { classClauses.push("EXISTS (SELECT 1 FROM enrollments eg JOIN guardian_student_links gl ON gl.tenant_id=eg.tenant_id AND gl.student_user_id=eg.student_user_id WHERE eg.tenant_id=c.tenant_id AND eg.class_id=c.id AND gl.guardian_user_id=?)"); classArgs.push(userId); }
     const classAccess = admin ? "1=1" : classClauses.length ? `(${classClauses.join(" OR ")})` : "1=0";
 
     const submissionClauses: string[] = [];
     const submissionArgs: unknown[] = [tenantId];
-    if (roles.includes("teacher")) { submissionClauses.push("c.teacher_user_id=?"); submissionArgs.push(userId); }
-    if (roles.includes("student")) { submissionClauses.push("s.student_user_id=?"); submissionArgs.push(userId); }
-    if (roles.includes("guardian")) { submissionClauses.push("EXISTS (SELECT 1 FROM guardian_student_links gl WHERE gl.tenant_id=s.tenant_id AND gl.student_user_id=s.student_user_id AND gl.guardian_user_id=?)"); submissionArgs.push(userId); }
+    if (!admin && roles.includes("teacher")) { submissionClauses.push("c.teacher_user_id=?"); submissionArgs.push(userId); }
+    if (!admin && roles.includes("student")) { submissionClauses.push("s.student_user_id=?"); submissionArgs.push(userId); }
+    if (!admin && roles.includes("guardian")) { submissionClauses.push("EXISTS (SELECT 1 FROM guardian_student_links gl WHERE gl.tenant_id=s.tenant_id AND gl.student_user_id=s.student_user_id AND gl.guardian_user_id=?)"); submissionArgs.push(userId); }
     const submissionAccess = admin ? "1=1" : submissionClauses.length ? `(${submissionClauses.join(" OR ")})` : "1=0";
 
     const classesQuery = db.prepare(`SELECT c.*,COUNT(e.id) AS studentCount FROM classes c LEFT JOIN enrollments e ON e.class_id=c.id AND e.tenant_id=c.tenant_id AND e.status='active' WHERE c.tenant_id=? AND ${classAccess} GROUP BY c.id ORDER BY c.created_at DESC`).bind(...classArgs);

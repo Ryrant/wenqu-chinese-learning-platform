@@ -36,8 +36,9 @@ export function Dashboard() {
   async function refresh() {
     setError("");
     const response = await fetch("/api/v1/workspace", { cache: "no-store" });
-    if (!response.ok) throw new Error(response.status === 401 ? "请先完成 ChatGPT 登录" : "工作区数据加载失败");
-    const next = await response.json() as WorkspaceData;
+    const payload = await response.json() as WorkspaceData | { error?: string };
+    if (!response.ok) throw new Error(response.status === 401 ? "请先完成 ChatGPT 登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
+    const next = payload as WorkspaceData;
     setData(next);
     if (!next.user.roles.includes(role)) {
       const first = next.user.roles[0] ?? "student";
@@ -49,8 +50,9 @@ export function Dashboard() {
     let active = true;
     fetch("/api/v1/workspace", { cache: "no-store" })
       .then(async (response) => {
-        if (!response.ok) throw new Error(response.status === 401 ? "请先完成 ChatGPT 登录" : "工作区数据加载失败");
-        return response.json() as Promise<WorkspaceData>;
+        const payload = await response.json() as WorkspaceData | { error?: string };
+        if (!response.ok) throw new Error(response.status === 401 ? "请先完成 ChatGPT 登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
+        return payload as WorkspaceData;
       })
       .then((next) => { if (active) setData(next); })
       .catch((reason: Error) => { if (active) setError(reason.message); })
