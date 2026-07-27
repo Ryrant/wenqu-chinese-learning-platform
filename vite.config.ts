@@ -4,6 +4,9 @@ import { sites } from "./build/sites-vite-plugin";
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+const wranglerConfigPath = process.env.WENQU_DEPLOY_TARGET === "standard"
+  ? "./wrangler.toml"
+  : "./wrangler.chatgpt.toml";
 
 export default defineConfig(async () => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
@@ -24,7 +27,7 @@ export default defineConfig(async () => {
       sites(),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        configPath: "./wrangler.toml",
+        configPath: wranglerConfigPath,
       }),
     ],
   };

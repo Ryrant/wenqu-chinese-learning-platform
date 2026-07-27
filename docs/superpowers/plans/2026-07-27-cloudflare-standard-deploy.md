@@ -4,7 +4,7 @@
 
 **Goal:** Add standard Cloudflare Workers deployment support with password login while preserving existing ChatGPT Platform Sites behavior.
 
-**Architecture:** Keep the existing business API surface stable by extending the shared `platformContext()` identity layer. Add a small JWT helper module and auth API routes, then let the React dashboard show a login panel only when the runtime reports standard auth mode. Use `wrangler.toml` as the single standard Cloudflare configuration source and keep `.openai/hosting.json` for Sites packaging.
+**Architecture:** Keep the existing business API surface stable by extending the shared `platformContext()` identity layer. Add a small JWT helper module and auth API routes, then let the React dashboard show a login panel only when the runtime reports standard auth mode. Use separate default/Sites and standard Wrangler configurations selected by the build target, and keep `.openai/hosting.json` for Sites packaging.
 
 **Tech Stack:** TypeScript, React 19, Vinext, Vite, Cloudflare Workers, D1, R2, Wrangler 4.92.0, Node.js Test Runner.
 
@@ -30,13 +30,26 @@
 - `app/api/v1/auth/session/route.ts`: Runtime auth mode and current session endpoint.
 - `app/dashboard.tsx`: Minimal login and logout UI for standard mode only.
 - `cloudflare-env.d.ts`: Worker binding and environment variable typing.
-- `vite.config.ts`: Use root `wrangler.toml` through Cloudflare Vite plugin `configPath`.
+- `vite.config.ts`: Select `wrangler.chatgpt.toml` by default and `wrangler.toml` for the standard deploy target.
+- `wrangler.chatgpt.toml`: Default/Sites-compatible bindings without `AUTH_MODE=standard`.
 - `wrangler.toml`: Standard Cloudflare Workers configuration.
+- `scripts/build-standard.mjs`: Cross-platform standard-target build launcher.
+- `scripts/render-wrangler-config.mjs`: CI validation and standard config renderer.
 - `.env.example`: Safe local environment template.
 - `.github/workflows/deploy.yml`: GitHub Actions deployment workflow.
 - `AGENTS.md`: Project-local collaboration, branch, PR, verification, and secret handling rules.
 - `tests/rendered-html.test.mjs`: Static regression tests for deployment/auth configuration.
 - `docs/superpowers/plans/2026-07-27-cloudflare-standard-deploy.md`: This implementation plan.
+
+## Final Review Amendments
+
+The final whole-branch review adds these requirements to the original task sequence:
+
+- Default builds must preserve ChatGPT/Sites auth semantics; only `build:standard` selects `AUTH_MODE=standard`.
+- CI must render D1, R2, and administrator values before verification, fail on missing/placeholders, and upload `ADMIN_PASSWORD` plus `JWT_SECRET` as Worker Secrets.
+- JWT helpers require Node behavior tests for valid, expired, malformed, and invalid-signature tokens.
+- Standard login requires isolate-local best-effort throttling, while production documentation requires Cloudflare WAF Rate Limiting or Cloudflare Access.
+- Malformed percent-encoded session cookies must fail closed as unauthenticated.
 
 ---
 

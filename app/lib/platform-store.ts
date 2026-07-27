@@ -45,7 +45,12 @@ function tokenFromRequest(request: Request) {
   // Session cookie: wenqu_session.
   const cookie = request.headers.get("Cookie") ?? "";
   const match = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${sessionCookieName}=`));
-  return match ? decodeURIComponent(match.slice(sessionCookieName.length + 1)) : "";
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match.slice(sessionCookieName.length + 1));
+  } catch {
+    return "";
+  }
 }
 
 async function standardIdentity(request: Request) {
