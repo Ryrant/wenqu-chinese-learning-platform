@@ -16,5 +16,19 @@ type R2Bucket = {
 type Fetcher = { fetch(request: Request): Promise<Response> };
 
 declare module "cloudflare:workers" {
-  export const env: { DB: D1Database; CONTENT: R2Bucket; [key: string]: unknown };
+  export const env: {
+    DB: D1Database;
+    CONTENT: R2Bucket;
+    AUTH_MODE?: "chatgpt" | "standard" | "local";
+    ADMIN_EMAIL?: string;
+    ADMIN_DISPLAY_NAME?: string;
+    ADMIN_PASSWORD?: string;
+    JWT_SECRET?: string;
+    JWT_TTL_SECONDS?: string;
+    DEV_USER_EMAIL?: string;
+    AI_API_KEY?: string;
+    SPEECH_API_KEY?: string;
+    MODERATION_API_KEY?: string;
+    [key: string]: unknown;
+  };
 }

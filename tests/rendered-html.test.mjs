@@ -60,3 +60,18 @@ test("standard auth token helpers use Web Crypto without new dependencies", asyn
   assert.match(token, /try \{[\s\S]*base64UrlDecode\(signature\)[\s\S]*crypto\.subtle\.verify[\s\S]*\} catch \{[\s\S]*return null;/);
   assert.doesNotMatch(JSON.stringify(pkg.dependencies), /jose|jsonwebtoken/);
 });
+
+test("platform identity supports chatgpt standard and local auth modes", async () => {
+  const store = await read("app/lib/platform-store.ts");
+  const envTypes = await read("cloudflare-env.d.ts");
+  assert.match(store, /export type AuthMode = "chatgpt" \| "standard" \| "local"/);
+  assert.match(store, /export function getAuthMode\(\): AuthMode/);
+  assert.match(store, /AUTH_MODE/);
+  assert.match(store, /oai-authenticated-user-email/);
+  assert.match(store, /verifySessionToken/);
+  assert.match(store, /Authorization/);
+  assert.match(store, /wenqu_session/);
+  assert.match(envTypes, /AUTH_MODE\?: "chatgpt" \| "standard" \| "local"/);
+  assert.match(envTypes, /ADMIN_EMAIL\?: string/);
+  assert.match(envTypes, /JWT_SECRET\?: string/);
+});
