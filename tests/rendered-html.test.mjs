@@ -57,5 +57,6 @@ test("standard auth token helpers use Web Crypto without new dependencies", asyn
   assert.match(token, /export async function verifySessionToken/);
   assert.match(token, /crypto\.subtle\.sign/);
   assert.match(token, /crypto\.subtle\.verify/);
+  assert.match(token, /try \{[\s\S]*base64UrlDecode\(signature\)[\s\S]*crypto\.subtle\.verify[\s\S]*\} catch \{[\s\S]*return null;/);
   assert.doesNotMatch(JSON.stringify(pkg.dependencies), /jose|jsonwebtoken/);
 });
