@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
+const execFileAsync = promisify(execFile);
 
 test("all four role workspaces expose real operations instead of timer shells", async () => {
   const [dashboard, student, staff] = await Promise.all([read("app/dashboard.tsx"), read("app/student-view.tsx"), read("app/staff-views.tsx")]);
@@ -114,32 +120,141 @@ test("dashboard detects authenticated standard sessions and preserves the worksp
   assert.match(dashboard, /notify\("退出失败", reason instanceof Error \? reason\.message : "退出登录失败", "error"\);/);
 });
 
-test("standard cloudflare deployment configuration is present and secret-safe", async () => {
-  const [wrangler, workflow, envExample, pkgRaw, vite, agents] = await Promise.all([
+test("standard and ChatGPT builds select separate Wrangler configurations", async () => {
+  const [standardWrangler, chatGptWrangler, pkgRaw, vite] = await Promise.all([
     read("wrangler.toml"),
-    read(".github/workflows/deploy.yml"),
-    read(".env.example"),
+    read("wrangler.chatgpt.toml"),
     read("package.json"),
     read("vite.config.ts"),
-    read("AGENTS.md"),
   ]);
   const pkg = JSON.parse(pkgRaw);
-  assert.equal(pkg.scripts["cf:preview"], "npm run build && npx wrangler dev");
-  assert.equal(pkg.scripts["cf:deploy"], "npm run build && npx wrangler deploy");
-  assert.match(wrangler, /main = "worker\/index\.ts"/);
-  assert.match(wrangler, /binding = "DB"/);
-  assert.match(wrangler, /binding = "CONTENT"/);
-  assert.match(wrangler, /AUTH_MODE = "standard"/);
-  assert.match(wrangler, /required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
-  assert.doesNotMatch(wrangler, /ADMIN_PASSWORD =|JWT_SECRET =|CLOUDFLARE_API_TOKEN/);
-  assert.match(workflow, /cloudflare\/wrangler-action@v3/);
-  assert.match(workflow, /CLOUDFLARE_API_TOKEN/);
-  assert.match(workflow, /CLOUDFLARE_ACCOUNT_ID/);
+  assert.equal(pkg.scripts["build:standard"], "node scripts/build-standard.mjs");
+  assert.equal(pkg.scripts["cf:preview"], "npm run build:standard && npx wrangler dev");
+  assert.equal(pkg.scripts["cf:deploy"], "npm run build:standard && npx wrangler deploy");
+  assert.match(vite, /WENQU_DEPLOY_TARGET/);
+  assert.match(vite, /\.\/wrangler\.chatgpt\.toml/);
+  assert.match(vite, /\.\/wrangler\.toml/);
+  assert.match(standardWrangler, /AUTH_MODE = "standard"/);
+  assert.match(chatGptWrangler, /binding = "DB"/);
+  assert.match(chatGptWrangler, /binding = "CONTENT"/);
+  assert.doesNotMatch(chatGptWrangler, /AUTH_MODE\s*=\s*"standard"/);
+});
+
+test("CI renders deploy resources before verification and uploads Worker secrets", async () => {
+  const [workflow, renderScript] = await Promise.all([
+    read(".github/workflows/deploy.yml"),
+    read("scripts/render-wrangler-config.mjs"),
+  ]);
+  const renderIndex = workflow.indexOf("node scripts/render-wrangler-config.mjs");
+  const verifyIndex = workflow.indexOf("npm test");
+  const deployIndex = workflow.indexOf("cloudflare/wrangler-action@v3");
+  assert.ok(renderIndex >= 0 && renderIndex < verifyIndex && verifyIndex < deployIndex);
+  assert.match(workflow, /D1_DATABASE_ID:\s*\$\{\{\s*vars\.D1_DATABASE_ID\s*\}\}/);
+  assert.match(workflow, /R2_BUCKET_NAME:\s*\$\{\{\s*vars\.R2_BUCKET_NAME\s*\}\}/);
+  assert.match(workflow, /ADMIN_EMAIL:\s*\$\{\{\s*vars\.ADMIN_EMAIL\s*\}\}/);
+  assert.match(workflow, /secrets:\s*\|[\s\S]*ADMIN_PASSWORD[\s\S]*JWT_SECRET/);
+  assert.match(workflow, /ADMIN_PASSWORD:\s*\$\{\{\s*secrets\.ADMIN_PASSWORD\s*\}\}/);
+  assert.match(workflow, /JWT_SECRET:\s*\$\{\{\s*secrets\.JWT_SECRET\s*\}\}/);
+  assert.match(renderScript, /D1_DATABASE_ID/);
+  assert.match(renderScript, /R2_BUCKET_NAME/);
+  assert.match(renderScript, /ADMIN_EMAIL/);
+});
+
+test("Wrangler renderer rejects placeholders and writes controlled CI values without logging secrets", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "wenqu-wrangler-"));
+  try {
+    await writeFile(join(directory, "wrangler.toml"), await read("wrangler.toml"), "utf8");
+    const script = fileURLToPath(new URL("../scripts/render-wrangler-config.mjs", import.meta.url));
+    await assert.rejects(execFileAsync(process.execPath, [script], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        D1_DATABASE_ID: "00000000-0000-4000-8000-000000000000",
+        R2_BUCKET_NAME: "replace-with-r2-bucket-name",
+        ADMIN_EMAIL: "admin@example.com",
+      },
+    }));
+
+    const secretFixture = "must-not-appear-in-output";
+    const { stdout, stderr } = await execFileAsync(process.execPath, [script], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        D1_DATABASE_ID: "12345678-1234-4abc-8def-1234567890ab",
+        R2_BUCKET_NAME: "wenqu-ci-test",
+        ADMIN_EMAIL: "admin@wenqu.test",
+        ADMIN_PASSWORD: secretFixture,
+        JWT_SECRET: secretFixture,
+      },
+    });
+    const rendered = await readFile(join(directory, "wrangler.toml"), "utf8");
+    assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/);
+    assert.match(rendered, /bucket_name = "wenqu-ci-test"/);
+    assert.match(rendered, /ADMIN_EMAIL = "admin@wenqu.test"/);
+    assert.doesNotMatch(`${stdout}\n${stderr}`, new RegExp(secretFixture));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("standard build launcher delegates through the active npm CLI with the standard target", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "wenqu-build-standard-"));
+  try {
+    const outputPath = join(directory, "invocation.json");
+    const npmCliPath = join(directory, "fake-npm.mjs");
+    await writeFile(npmCliPath, `
+      import { writeFile } from "node:fs/promises";
+      await writeFile(process.env.WENQU_TEST_OUTPUT, JSON.stringify({
+        args: process.argv.slice(2),
+        target: process.env.WENQU_DEPLOY_TARGET,
+      }));
+    `, "utf8");
+    const script = fileURLToPath(new URL("../scripts/build-standard.mjs", import.meta.url));
+    await execFileAsync(process.execPath, [script], {
+      env: {
+        ...process.env,
+        npm_execpath: npmCliPath,
+        WENQU_TEST_OUTPUT: outputPath,
+      },
+    });
+    const invocation = JSON.parse(await readFile(outputPath, "utf8"));
+    assert.deepEqual(invocation, { args: ["run", "build"], target: "standard" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("standard cloudflare deployment configuration is documented and secret-safe", async () => {
+  const [standardWrangler, envExample, agents] = await Promise.all([
+    read("wrangler.toml"),
+    read(".env.example"),
+    read("AGENTS.md"),
+  ]);
+  assert.match(standardWrangler, /main = "worker\/index\.ts"/);
+  assert.match(standardWrangler, /binding = "DB"/);
+  assert.match(standardWrangler, /binding = "CONTENT"/);
+  assert.match(standardWrangler, /required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
+  assert.doesNotMatch(standardWrangler, /ADMIN_PASSWORD =|JWT_SECRET =|CLOUDFLARE_API_TOKEN/);
   assert.match(envExample, /AUTH_MODE=standard/);
   assert.match(envExample, /JWT_SECRET=/);
+  assert.match(envExample, /D1_DATABASE_ID/);
+  assert.match(envExample, /R2_BUCKET_NAME/);
   assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
-  assert.match(vite, /configPath: "\.\/wrangler\.toml"/);
   assert.match(agents, /feature 分支/);
   assert.match(agents, /PR/);
   assert.match(agents, /AUTH_MODE=standard/);
+  assert.match(agents, /WAF Rate Limiting|Cloudflare Access/);
+  assert.match(agents, /\/api\/v1\/auth\/login/);
+});
+
+test("login has best-effort throttling and malformed cookies fail closed", async () => {
+  const [login, store] = await Promise.all([
+    read("app/api/v1/auth/login/route.ts"),
+    read("app/lib/platform-store.ts"),
+  ]);
+  assert.match(login, /429/);
+  assert.match(login, /Retry-After/i);
+  assert.match(login, /CF-Connecting-IP/i);
+  assert.match(login, /loginAttempts/);
+  assert.match(store, /try \{[\s\S]*decodeURIComponent[\s\S]*\} catch \{[\s\S]*return "";/);
 });

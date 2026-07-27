@@ -92,15 +92,13 @@ JWT 设计：
 
 ## Cloudflare / Wrangler 配置
 
-新增 `wrangler.toml` 作为标准 Workers 输入配置，配置内容包括：
+使用两份职责分离的 Wrangler 输入配置：
 
-- Worker 名称。
-- `main = "worker/index.ts"`。
-- `compatibility_date` 和 `nodejs_compat`。
-- D1 binding：`DB`。
-- R2 binding：`CONTENT`。
-- 非敏感变量：`AUTH_MODE = "standard"`。
-- 必需 Secrets：`ADMIN_PASSWORD`、`JWT_SECRET`。
+- 默认 `npm run build` 读取 `wrangler.chatgpt.toml`，保留 `DB`、`CONTENT` binding，但不设置 `AUTH_MODE=standard`。
+- `npm run build:standard` 通过 `WENQU_DEPLOY_TARGET=standard` 选择 `wrangler.toml`。
+- `wrangler.toml` 使用安全占位值并设置 `AUTH_MODE = "standard"`；CI 在验证和部署前写入真实 D1 ID、R2 bucket 名和管理员邮箱。
+- 两份配置都包含 Worker 名称、`main = "worker/index.ts"`、`compatibility_date` 和 `nodejs_compat`。
+- 标准配置声明必需 Secrets：`ADMIN_PASSWORD`、`JWT_SECRET`。
 
 敏感项处理：
 
@@ -117,16 +115,18 @@ Cloudflare Vite plugin 注意点：
 
 `package.json` 新增：
 
-- `cf:preview`：`npm run build && npx wrangler dev`
-- `cf:deploy`：`npm run build && npx wrangler deploy`
+- `build:standard`：跨平台脚本设置标准部署目标后执行 build。
+- `cf:preview`：`npm run build:standard && npx wrangler dev`
+- `cf:deploy`：`npm run build:standard && npx wrangler deploy`
 
 `.github/workflows/deploy.yml`：
 
 - push 到 `main` 时触发。
 - 使用 Node.js 22。
-- 执行 `npm ci`、`npm test`。
-- 使用 `cloudflare/wrangler-action@v3` 部署。
-- 读取 GitHub Secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`。
+- 从 GitHub Variables 读取 `D1_DATABASE_ID`、`R2_BUCKET_NAME`、`ADMIN_EMAIL`，拒绝缺失值和占位值，然后渲染 `wrangler.toml`。
+- 执行 `npm ci`、`npm run lint`、`npm test`、`npm run build:standard`。
+- 使用 `cloudflare/wrangler-action@v3` 部署，并上传 `ADMIN_PASSWORD`、`JWT_SECRET` Worker Secrets。
+- 读取 GitHub Secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`ADMIN_PASSWORD`、`JWT_SECRET`。
 
 ## 项目 AGENTS.md 更新
 
@@ -145,6 +145,8 @@ Cloudflare Vite plugin 注意点：
 - JWT 缺失、过期、签名错误：返回 `authentication_required`。
 - 角色不足：继续返回 `forbidden`。
 - 登录失败不输出密码、token 或密钥。
+- 畸形 session Cookie 按未认证处理，不因 URI 解码错误返回 500。
+- 登录路由按客户端地址提供单 isolate、固定窗口的尽力限流；达到阈值返回 429 和 `Retry-After`。
 
 ## 测试计划
 
@@ -157,8 +159,10 @@ Cloudflare Vite plugin 注意点：
 
 - `platform-store.ts` 保留 ChatGPT header 支持。
 - `platform-store.ts` 支持 `AUTH_MODE` 和 standard JWT 身份。
+- 行为测试覆盖 JWT 有效、过期、畸形和签名错误。
 - 新增 auth API 路由存在并设置 HttpOnly cookie。
-- `wrangler.toml` 存在 D1/R2 binding 和 required secrets。
+- 默认和标准构建分别选择正确 Wrangler 配置，构建产物中的认证模式符合目标。
+- CI 配置渲染脚本拒绝占位值且不输出 Secrets。
 - `package.json` 包含 `cf:preview`、`cf:deploy`。
 - `.env.example` 不包含真实密码或 token。
 - 项目根目录 `AGENTS.md` 存在并包含 PR/分支和 Secrets 约定。
@@ -167,6 +171,7 @@ Cloudflare Vite plugin 注意点：
 
 - `@cloudflare/vite-plugin` 会生成部署用输出配置；如果根 `wrangler.toml` 和 `vite.config.ts` 同时声明 binding，可能出现重复或覆盖。实现时必须通过 build 输出确认。
 - 标准密码登录只是部署解耦的最小方案，不等于完整多用户认证系统；后续可替换为 OIDC、Cloudflare Access 或机构账号系统。
+- 应用内限流不跨 Worker isolate 共享状态，不能替代 Cloudflare WAF Rate Limiting；公开部署前必须启用 WAF Rate Limiting 或 Cloudflare Access。
 - 如果 CI 只执行 `wrangler deploy` 而不先 build，可能部署不到 Vinext 生成的正确产物。因此脚本和 workflow 必须先构建。
 
 ## 参考依据

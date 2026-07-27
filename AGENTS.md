@@ -10,9 +10,12 @@
 ## 部署规则
 
 - ChatGPT Platform Sites 继续使用 `.openai/hosting.json`，不要删除该文件。
+- 默认 `npm run build` 使用 `wrangler.chatgpt.toml`，不得设置 `AUTH_MODE=standard`；标准 Workers 构建使用 `npm run build:standard` 和 `wrangler.toml`。
 - 标准 Cloudflare Workers 部署使用 `AUTH_MODE=standard`。
 - `DB` 是 D1 binding，`CONTENT` 是 R2 binding。
 - `ADMIN_PASSWORD`、`JWT_SECRET`、`CLOUDFLARE_API_TOKEN`、真实 D1 database id 和真实 R2 bucket 名称不得提交。
+- GitHub Actions 使用 Variables `D1_DATABASE_ID`、`R2_BUCKET_NAME`、`ADMIN_EMAIL`，使用 Secrets `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`ADMIN_PASSWORD`、`JWT_SECRET`；缺失或占位配置必须在部署前失败。
+- 应用内 `/api/v1/auth/login` 限流只在单个 Worker isolate 内尽力生效。公开部署前必须配置 Cloudflare WAF Rate Limiting，或使用 Cloudflare Access 保护应用。
 - GitHub Actions 部署前必须先执行 `npm test`。
 
 ## 本地开发
