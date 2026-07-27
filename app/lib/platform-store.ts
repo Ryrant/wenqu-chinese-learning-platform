@@ -1,9 +1,17 @@
 import { env } from "cloudflare:workers";
+import { sessionCookieName, verifySessionToken } from "./auth-token";
 
 export type PlatformRole = "student" | "teacher" | "guardian" | "admin";
+export type AuthMode = "chatgpt" | "standard" | "local";
 export type PlatformContext = { db: D1Database; tenantId: string; userId: string; userEmail: string; displayName: string; roles: PlatformRole[] };
 const ROLE_SET = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
 let schemaReady: Promise<void> | null = null;
+
+export function getAuthMode(): AuthMode {
+  const configured = (env as unknown as { AUTH_MODE?: string }).AUTH_MODE?.trim().toLowerCase();
+  if (configured === "chatgpt" || configured === "standard" || configured === "local") return configured;
+  return process.env.NODE_ENV === "development" ? "local" : "chatgpt";
+}
 
 function idPart(value: string) {
   let hash = 2166136261;
@@ -11,14 +19,8 @@ function idPart(value: string) {
   return (hash >>> 0).toString(36);
 }
 
-function identity(request: Request) {
-  const forwarded = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
-  const development = process.env.NODE_ENV === "development"
-    ? request.headers.get("x-wenqu-dev-user")?.trim().toLowerCase()
-      ?? process.env.DEV_USER_EMAIL?.trim().toLowerCase()
-      ?? "dev@wenqu.local"
-    : null;
-  const email = forwarded ?? development;
+function chatGptIdentity(request: Request) {
+  const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
   if (!email) throw new Error("authentication_required");
   let displayName = email.split("@")[0];
   const encoded = request.headers.get("oai-authenticated-user-full-name");
@@ -26,6 +28,41 @@ function identity(request: Request) {
     try { displayName = decodeURIComponent(encoded); } catch { /* fall back to email prefix */ }
   }
   return { email, displayName };
+}
+
+function localIdentity(request: Request) {
+  const bindings = env as unknown as { DEV_USER_EMAIL?: string };
+  const email = request.headers.get("x-wenqu-dev-user")?.trim().toLowerCase()
+    ?? bindings.DEV_USER_EMAIL?.trim().toLowerCase()
+    ?? process.env.DEV_USER_EMAIL?.trim().toLowerCase()
+    ?? "dev@wenqu.local";
+  return { email, displayName: email.split("@")[0] };
+}
+
+function tokenFromRequest(request: Request) {
+  const authorization = request.headers.get("Authorization");
+  if (authorization?.startsWith("Bearer ")) return authorization.slice("Bearer ".length).trim();
+  // Session cookie: wenqu_session.
+  const cookie = request.headers.get("Cookie") ?? "";
+  const match = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${sessionCookieName}=`));
+  return match ? decodeURIComponent(match.slice(sessionCookieName.length + 1)) : "";
+}
+
+async function standardIdentity(request: Request) {
+  const bindings = env as unknown as { JWT_SECRET?: string };
+  if (!bindings.JWT_SECRET) throw new Error("authentication_config_missing");
+  const token = tokenFromRequest(request);
+  if (!token) throw new Error("authentication_required");
+  const session = await verifySessionToken(token, bindings.JWT_SECRET);
+  if (!session) throw new Error("authentication_required");
+  return { email: session.email.trim().toLowerCase(), displayName: session.displayName };
+}
+
+async function identity(request: Request) {
+  const mode = getAuthMode();
+  if (mode === "standard") return standardIdentity(request);
+  if (mode === "local") return localIdentity(request);
+  return chatGptIdentity(request);
 }
 
 async function ensureCoreSchema(db: D1Database) {
@@ -124,7 +161,7 @@ export async function platformContext(request: Request, requiredRole?: PlatformR
     schemaReady = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); })().catch((error) => { schemaReady = null; throw error; });
   }
   await schemaReady;
-  const { email, displayName } = identity(request);
+  const { email, displayName } = await identity(request);
   const userId = `usr_${idPart(email)}`;
   const memberships = await db.prepare(`SELECT rm.tenant_id AS tenantId, rm.role AS role FROM role_memberships rm JOIN users u ON u.id=rm.user_id WHERE lower(u.email)=? ORDER BY rm.created_at ASC`).bind(email).all<{ tenantId: string; role: string }>();
   let tenantId = memberships.results[0]?.tenantId ?? `tenant_${idPart(email)}`;
@@ -150,7 +187,13 @@ export async function platformContext(request: Request, requiredRole?: PlatformR
 
 export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
-  const status = message === "authentication_required" ? 401 : message === "forbidden" ? 403 : 500;
+  const status = message === "authentication_required"
+    ? 401
+    : message === "forbidden"
+      ? 403
+      : message === "authentication_config_missing"
+        ? 500
+        : 500;
   if (status >= 500) console.error("platform_api_error", { message });
   return Response.json({ error: message }, { status });
 }
