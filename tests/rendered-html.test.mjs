@@ -113,3 +113,33 @@ test("dashboard detects authenticated standard sessions and preserves the worksp
   assert.match(dashboard, /if \(!response\.ok\) throw new Error\("退出登录失败"\);/);
   assert.match(dashboard, /notify\("退出失败", reason instanceof Error \? reason\.message : "退出登录失败", "error"\);/);
 });
+
+test("standard cloudflare deployment configuration is present and secret-safe", async () => {
+  const [wrangler, workflow, envExample, pkgRaw, vite, agents] = await Promise.all([
+    read("wrangler.toml"),
+    read(".github/workflows/deploy.yml"),
+    read(".env.example"),
+    read("package.json"),
+    read("vite.config.ts"),
+    read("AGENTS.md"),
+  ]);
+  const pkg = JSON.parse(pkgRaw);
+  assert.equal(pkg.scripts["cf:preview"], "npm run build && npx wrangler dev");
+  assert.equal(pkg.scripts["cf:deploy"], "npm run build && npx wrangler deploy");
+  assert.match(wrangler, /main = "worker\/index\.ts"/);
+  assert.match(wrangler, /binding = "DB"/);
+  assert.match(wrangler, /binding = "CONTENT"/);
+  assert.match(wrangler, /AUTH_MODE = "standard"/);
+  assert.match(wrangler, /required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
+  assert.doesNotMatch(wrangler, /ADMIN_PASSWORD =|JWT_SECRET =|CLOUDFLARE_API_TOKEN/);
+  assert.match(workflow, /cloudflare\/wrangler-action@v3/);
+  assert.match(workflow, /CLOUDFLARE_API_TOKEN/);
+  assert.match(workflow, /CLOUDFLARE_ACCOUNT_ID/);
+  assert.match(envExample, /AUTH_MODE=standard/);
+  assert.match(envExample, /JWT_SECRET=/);
+  assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
+  assert.match(vite, /configPath: "\.\/wrangler\.toml"/);
+  assert.match(agents, /feature 分支/);
+  assert.match(agents, /PR/);
+  assert.match(agents, /AUTH_MODE=standard/);
+});
