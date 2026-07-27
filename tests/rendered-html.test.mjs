@@ -75,3 +75,21 @@ test("platform identity supports chatgpt standard and local auth modes", async (
   assert.match(envTypes, /ADMIN_EMAIL\?: string/);
   assert.match(envTypes, /JWT_SECRET\?: string/);
 });
+
+test("standard auth API exposes login logout and session endpoints", async () => {
+  const [login, logout, session] = await Promise.all([
+    read("app/api/v1/auth/login/route.ts"),
+    read("app/api/v1/auth/logout/route.ts"),
+    read("app/api/v1/auth/session/route.ts"),
+  ]);
+  assert.match(login, /ADMIN_EMAIL/);
+  assert.match(login, /ADMIN_PASSWORD/);
+  assert.match(login, /JWT_SECRET/);
+  assert.match(login, /createSessionToken/);
+  assert.match(login, /HttpOnly/);
+  assert.match(login, /SameSite=Lax/);
+  assert.doesNotMatch(login, /console\.log\([^)]*password|console\.error\([^)]*password/);
+  assert.match(logout, /Max-Age=0/);
+  assert.match(session, /getAuthMode/);
+  assert.match(session, /platformContext/);
+});
