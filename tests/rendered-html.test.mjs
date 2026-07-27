@@ -93,3 +93,15 @@ test("standard auth API exposes login logout and session endpoints", async () =>
   assert.match(session, /getAuthMode/);
   assert.match(session, /platformContext/);
 });
+
+test("dashboard exposes standard mode login and logout flow", async () => {
+  const [dashboard, css] = await Promise.all([read("app/dashboard.tsx"), read("app/globals.css")]);
+  assert.match(dashboard, /authMode/);
+  assert.match(dashboard, /\/api\/v1\/auth\/session/);
+  assert.match(dashboard, /\/api\/v1\/auth\/login/);
+  assert.match(dashboard, /\/api\/v1\/auth\/logout/);
+  assert.match(dashboard, /type="password"/);
+  assert.match(dashboard, /标准 Cloudflare 登录/);
+  assert.match(css, /\.login-card/);
+  assert.match(css, /\.logout-button/);
+});
