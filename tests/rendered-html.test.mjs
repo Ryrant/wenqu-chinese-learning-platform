@@ -47,3 +47,15 @@ test("versioned APIs enforce tenant scope, honest provider state and review fall
   assert.match(health, /not_configured_manual_review/); assert.doesNotMatch(health, /99\.9|healthy/);
   await access(new URL("dist/server/index.js", root));
 });
+
+test("standard auth token helpers use Web Crypto without new dependencies", async () => {
+  const token = await read("app/lib/auth-token.ts");
+  const pkg = JSON.parse(await read("package.json"));
+  assert.match(token, /export type StandardSession/);
+  assert.match(token, /export const sessionCookieName = "wenqu_session"/);
+  assert.match(token, /export async function createSessionToken/);
+  assert.match(token, /export async function verifySessionToken/);
+  assert.match(token, /crypto\.subtle\.sign/);
+  assert.match(token, /crypto\.subtle\.verify/);
+  assert.doesNotMatch(JSON.stringify(pkg.dependencies), /jose|jsonwebtoken/);
+});
