@@ -53,6 +53,11 @@ export async function verifySessionToken(token: string, secret: string, nowSecon
   if (!session || !session.email || !session.displayName || !Number.isFinite(session.iat) || !Number.isFinite(session.exp)) return null;
   if (session.exp <= nowSeconds) return null;
   const key = await importSigningKey(secret);
-  const valid = await crypto.subtle.verify("HMAC", key, base64UrlDecode(signature), encoder.encode(`${header}.${payload}`));
-  return valid ? session : null;
+  try {
+    const signatureBytes = base64UrlDecode(signature);
+    const valid = await crypto.subtle.verify("HMAC", key, signatureBytes, encoder.encode(`${header}.${payload}`));
+    return valid ? session : null;
+  } catch {
+    return null;
+  }
 }
