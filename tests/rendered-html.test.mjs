@@ -105,3 +105,11 @@ test("dashboard exposes standard mode login and logout flow", async () => {
   assert.match(css, /\.login-card/);
   assert.match(css, /\.logout-button/);
 });
+
+test("dashboard detects authenticated standard sessions and preserves the workspace on logout failure", async () => {
+  const dashboard = await read("app/dashboard.tsx");
+  assert.match(dashboard, /setData\(next\);\s*void loadAuthMode\(\)\.catch\(\(\) => null\)/);
+  assert.match(dashboard, /const response = await fetch\("\/api\/v1\/auth\/logout", \{ method: "POST" \}\);/);
+  assert.match(dashboard, /if \(!response\.ok\) throw new Error\("退出登录失败"\);/);
+  assert.match(dashboard, /notify\("退出失败", reason instanceof Error \? reason\.message : "退出登录失败", "error"\);/);
+});

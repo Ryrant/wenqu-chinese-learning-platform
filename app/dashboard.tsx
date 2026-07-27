@@ -65,7 +65,12 @@ export function Dashboard() {
         if (!response.ok) throw new Error(response.status === 401 ? "请先完成 ChatGPT 登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
         return payload as WorkspaceData;
       })
-      .then((next) => { if (active) setData(next); })
+      .then((next) => {
+        if (active) {
+          setData(next);
+          void loadAuthMode().catch(() => null);
+        }
+      })
       .catch(async (reason: Error) => {
         if (!active) return;
         const mode = await loadAuthMode().catch(() => null);
@@ -107,10 +112,15 @@ export function Dashboard() {
   }
 
   async function logout() {
-    await fetch("/api/v1/auth/logout", { method: "POST" });
-    setData(null);
-    setAuthMode("standard");
-    setError("已退出登录");
+    try {
+      const response = await fetch("/api/v1/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("退出登录失败");
+      setData(null);
+      setAuthMode("standard");
+      setError("已退出登录");
+    } catch (reason) {
+      notify("退出失败", reason instanceof Error ? reason.message : "退出登录失败", "error");
+    }
   }
 
   const unread = useMemo(() => data?.notifications.filter((item) => !item.read_at).length ?? 0, [data]);
