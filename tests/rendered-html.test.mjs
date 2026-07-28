@@ -258,3 +258,30 @@ test("login has best-effort throttling and malformed cookies fail closed", async
   assert.match(login, /loginAttempts/);
   assert.match(store, /try \{[\s\S]*decodeURIComponent[\s\S]*\} catch \{[\s\S]*return "";/);
 });
+
+test("repository infrastructure includes issue forms and self-hosted Cloudflare deployment docs", async () => {
+  const [config, bug, feature, readme] = await Promise.all([
+    read(".github/ISSUE_TEMPLATE/config.yml"),
+    read(".github/ISSUE_TEMPLATE/bug_report.yml"),
+    read(".github/ISSUE_TEMPLATE/feature_request.yml"),
+    read("README.md"),
+  ]);
+  assert.match(config, /blank_issues_enabled: false/);
+  assert.match(bug, /Bug Report \/ 缺陷反馈/);
+  assert.match(bug, /Cloudflare deployment \/ Cloudflare 部署/);
+  assert.match(bug, /Node\.js/);
+  assert.match(bug, /D1=DB, R2=CONTENT/);
+  assert.match(bug, /I have removed sensitive information/);
+  assert.match(feature, /Feature Request \/ 功能建议/);
+  assert.match(feature, /Cloudflare self-hosting \/ Cloudflare 自托管/);
+  assert.match(readme, /Deploy to Cloudflare Workers/);
+  assert.match(readme, /自托管部署到 Cloudflare/);
+  assert.match(readme, /Cloudflare Workers 连接 GitHub 仓库/);
+  assert.match(readme, /GitHub Actions 自动部署/);
+  assert.match(readme, /一键部署/);
+  assert.match(readme, /本地 Wrangler 部署/);
+  assert.match(readme, /npm run build:standard/);
+  assert.match(readme, /npx wrangler deploy --keep-vars/);
+  assert.match(readme, /本项目不是公共 SaaS 服务/);
+  assert.match(readme, /tests\/auth-token\.test\.mjs/);
+});

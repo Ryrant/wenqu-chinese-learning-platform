@@ -1,0 +1,59 @@
+name: Feature Request / 功能建议
+description: Suggest a new feature or improvement for 文趣 / 提交新功能或改进建议
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing your idea.
+        感谢你提出建议。
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case / 使用场景
+      description: What are you trying to do, and where is the current pain point? / 你想做什么，当前卡点在哪里？
+      placeholder: 例如：海外华文教师希望快速生成分层作业，或机构管理员希望更容易自托管部署。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area / 功能范围
+      description: Which area would this improve? / 这个建议主要改进哪个部分？
+      options:
+        - Student learning / 学生学习
+        - Teacher tools / 教师工具
+        - Guardian reports / 家长报告
+        - Admin operations / 机构运营
+        - Content and knowledge base / 内容与知识库
+        - Cloudflare self-hosting / Cloudflare 自托管
+        - Developer experience / 开发体验
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Expected Improvement / 期望改进
+      description: What would you like 文趣 to do? / 你希望文趣怎么做？
+      placeholder: 描述你希望新增的功能、页面、接口、配置或部署体验。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered / 备选方案
+      description: Any other approaches you have thought about? / 你考虑过的其他方案？
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist / 提交前确认
+      options:
+        - label: I have searched existing issues before submitting this request. / 我已先搜索过现有 Issue。
+        - label: This request does not require committing secrets, private student data, or production Cloudflare identifiers. / 这个建议不需要提交密钥、真实学生数据或生产 Cloudflare 标识。

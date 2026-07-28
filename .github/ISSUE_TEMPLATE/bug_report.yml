@@ -1,0 +1,107 @@
+name: Bug Report / 缺陷反馈
+description: Report a reproducible bug in 文趣 · 华文趣味教学助手 / 提交可复现的问题
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+        感谢你反馈问题。
+
+        Do not include real student data, API keys, passwords, JWT secrets, Cloudflare tokens, D1 database IDs, or R2 object URLs.
+        请勿提交真实学生数据、API Key、密码、JWT 密钥、Cloudflare Token、D1 数据库 ID 或 R2 对象地址。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Bug Summary / 问题概述
+      description: Describe the issue clearly and concisely. / 请简要描述问题。
+      placeholder: 页面、接口、部署或数据保存出现了什么异常？
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area / 影响范围
+      description: Which part is affected? / 问题主要影响哪个部分？
+      options:
+        - Student workspace / 学生端
+        - Teacher workspace / 教师端
+        - Guardian workspace / 家长端
+        - Admin workspace / 机构端
+        - API or authentication / API 或认证
+        - Cloudflare deployment / Cloudflare 部署
+        - Local development or tests / 本地开发或测试
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce / 复现步骤
+      description: If possible, list the shortest steps to reproduce it. / 如方便，请提供最小复现步骤。
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Click ...
+        4. See error ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版本
+      description: 文趣 version or commit hash. / 文趣版本或 commit hash。
+      placeholder: e.g. v1.0.0 or c5e4c24 / 例如 v1.0.0 或 c5e4c24
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 运行环境
+      description: OS, runtime, browser, Cloudflare mode and relevant bindings. / 操作系统、运行时、浏览器、Cloudflare 模式及相关绑定。
+      placeholder: |
+        OS: Windows 11 / Ubuntu 22.04 / macOS
+        Node.js: 22.x
+        npm: 10.x
+        Browser: Chrome / Edge / Safari
+        Deploy mode: local / ChatGPT Sites / standard Cloudflare Workers
+        Bindings: D1=DB, R2=CONTENT
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior / 期望行为
+      description: What should have happened? / 你期望的结果是什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior / 实际行为
+      description: What actually happened? / 实际发生了什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or Screenshots / 日志或截图
+      description: Paste relevant logs or screenshots after removing sensitive values. / 请在移除敏感信息后贴出相关日志或截图。
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist / 提交前确认
+      options:
+        - label: I have searched existing issues before submitting this report. / 我已先搜索过现有 Issue。
+        - label: I have removed sensitive information from logs and screenshots. / 我已移除日志和截图中的敏感信息。
+        - label: I can reproduce this on the latest main branch or a named release. / 我可以在最新 main 分支或明确版本复现。
