@@ -1,104 +1,88 @@
-# 文趣 · 华文趣味教学助手
+<div align="center">
+  <!-- <img src="./public/og.png" alt="文趣 · 华文趣味教学助手 Logo" width="120" /> -->
+  <h1>文趣 · 华文趣味教学助手</h1>
+  <p>可自托管的海外华文趣味教学平台</p>
+</div>
 
-[![Version](https://img.shields.io/badge/version-v1.0.0-0f766e)](https://github.com/Ryrant/wenqu-chinese-learning-platform/releases/tag/v1.0.0)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.13-339933)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6)](https://www.typescriptlang.org/)
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ryrant/wenqu-chinese-learning-platform)
+<p align="center">
+  <a href="https://github.com/Ryrant/wenqu-chinese-learning-platform/releases"><img src="https://img.shields.io/github/v/release/Ryrant/wenqu-chinese-learning-platform?label=Release&color=3b82f6" alt="Release" /></a>
+  <a href="https://github.com/Ryrant/wenqu-chinese-learning-platform/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Ryrant/wenqu-chinese-learning-platform?color=10b981" alt="License" /></a>
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Ryrant/wenqu-chinese-learning-platform"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" /></a>
+</p>
 
-面向海外华文学校的多租户教学平台，覆盖学生、教师、家长和机构管理员。平台围绕“诊断—学习—反馈—学情分析”闭环构建，业务数据保存到 Cloudflare D1，教材与音频保存到 R2。
+---
+
+## ✨ 为什么做这个项目
+
+文趣面向海外华文学校和华裔青少年，提供学生、教师、家长和机构管理员四端工作台。项目围绕“诊断—学习—反馈—学情分析”闭环设计，业务数据保存到用户自己的 Cloudflare D1，教材、音频等文件保存到用户自己的 Cloudflare R2。
+
+本项目不是公共 SaaS 服务。你可以把它部署到自己的 Cloudflare 账号中，管理员账号、密码、JWT 密钥、D1/R2 数据和访问权限都由你自己管理。
 
 线上演示：[wenqu-learning.savory-pike-1800.chatgpt.site](https://wenqu-learning.savory-pike-1800.chatgpt.site/)
 
-## v1.0.0 已实现功能
+## 🚀 核心能力
 
-- 身份与租户：读取生产环境登录身份，服务端实施租户和角色隔离；受邀成员首次登录自动加入机构。
-- 学生端：任务学习、文字作业、浏览器录音、音频持久化、来源化知识问答和掌握度展示。
-- 教师端：班级与任务管理、任务发布、来源化 AI 备课、提交审核、人工评分和学情查看。
+- 学生端：学习总览、任务学习、文字作业、浏览器录音、来源化知识问答和掌握度展示。
+- 教师端：班级管理、任务发布、来源化备课、作业批阅、人工评分和学情查看。
 - 家长端：学习报告、薄弱点、家庭练习提醒和学习分析授权管理。
-- 机构端：教材上传、权属记录、内容审核发布、成员邀请、服务状态和审计日志。
-- 数据与检索：D1 业务模型、R2 对象存储、已发布知识片段关键词检索、引用记录和内容版本信息。
-- 安全降级：未配置模型或语音服务时，明确使用来源化模板或教师复核，不生成虚假模型状态和发音分数。
+- 机构端：内容上传、权属审核、知识检索、成员邀请、服务状态和审计日志。
+- 数据持久化：D1 保存租户、成员、作业、提交、反馈和审计记录；R2 保存教材和音频文件。
+- 安全降级：未配置模型或语音服务时，明确使用来源化模板或教师复核，不展示虚假 AI 状态。
+- 自托管部署：支持 ChatGPT Platform Sites、本地开发和标准 Cloudflare Workers 部署。
 
-## 技术栈
+## ⚡ 快速开始
 
-- TypeScript、React 19、Next.js 16、Vinext、Vite
-- Cloudflare Workers、D1、R2
-- Drizzle ORM / Drizzle Kit
-- ESLint、Node.js Test Runner
-
-## 快速开始
-
-### 1. 环境要求
+### 前置要求
 
 - Node.js `22.13.0` 或更高版本
 - npm（随 Node.js 安装）
 - Git
 
-确认版本：
-
-```bash
-node --version
-npm --version
-git --version
-```
-
-### 2. 下载代码
-
-使用 Git 克隆：
+### 安装与运行
 
 ```bash
 git clone https://github.com/Ryrant/wenqu-chinese-learning-platform.git
 cd wenqu-chinese-learning-platform
-```
-
-也可以在 GitHub Release 页面下载 `v1.0.0` 的 Source code 压缩包，解压后进入项目目录。
-
-### 3. 安装与启动
-
-```bash
 npm ci
 npm run dev
 ```
 
-浏览器打开 [http://localhost:3000](http://localhost:3000)。首次访问会自动创建本地 D1 表和一套可操作的示例工作区，不需要单独安装 PostgreSQL、Redis 或本地对象存储。
+浏览器打开 [http://localhost:3000](http://localhost:3000)。首次访问会自动创建本地 D1 表和一套可操作的示例工作区。
 
-开发环境默认使用 `dev@wenqu.local` 作为本地测试身份。若要指定自己的测试身份：
+本地开发默认使用 `dev@wenqu.local` 作为测试身份。若要指定自己的测试身份：
 
 ```bash
-# macOS / Linux
 cp .env.example .env.local
-
-# Windows PowerShell
-Copy-Item .env.example .env.local
 ```
 
 然后修改：
 
 ```dotenv
+AUTH_MODE=local
 DEV_USER_EMAIL=your-name@wenqu.local
 ```
 
-此回退身份只在 `NODE_ENV=development` 时生效；生产环境没有可信身份头会直接返回 `401`。
+## 📖 使用说明
 
-## 自托管部署到 Cloudflare
+### 自托管部署到 Cloudflare
 
-本项目不是公共 SaaS 服务。你可以把它部署到自己的 Cloudflare 账号中，D1 数据库、R2 存储和所有登录密钥都保存在你自己的账号里。
-
-### 前置要求
+文趣的标准 Cloudflare 部署是给用户部署到自己的 Cloudflare 账号使用的。请先准备：
 
 - [Cloudflare 账号](https://dash.cloudflare.com/)
-- [GitHub 账号](https://github.com/)（使用 Cloudflare 连接 GitHub 或 GitHub Actions 时需要）
-- Node.js `22.13.0` 或更高版本（本地 Wrangler 部署时需要）
+- [GitHub 账号](https://github.com/)（使用 Cloudflare 连接仓库或 GitHub Actions 时需要）
+- 一个 D1 数据库，binding 名称必须是 `DB`
+- 一个 R2 Bucket，binding 名称必须是 `CONTENT`
+- 管理员邮箱、管理员密码和 JWT 签名密钥
 
 ### 方式一：Cloudflare Workers 连接 GitHub 仓库（推荐）
 
-这种方式适合长期自托管，后续同步 Fork 后可以在 Cloudflare 里重新部署。
+这种方式适合长期自托管，后续同步 Fork 后可以在 Cloudflare 中重新部署。
 
 1. 在 GitHub 点击右上角 **Fork**，把仓库复制到你自己的账号。
 2. 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)。
 3. 进入 **Workers & Pages**，点击 **Create application**。
-4. 选择 **Import a repository** / **Continue with GitHub**，授权并选择你 Fork 的仓库。
-5. 项目名称可填写 `wenqu-chinese-learning-platform`。
+4. 选择 **Import a repository** 或 **Continue with GitHub**，授权并选择你 Fork 的仓库。
+5. Project Name 可填写 `wenqu-chinese-learning-platform`。
 6. Build command 填写：
 
    ```bash
@@ -111,7 +95,7 @@ DEV_USER_EMAIL=your-name@wenqu.local
    npx wrangler deploy --keep-vars
    ```
 
-8. 首次部署前，在 Cloudflare 项目的 **Settings** → **Variables and Secrets** 中配置：
+8. 在 Cloudflare 项目的 **Settings** → **Variables and Secrets** 中配置：
 
    | 名称 | 类型 | 说明 |
    | --- | --- | --- |
@@ -124,24 +108,35 @@ DEV_USER_EMAIL=your-name@wenqu.local
    | `SPEECH_API_KEY` | Secret，可选 | 语音评测服务密钥；不填时转人工复核 |
    | `MODERATION_API_KEY` | Secret，可选 | 内容审核服务密钥；不填时使用基础规则 |
 
-9. 在 Cloudflare 账号中创建并绑定：
+9. 在 Cloudflare 项目绑定中确认：
 
-   - D1 数据库，binding 名称为 `DB`
-   - R2 Bucket，binding 名称为 `CONTENT`
+   - D1 binding：`DB`
+   - R2 binding：`CONTENT`
 
-部署成功后访问 Worker 分配的 `workers.dev` 域名即可进入登录页。
+部署成功后，访问 Cloudflare 分配的 `workers.dev` 域名即可进入登录页。
 
-### 方式二：GitHub Actions 自动部署
+### 方式二：一键部署
 
-这种方式同样部署到你自己的 Cloudflare 账号。它适合你希望推送到自己 Fork 的 `main` 后自动发布。
+点击按钮进入 Cloudflare 部署向导：
+
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ryrant/wenqu-chinese-learning-platform)
+
+一键部署适合快速试用。部署过程中或部署完成后，请在 Cloudflare 控制台确认：
+
+- Build command：`npm run build:standard`
+- Deploy command：`npx wrangler deploy --keep-vars`
+- D1 binding：`DB`
+- R2 binding：`CONTENT`
+- 必填变量和密钥：`AUTH_MODE=standard`、`ADMIN_EMAIL`、`ADMIN_PASSWORD`、`JWT_SECRET`
+
+一键部署后续同步更新不如 GitHub 仓库连接方式方便；长期使用建议迁移到方式一。
+
+### 方式三：GitHub Actions 自动部署（可选）
+
+这种方式同样部署到你自己的 Cloudflare 账号，适合希望 push 到 Fork 的 `main` 后自动发布的用户。
 
 1. Fork 本仓库。
-2. 在 Cloudflare 控制台创建 D1 数据库和 R2 Bucket，并记录：
-
-   - D1 Database ID
-   - R2 Bucket Name
-   - Cloudflare Account ID
-
+2. 在 Cloudflare 控制台创建 D1 数据库和 R2 Bucket，并记录 D1 Database ID、R2 Bucket Name、Cloudflare Account ID。
 3. 在 [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) 创建 API Token。可使用 **Edit Cloudflare Workers** 模板，并确保它能部署 Worker、读取/绑定 D1 与 R2。
 4. 打开你 Fork 后的 GitHub 仓库，进入 **Settings** → **Secrets and variables** → **Actions**。
 5. 添加 Variables：
@@ -163,20 +158,6 @@ DEV_USER_EMAIL=your-name@wenqu.local
 
 7. 推送到你 Fork 的 `main` 分支，GitHub Actions 会运行测试并部署到你的 Cloudflare 账号。
 
-### 方式三：一键部署
-
-点击下面按钮可以进入 Cloudflare 的部署向导：
-
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ryrant/wenqu-chinese-learning-platform)
-
-一键部署适合快速试用。部署过程中或部署完成后，需要在 Cloudflare 控制台确认 D1/R2 绑定和环境变量：
-
-- Build command：`npm run build:standard`
-- Deploy command：`npx wrangler deploy --keep-vars`
-- D1 binding：`DB`
-- R2 binding：`CONTENT`
-- 必填变量/密钥：`AUTH_MODE=standard`、`ADMIN_EMAIL`、`ADMIN_PASSWORD`、`JWT_SECRET`
-
 ### 方式四：本地 Wrangler 部署
 
 本地部署会发布到当前 `wrangler login` 登录的 Cloudflare 账号。
@@ -189,145 +170,127 @@ npm run cf:deploy
 
 正式部署前请先在 Cloudflare 中创建 D1/R2，并把 `wrangler.toml` 中的占位值替换为你自己的资源名称和 ID。不要提交真实资源 ID、密码或密钥。
 
-### 部署安全注意事项
+### 访问后台
 
-- `/api/v1/auth/login` 内置的是 Worker isolate 内的尽力限流。公开访问前，建议在 Cloudflare WAF 中对登录接口配置 Rate Limiting，或使用 Cloudflare Access 保护应用。
-- `ADMIN_PASSWORD` 和 `JWT_SECRET` 必须配置为 Secret，不要写入仓库。
-- 学生数据、作业、音频和教材文件会存入你自己的 D1/R2，请按当地未成年人数据保护要求管理访问权限。
-
-## 常用命令
-
-| 命令 | 用途 |
-| --- | --- |
-| `npm run dev` | 启动本地开发服务器和 Cloudflare 本地绑定 |
-| `npm run lint` | 运行代码规范检查 |
-| `npm run build` | 生成生产构建 |
-| `npm run build:standard` | 使用标准 Cloudflare Workers 配置生成构建 |
-| `npm test` | 生产构建并运行回归测试 |
-| `npm run db:generate` | 根据 `db/schema.ts` 生成 Drizzle 迁移 |
-| `npm run cf:preview` | 使用标准 Cloudflare 配置启动 Wrangler 预览 |
-| `npm run cf:deploy` | 使用标准 Cloudflare 配置部署到当前账号 |
-
-## 本地数据与重置
-
-本地 D1/R2 模拟数据保存在项目的 `.wrangler/` 目录，并已加入 `.gitignore`。需要重新体验“全新机构首次进入”时，先停止开发服务器，然后只删除本项目的 `.wrangler/`：
-
-```powershell
-# Windows PowerShell（在项目根目录执行）
-Remove-Item -LiteralPath .wrangler -Recurse -Force
-```
-
-```bash
-# macOS / Linux（在项目根目录执行）
-rm -rf .wrangler
-```
-
-重新执行 `npm run dev` 后，基础表和示例数据会自动初始化。
-
-## 本地测试
-
-项目当前使用 `tests/` 目录保存自动化测试：
-
-- `tests/rendered-html.test.mjs`：检查页面、API、部署配置和安全约束。
-- `tests/auth-token.test.mjs`：执行 JWT 创建、校验、过期、篡改和畸形输入行为测试。
-
-常用检查命令：
-
-```bash
-npm run lint
-npm test
-npm run build:standard
-```
-
-本地运行 `npm run dev` 时，Cloudflare 本地状态保存在 `.wrangler/`。如需重新生成示例工作区，可以删除 `.wrangler/` 后重启开发服务器。
-
-## 可选服务配置
-
-复制 `.env.example` 为 `.env.local` 后可填写以下配置：
-
-| 变量 | 是否必需 | 未配置时行为 |
-| --- | --- | --- |
-| `DEV_USER_EMAIL` | 否，仅本地 | 使用 `dev@wenqu.local` |
-| `AI_API_KEY` | 否 | 使用带知识来源的确定性教学模板 |
-| `SPEECH_API_KEY` | 否 | 音频正常保存，进入教师人工复核 |
-| `MODERATION_API_KEY` | 否 | 使用基础规则检查 |
-
-不要提交 `.env.local`、真实 API Key、学生信息或生产数据。
-
-## 项目结构
+标准 Cloudflare Workers 部署完成后，打开 Worker URL：
 
 ```text
-app/
-  api/v1/                 # 版本化业务 API
-  dashboard.tsx           # 角色工作台与导航
-  student-view.tsx        # 学生学习体验
-  staff-views.tsx         # 教师、家长、机构视图
-  lib/                    # 身份、租户、数据初始化与共享类型
-db/                       # Drizzle 数据模型
-drizzle/                  # 数据库迁移
-worker/                    # Cloudflare Worker 入口
-public/                    # 静态资源
-tests/                     # 回归测试
-scripts/                   # 标准 Cloudflare 构建与部署配置渲染脚本
-.github/ISSUE_TEMPLATE/    # GitHub Issue 表单
-.openai/hosting.json       # Sites 项目及 D1/R2 绑定声明
+https://你的项目名.你的子域.workers.dev/
 ```
 
-## 核心接口
+使用部署时配置的 `ADMIN_EMAIL` 和 `ADMIN_PASSWORD` 登录。首次进入会自动初始化租户、用户、四端角色和示例工作区。
 
-| 方法 | 路径 | 说明 |
+### 升级 Cloudflare Workers
+
+- Cloudflare Workers 连接 GitHub 仓库：在你的 Fork 页面点击 **Sync fork** → **Update branch**，Cloudflare 会检测代码变化并重新部署。
+- GitHub Actions 自动部署：同步上游后推送到 `main`，Actions 会重新运行测试和部署。
+- 一键部署：建议重新部署，或迁移到 Cloudflare 连接 GitHub 仓库方式。
+- 本地 Wrangler 部署：拉取最新代码后重新执行 `npm ci` 和 `npm run cf:deploy`。
+
+## 🧠 功能细节
+
+### 认证模式
+
+项目支持三种认证模式：
+
+| 模式 | 适用场景 | 身份来源 |
 | --- | --- | --- |
-| `GET` | `/api/v1/workspace` | 获取当前角色范围内的工作区聚合数据 |
-| `POST` | `/api/v1/workspace/actions` | 班级、任务、评分、提醒、授权、邀请和内容审核命令 |
-| `POST` | `/api/v1/ai/generate` | 通过 SSE 返回带引用的教学草稿 |
-| `POST` | `/api/v1/knowledge/search` | 检索当前租户已发布的知识内容 |
-| `POST` | `/api/v1/content/upload` | 上传教材并保存权属元数据 |
-| `POST` | `/api/v1/speech/submissions` | 保存语音作业并进入复核队列 |
-| `POST` | `/api/v1/submissions` | 提交文字作业 |
-| `POST` | `/api/v1/feedback` | 保存用户反馈 |
-| `GET` | `/api/v1/health` | 查看数据库、存储和 AI 服务状态 |
+| `local` | 本地开发 | `x-wenqu-dev-user` 或 `DEV_USER_EMAIL` |
+| `chatgpt` | ChatGPT Platform Sites | `oai-authenticated-user-email` 平台身份头 |
+| `standard` | 用户自托管 Cloudflare Workers | 管理员密码登录 + HttpOnly JWT Cookie |
 
-## 数据与生产绑定
+默认 `npm run build` 使用 `wrangler.chatgpt.toml`，用于 ChatGPT/Sites 兼容构建。标准 Cloudflare Workers 部署使用 `npm run build:standard` 和 `wrangler.toml`。
+
+### 数据与绑定
 
 生产运行需要以下 Cloudflare 绑定：
 
 - `DB`：D1 数据库
 - `CONTENT`：R2 Bucket
 
-基础表会在运行时进行幂等校验，正式数据库变更仍应通过 `drizzle/` 中的迁移文件管理。ChatGPT Platform Sites 通过平台身份头登录；标准 Cloudflare Workers 自托管部署使用 `AUTH_MODE=standard`、管理员密码和 HttpOnly JWT 会话。
+基础表会在运行时进行幂等校验，正式数据库变更仍应通过 `drizzle/` 中的迁移文件管理。
 
-## 成员协作流程
+### 安全注意事项
 
-```bash
-git switch -c feature/your-feature
-# 修改并验证
-npm run lint
-npm test
-git add <本次修改的文件>
-git commit -m "feat: describe your change"
-git push -u origin feature/your-feature
+- 不要提交 `.env.local`、真实 API Key、学生信息、Cloudflare Token、D1 ID、R2 Bucket 名称、管理员密码或 JWT 密钥。
+- `/api/v1/auth/login` 内置的是 Worker isolate 内的尽力限流。公开访问前，建议在 Cloudflare WAF 中对登录接口配置 Rate Limiting，或使用 Cloudflare Access 保护应用。
+- 学生数据、作业、音频和教材文件会存入你自己的 D1/R2，请按当地未成年人数据保护要求管理访问权限。
+
+## 🧱 技术栈
+
+- TypeScript：应用与 Worker 代码
+- React 19：前端交互
+- Next.js 16 + Vinext + Vite：应用路由与 Cloudflare 构建
+- Cloudflare Workers：边缘运行环境
+- Cloudflare D1：SQLite 数据库
+- Cloudflare R2：教材与音频对象存储
+- Drizzle ORM / Drizzle Kit：数据模型与迁移
+- ESLint、Node.js Test Runner：代码检查与回归测试
+
+## 🗂️ 项目结构
+
+```text
+wenqu-chinese-learning-platform/
+├── app/                       # 页面、四端工作台与版本化 API
+├── app/lib/                   # 身份、租户、数据初始化与共享类型
+├── db/                        # Drizzle 数据模型
+├── drizzle/                   # 数据库迁移
+├── worker/                    # Cloudflare Worker 入口
+├── public/                    # 静态资源
+├── scripts/                   # 标准 Cloudflare 构建与配置渲染脚本
+├── tests/                     # 自动化回归测试
+├── .github/ISSUE_TEMPLATE/    # GitHub Issue 表单
+├── .openai/hosting.json       # ChatGPT Platform Sites 绑定声明
+├── wrangler.chatgpt.toml      # ChatGPT/Sites 兼容构建配置
+└── wrangler.toml              # 标准 Cloudflare Workers 自托管配置
 ```
 
-然后在 GitHub 创建 Pull Request。不要把真实未成年人数据、对象存储文件、密钥或本地 `.wrangler/` 状态提交到仓库。
+## 👨‍💻 本地开发
 
-## 常见问题
+### 环境
 
-### 端口 3000 被占用
+- Node.js `22.13.0` 或更高版本
+- npm
+- Git
 
-开发服务器会自动选择其他端口，请以终端显示的 `Local` 地址为准。
+### 命令
 
-### 页面提示工作区加载失败
+```bash
+npm run dev
+npm run lint
+npm test
+npm run build
+npm run build:standard
+```
 
-1. 确认使用 Node.js 22.13 或更高版本。
-2. 停止服务器后删除本项目 `.wrangler/`，再执行 `npm run dev`。
-3. 查看终端中的 `platform_api_error`，它会输出服务端错误原因。
+常用命令说明：
 
-### 首次安装依赖失败
+| 命令 | 用途 |
+| --- | --- |
+| `npm run dev` | 启动本地开发服务器和 Cloudflare 本地绑定 |
+| `npm run lint` | 运行代码规范检查 |
+| `npm test` | 默认构建并运行 `tests/` 下的回归测试 |
+| `npm run build` | 生成 ChatGPT/Sites 兼容构建 |
+| `npm run build:standard` | 生成标准 Cloudflare Workers 构建 |
+| `npm run cf:preview` | 使用标准 Cloudflare 配置启动 Wrangler 预览 |
+| `npm run cf:deploy` | 使用标准 Cloudflare 配置部署到当前账号 |
+| `npm run db:generate` | 根据 `db/schema.ts` 生成 Drizzle 迁移 |
 
-删除未完成的 `node_modules` 后重新运行 `npm ci`，并确认公司网络或代理可以访问 npm Registry。
+本地 D1/R2 模拟状态保存在 `.wrangler/`。如需重新体验“全新机构首次进入”，停止开发服务器后删除本项目的 `.wrangler/`，再执行 `npm run dev`。
 
-## 版本与授权
+当前自动化测试目录是 `tests/`：
 
-当前稳定版本：`v1.0.0`。
+- `tests/rendered-html.test.mjs`：检查页面、API、部署配置和安全约束。
+- `tests/auth-token.test.mjs`：执行 JWT 创建、校验、过期、篡改和畸形输入行为测试。
 
-仓库未附带开源许可证，默认仅供仓库所有者及获授权成员使用。如需对外开源或商业分发，请先补充合适的 `LICENSE` 和内容版权说明。
+## 🔐 安全报告
+
+如果发现安全问题，请不要公开披露细节。请优先参考仓库中的 [SECURITY.md](./SECURITY.md) 提交安全报告。
+
+## 📄 许可证
+
+本项目基于 [GPL-3.0](./LICENSE) 开源。
+
+<div align="center">
+  <sub>Built with ❤️ by Sunny</sub>
+</div>

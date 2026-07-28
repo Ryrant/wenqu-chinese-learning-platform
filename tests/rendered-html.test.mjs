@@ -285,3 +285,31 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   assert.match(readme, /本项目不是公共 SaaS 服务/);
   assert.match(readme, /tests\/auth-token\.test\.mjs/);
 });
+
+test("repository infrastructure includes standard README security and GPL license files", async () => {
+  const [readme, security, license, pkgRaw] = await Promise.all([
+    read("README.md"),
+    read("SECURITY.md"),
+    read("LICENSE"),
+    read("package.json"),
+  ]);
+  const pkg = JSON.parse(pkgRaw);
+  assert.match(readme, /^<div align="center">/);
+  assert.match(readme, /<p align="center">/);
+  assert.match(readme, /## ✨ 为什么做这个项目/);
+  assert.match(readme, /## 🚀 核心能力/);
+  assert.match(readme, /## ⚡ 快速开始/);
+  assert.match(readme, /## 📖 使用说明/);
+  assert.match(readme, /## 🧠 功能细节/);
+  assert.match(readme, /## 🧱 技术栈/);
+  assert.match(readme, /## 🗂️ 项目结构/);
+  assert.match(readme, /## 👨‍💻 本地开发/);
+  assert.match(readme, /## 🔐 安全报告/);
+  assert.match(readme, /## 📄 许可证/);
+  assert.match(readme, /<sub>Built with ❤️ by Sunny<\/sub>/);
+  assert.match(security, /# Security Policy \/ 安全政策/);
+  assert.match(security, /mail@sunnyhmz\.top/);
+  assert.match(license, /GNU GENERAL PUBLIC LICENSE/);
+  assert.match(license, /Version 3, 29 June 2007/);
+  assert.equal(pkg.license, "GPL-3.0-only");
+});
