@@ -24,6 +24,10 @@ export function Dashboard() {
   const [toast, setToast] = useState<Toast>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [authMode, setAuthMode] = useState<"chatgpt" | "standard" | "local" | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
   const [noticesOpen, setNoticesOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -32,6 +36,13 @@ export function Dashboard() {
     setToast({ title, detail, tone });
     window.setTimeout(() => setToast(null), 3600);
   };
+
+  async function loadAuthMode() {
+    const response = await fetch("/api/v1/auth/session", { cache: "no-store" });
+    const payload = await response.json() as { authMode?: "chatgpt" | "standard" | "local" };
+    setAuthMode(payload.authMode ?? null);
+    return payload.authMode ?? null;
+  }
 
   async function refresh() {
     setError("");
@@ -54,8 +65,17 @@ export function Dashboard() {
         if (!response.ok) throw new Error(response.status === 401 ? "请先完成 ChatGPT 登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
         return payload as WorkspaceData;
       })
-      .then((next) => { if (active) setData(next); })
-      .catch((reason: Error) => { if (active) setError(reason.message); })
+      .then((next) => {
+        if (active) {
+          setData(next);
+          void loadAuthMode().catch(() => null);
+        }
+      })
+      .catch(async (reason: Error) => {
+        if (!active) return;
+        const mode = await loadAuthMode().catch(() => null);
+        setError(mode === "standard" ? "请使用管理员账号登录" : reason.message);
+      })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, []);
@@ -68,10 +88,46 @@ export function Dashboard() {
     return result;
   }
 
+  async function login(event: React.FormEvent) {
+    event.preventDefault();
+    setLoginBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/v1/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "登录失败");
+      setPassword("");
+      setLoading(true);
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "登录失败");
+    } finally {
+      setLoading(false);
+      setLoginBusy(false);
+    }
+  }
+
+  async function logout() {
+    try {
+      const response = await fetch("/api/v1/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("退出登录失败");
+      setData(null);
+      setAuthMode("standard");
+      setError("已退出登录");
+    } catch (reason) {
+      notify("退出失败", reason instanceof Error ? reason.message : "退出登录失败", "error");
+    }
+  }
+
   const unread = useMemo(() => data?.notifications.filter((item) => !item.read_at).length ?? 0, [data]);
   const visibleRoles = roles.filter((item) => data?.user.roles.includes(item.id));
 
   if (loading) return <main className="center-state"><div className="loader"/><h1>正在连接真实工作区…</h1><p>加载班级、任务、内容与审计记录</p></main>;
+  if ((error || !data) && authMode === "standard") return <main className="center-state"><form className="login-card" onSubmit={login}><span className="eyebrow">标准 Cloudflare 登录</span><h1>进入文趣工作区</h1><p>使用部署时配置的管理员邮箱和密码登录。</p><label>邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" required /></label><label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "登录中…" : "登录"}</button></form></main>;
   if (error || !data) return <main className="center-state"><h1>暂时无法进入工作区</h1><p>{error || "未知错误"}</p><button className="primary-button" onClick={() => { setLoading(true); refresh().catch((reason: Error) => setError(reason.message)).finally(() => setLoading(false)); }}>重新加载</button></main>;
 
   function switchRole(next: Role) { setRole(next); setActiveNav(navigation[next][0]); }
@@ -94,7 +150,7 @@ export function Dashboard() {
       <header className="topbar">
         <div className="mobile-brand"><span className="brand-mark">文</span><strong>文趣</strong></div>
         <div className="role-switcher" aria-label="已授权角色">{visibleRoles.map((item) => <button type="button" key={item.id} className={role === item.id ? "active" : ""} onClick={() => switchRole(item.id)}>{item.label}</button>)}</div>
-        <div className="top-actions"><span className="mode-chip">试用工作区 · 真实保存</span><button type="button" className="notification" aria-label={`通知 ${unread} 条未读`} onClick={() => setNoticesOpen(!noticesOpen)}>◌{unread > 0 && <i/>}</button><div className="profile"><span className={`avatar ${role}`}>{data.user.displayName[0]?.toUpperCase()}</span><div><strong>{data.user.displayName}</strong><small>{data.user.email}</small></div></div></div>
+        <div className="top-actions"><span className="mode-chip">试用工作区 · 真实保存</span><button type="button" className="notification" aria-label={`通知 ${unread} 条未读`} onClick={() => setNoticesOpen(!noticesOpen)}>◌{unread > 0 && <i/>}</button><div className="profile"><span className={`avatar ${role}`}>{data.user.displayName[0]?.toUpperCase()}</span><div><strong>{data.user.displayName}</strong><small>{data.user.email}</small></div></div>{authMode === "standard" && <button type="button" className="logout-button" onClick={logout}>退出</button>}</div>
         {noticesOpen && <div className="notice-drawer"><div className="panel-heading"><h3>通知</h3><button onClick={() => setNoticesOpen(false)}>关闭</button></div>{data.notifications.length ? data.notifications.map((item) => <button key={String(item.id)} className={item.read_at ? "read" : ""} onClick={async () => { await act("mark_notification", { id: item.id }); }}><strong>{String(item.title)}</strong><small>{String(item.detail)}</small></button>) : <p className="empty-state">暂无通知</p>}</div>}
       </header>
       <div className="content"><div className="truth-banner"><strong>✓ 已连接 D1 + R2</strong><span>所有数字来自当前租户数据；未配置的模型能力会明确标注，不展示伪造分数。</span></div>
