@@ -141,8 +141,9 @@ test("standard and ChatGPT builds select separate Wrangler configurations", asyn
 });
 
 test("CI renders deploy resources before verification and uploads Worker secrets", async () => {
-  const [workflow, renderScript] = await Promise.all([
+  const [workflow, ciWorkflow, renderScript] = await Promise.all([
     read(".github/workflows/deploy.yml"),
+    read(".github/workflows/ci.yml"),
     read("scripts/render-wrangler-config.mjs"),
   ]);
   const renderIndex = workflow.indexOf("node scripts/render-wrangler-config.mjs");
@@ -158,6 +159,17 @@ test("CI renders deploy resources before verification and uploads Worker secrets
   assert.match(renderScript, /D1_DATABASE_ID/);
   assert.match(renderScript, /R2_BUCKET_NAME/);
   assert.match(renderScript, /ADMIN_EMAIL/);
+  assert.match(ciWorkflow, /^name: CI/m);
+  assert.match(ciWorkflow, /permissions:\s*\n\s*contents: read/);
+  assert.match(ciWorkflow, /pull_request:\s*\n\s*branches:\s*\n\s*- main/);
+  assert.match(ciWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
+  assert.match(ciWorkflow, /workflow_dispatch:/);
+  assert.match(ciWorkflow, /cancel-in-progress: true/);
+  assert.match(ciWorkflow, /timeout-minutes: 10/);
+  assert.match(ciWorkflow, /npm ci/);
+  assert.match(ciWorkflow, /npm run lint/);
+  assert.match(ciWorkflow, /npm test/);
+  assert.doesNotMatch(ciWorkflow, /wrangler-action|CLOUDFLARE_API_TOKEN|ADMIN_PASSWORD|JWT_SECRET/);
 });
 
 test("Wrangler renderer rejects placeholders and writes controlled CI values without logging secrets", async () => {
@@ -250,6 +262,8 @@ test("standard cloudflare deployment configuration is documented and secret-safe
   assert.match(agents, /demo 阶段/);
   assert.match(agents, /AUTH_MODE=standard/);
   assert.match(agents, /WAF Rate Limiting|Cloudflare Access/);
+  assert.match(agents, /\.github\/workflows\/ci\.yml.*必要校验/s);
+  assert.match(agents, /\.github\/workflows\/deploy\.yml.*main.*部署/s);
   assert.match(agents, /\/api\/v1\/auth\/login/);
 });
 
