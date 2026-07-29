@@ -242,6 +242,11 @@ test("standard cloudflare deployment configuration is documented and secret-safe
   assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
   assert.match(agents, /feature 分支/);
   assert.match(agents, /PR/);
+  assert.match(agents, /README 维护规则/);
+  assert.match(agents, /优先移动原文/);
+  assert.match(agents, /快速开始.*安装、运行、部署/s);
+  assert.match(agents, /使用说明.*平台内部功能使用说明/s);
+  assert.match(agents, /demo 阶段/);
   assert.match(agents, /AUTH_MODE=standard/);
   assert.match(agents, /WAF Rate Limiting|Cloudflare Access/);
   assert.match(agents, /\/api\/v1\/auth\/login/);
@@ -275,15 +280,18 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   assert.match(feature, /Feature Request \/ 功能建议/);
   assert.match(feature, /Cloudflare self-hosting \/ Cloudflare 自托管/);
   assert.match(readme, /Deploy to Cloudflare Workers/);
-  assert.match(readme, /自托管部署到 Cloudflare/);
   assert.match(readme, /Cloudflare Workers 连接 GitHub 仓库/);
   assert.match(readme, /GitHub Actions 自动部署/);
   assert.match(readme, /一键部署/);
   assert.match(readme, /本地 Wrangler 部署/);
   assert.match(readme, /npm run build:standard/);
   assert.match(readme, /npx wrangler deploy --keep-vars/);
-  assert.match(readme, /本项目不是公共 SaaS 服务/);
   assert.match(readme, /tests\/auth-token\.test\.mjs/);
+  const quickStartIndex = readme.indexOf("## ⚡ 快速开始");
+  const deployIndex = readme.indexOf("### 方式一：Cloudflare Workers 连接 GitHub 仓库（推荐）");
+  const usageIndex = readme.indexOf("## 📖 使用说明");
+  assert.ok(quickStartIndex >= 0 && deployIndex > quickStartIndex && usageIndex > deployIndex);
+  assert.match(readme.slice(usageIndex), /当前版本为 demo，平台内部功能使用说明待补充。/);
 });
 
 test("repository infrastructure includes standard README security and GPL license files", async () => {
@@ -306,7 +314,6 @@ test("repository infrastructure includes standard README security and GPL licens
   assert.match(readme, /## 👨‍💻 本地开发/);
   assert.match(readme, /## 🔐 安全报告/);
   assert.match(readme, /## 📄 许可证/);
-  assert.match(readme, /<sub>Built with ❤️ by Sunny<\/sub>/);
   assert.match(security, /# Security Policy \/ 安全政策/);
   assert.match(security, /mail@sunnyhmz\.top/);
   assert.match(license, /GNU GENERAL PUBLIC LICENSE/);
