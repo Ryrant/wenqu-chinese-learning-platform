@@ -181,7 +181,7 @@ test("Wrangler renderer rejects placeholders and writes controlled CI values wit
       env: {
         ...process.env,
         D1_DATABASE_ID: "12345678-1234-4abc-8def-1234567890ab",
-        R2_BUCKET_NAME: "wenqu-ci-test",
+        R2_BUCKET_NAME: "wenqu-platform-content",
         ADMIN_EMAIL: "admin@wenqu.test",
         ADMIN_PASSWORD: secretFixture,
         JWT_SECRET: secretFixture,
@@ -189,7 +189,7 @@ test("Wrangler renderer rejects placeholders and writes controlled CI values wit
     });
     const rendered = await readFile(join(directory, "wrangler.toml"), "utf8");
     assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/);
-    assert.match(rendered, /bucket_name = "wenqu-ci-test"/);
+    assert.match(rendered, /bucket_name = "wenqu-platform-content"/);
     assert.match(rendered, /ADMIN_EMAIL = "admin@wenqu.test"/);
     assert.doesNotMatch(`${stdout}\n${stderr}`, new RegExp(secretFixture));
   } finally {
