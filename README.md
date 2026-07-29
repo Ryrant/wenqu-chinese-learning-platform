@@ -1,13 +1,13 @@
 <div align="center">
   <!-- <img src="./public/og.png" alt="文趣 · 华文趣味教学助手 Logo" width="120" /> -->
   <h1>文趣 · 华文趣味教学助手</h1>
-  <p>可自托管的海外华文趣味教学平台</p>
+  <p>面向海外华文学校的多租户教学平台，覆盖学生、教师、家长和机构管理员</p>
 </div>
 
 <p align="center">
   <a href="https://github.com/Ryrant/wenqu-chinese-learning-platform/releases"><img src="https://img.shields.io/github/v/release/Ryrant/wenqu-chinese-learning-platform?label=Release&color=3b82f6" alt="Release" /></a>
   <a href="https://github.com/Ryrant/wenqu-chinese-learning-platform/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Ryrant/wenqu-chinese-learning-platform?color=10b981" alt="License" /></a>
-  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/Ryrant/wenqu-chinese-learning-platform"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers" /></a>
+  <a href="https://github.com/Ryrant/wenqu-chinese-learning-platform/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Ryrant/wenqu-chinese-learning-platform/ci.yml?branch=main&label=CI" alt="CI" /></a>
 </p>
 
 ---
@@ -15,10 +15,6 @@
 ## ✨ 为什么做这个项目
 
 文趣面向海外华文学校和华裔青少年，提供学生、教师、家长和机构管理员四端工作台。项目围绕“诊断—学习—反馈—学情分析”闭环设计，业务数据保存到用户自己的 Cloudflare D1，教材、音频等文件保存到用户自己的 Cloudflare R2。
-
-本项目不是公共 SaaS 服务。你可以把它部署到自己的 Cloudflare 账号中，管理员账号、密码、JWT 密钥、D1/R2 数据和访问权限都由你自己管理。
-
-线上演示：[wenqu-learning.savory-pike-1800.chatgpt.site](https://wenqu-learning.savory-pike-1800.chatgpt.site/)
 
 ## 🚀 核心能力
 
@@ -290,7 +286,3 @@ npm run build:standard
 ## 📄 许可证
 
 本项目基于 [GPL-3.0](./LICENSE) 开源。
-
-<div align="center">
-  <sub>Built with ❤️ by Sunny</sub>
-</div>
