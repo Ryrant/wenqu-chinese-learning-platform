@@ -30,36 +30,6 @@
 
 ### 📋 前置要求
 
-- Node.js `22.13.0` 或更高版本
-- npm（随 Node.js 安装）
-- Git
-
-### 📦 安装与运行
-
-```bash
-git clone https://github.com/Ryrant/wenqu-chinese-learning-platform.git
-cd wenqu-chinese-learning-platform
-npm ci
-npm run dev
-```
-
-浏览器打开 [http://localhost:3000](http://localhost:3000)。首次访问会自动创建本地 D1 表和一套可操作的示例工作区。
-
-本地开发默认使用 `dev@wenqu.local` 作为测试身份。若要指定自己的测试身份：
-
-```bash
-cp .env.example .env.local
-```
-
-然后修改：
-
-```dotenv
-AUTH_MODE=local
-DEV_USER_EMAIL=your-name@wenqu.local
-```
-
-### 📋 前置要求
-
 - [Cloudflare 账号](https://dash.cloudflare.com/)
 - [GitHub 账号](https://github.com/)
 
@@ -245,6 +215,32 @@ wenqu-chinese-learning-platform/
 - Node.js `22.13.0` 或更高版本
 - npm
 - Git
+
+### 本地启动
+
+```bash
+git clone https://github.com/Ryrant/wenqu-chinese-learning-platform.git
+cd wenqu-chinese-learning-platform
+npm ci
+npm run dev
+```
+
+浏览器打开 [http://localhost:3000](http://localhost:3000)。首次访问会自动创建本地 D1 表和一套可操作的示例工作区。
+
+### 本地测试身份
+
+本地开发默认使用 `dev@wenqu.local` 作为测试身份。若要指定自己的测试身份：
+
+```bash
+cp .env.example .env.local
+```
+
+然后修改：
+
+```dotenv
+AUTH_MODE=local
+DEV_USER_EMAIL=your-name@wenqu.local
+```
 
 ### 命令
 
