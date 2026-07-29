@@ -244,8 +244,9 @@ test("standard cloudflare deployment configuration is documented and secret-safe
   assert.match(agents, /PR/);
   assert.match(agents, /README 维护规则/);
   assert.match(agents, /优先移动原文/);
-  assert.match(agents, /快速开始.*安装、运行、部署/s);
+  assert.match(agents, /快速开始.*Cloudflare 自托管.*一键部署/s);
   assert.match(agents, /使用说明.*平台内部功能使用说明/s);
+  assert.match(agents, /本地开发.*clone.*依赖安装.*dev server/s);
   assert.match(agents, /demo 阶段/);
   assert.match(agents, /AUTH_MODE=standard/);
   assert.match(agents, /WAF Rate Limiting|Cloudflare Access/);
@@ -290,8 +291,15 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   const quickStartIndex = readme.indexOf("## ⚡ 快速开始");
   const deployIndex = readme.indexOf("### 方式一：Cloudflare Workers 连接 GitHub 仓库（推荐）");
   const usageIndex = readme.indexOf("## 📖 使用说明");
+  const localDevIndex = readme.indexOf("## 👨‍💻 本地开发");
   assert.ok(quickStartIndex >= 0 && deployIndex > quickStartIndex && usageIndex > deployIndex);
   assert.match(readme.slice(usageIndex), /当前版本为 demo，平台内部功能使用说明待补充。/);
+  assert.ok(localDevIndex > usageIndex);
+  assert.match(readme.slice(localDevIndex), /git clone https:\/\/github\.com\/Ryrant\/wenqu-chinese-learning-platform\.git/);
+  assert.match(readme.slice(localDevIndex), /npm ci/);
+  assert.match(readme.slice(localDevIndex), /npm run dev/);
+  assert.match(readme.slice(localDevIndex), /\.env\.local/);
+  assert.match(readme.slice(localDevIndex), /DEV_USER_EMAIL/);
 });
 
 test("repository infrastructure includes standard README security and GPL license files", async () => {
