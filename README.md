@@ -90,34 +90,7 @@
 
 一键部署后续同步更新不如 GitHub 仓库连接方式方便；长期使用建议迁移到方式一。
 
-### 方式三：GitHub Actions 自动部署（可选）
-
-这种方式同样部署到你自己的 Cloudflare 账号，适合希望 push 到 Fork 的 `main` 后自动发布的用户。
-
-1. Fork 本仓库。
-2. 在 Cloudflare 控制台创建 D1 数据库和 R2 Bucket，并记录 D1 Database ID、R2 Bucket Name、Cloudflare Account ID。
-3. 在 [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens) 创建 API Token。可使用 **Edit Cloudflare Workers** 模板，并确保它能部署 Worker、读取/绑定 D1 与 R2。
-4. 打开你 Fork 后的 GitHub 仓库，进入 **Settings** → **Secrets and variables** → **Actions**。
-5. 添加 Variables：
-
-   | Variable 名称 | 说明 |
-   | --- | --- |
-   | `D1_DATABASE_ID` | 你的 D1 Database ID |
-   | `R2_BUCKET_NAME` | 你的 R2 Bucket 名称 |
-   | `ADMIN_EMAIL` | 管理员登录邮箱 |
-
-6. 添加 Secrets：
-
-   | Secret 名称 | 说明 |
-   | --- | --- |
-   | `CLOUDFLARE_API_TOKEN` | Cloudflare API Token |
-   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare Account ID |
-   | `ADMIN_PASSWORD` | 管理员登录密码 |
-   | `JWT_SECRET` | JWT 签名密钥 |
-
-7. 推送到你 Fork 的 `main` 分支，GitHub Actions 会运行测试并部署到你的 Cloudflare 账号。
-
-### 方式四：本地 Wrangler 部署
+### 方式三：本地 Wrangler 部署
 
 本地部署会发布到当前 `wrangler login` 登录的 Cloudflare 账号。
 
@@ -142,7 +115,6 @@ https://你的项目名.你的子域.workers.dev/
 ### 升级 Cloudflare Workers
 
 - Cloudflare Workers 连接 GitHub 仓库：在你的 Fork 页面点击 **Sync fork** → **Update branch**，Cloudflare 会检测代码变化并重新部署。
-- GitHub Actions 自动部署：同步上游后推送到 `main`，Actions 会重新运行测试和部署。
 - 一键部署：建议重新部署，或迁移到 Cloudflare 连接 GitHub 仓库方式。
 - 本地 Wrangler 部署：拉取最新代码后重新执行 `npm ci` 和 `npm run cf:deploy`。
 

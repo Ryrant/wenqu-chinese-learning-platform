@@ -140,22 +140,12 @@ test("standard and ChatGPT builds select separate Wrangler configurations", asyn
   assert.doesNotMatch(chatGptWrangler, /AUTH_MODE\s*=\s*"standard"/);
 });
 
-test("CI renders deploy resources before verification and uploads Worker secrets", async () => {
-  const [workflow, ciWorkflow, renderScript] = await Promise.all([
-    read(".github/workflows/deploy.yml"),
+test("CI is lightweight and default deployment workflow is not committed", async () => {
+  const [ciWorkflow, renderScript] = await Promise.all([
     read(".github/workflows/ci.yml"),
     read("scripts/render-wrangler-config.mjs"),
   ]);
-  const renderIndex = workflow.indexOf("node scripts/render-wrangler-config.mjs");
-  const verifyIndex = workflow.indexOf("npm test");
-  const deployIndex = workflow.indexOf("cloudflare/wrangler-action@v3");
-  assert.ok(renderIndex >= 0 && renderIndex < verifyIndex && verifyIndex < deployIndex);
-  assert.match(workflow, /D1_DATABASE_ID:\s*\$\{\{\s*vars\.D1_DATABASE_ID\s*\}\}/);
-  assert.match(workflow, /R2_BUCKET_NAME:\s*\$\{\{\s*vars\.R2_BUCKET_NAME\s*\}\}/);
-  assert.match(workflow, /ADMIN_EMAIL:\s*\$\{\{\s*vars\.ADMIN_EMAIL\s*\}\}/);
-  assert.match(workflow, /secrets:\s*\|[\s\S]*ADMIN_PASSWORD[\s\S]*JWT_SECRET/);
-  assert.match(workflow, /ADMIN_PASSWORD:\s*\$\{\{\s*secrets\.ADMIN_PASSWORD\s*\}\}/);
-  assert.match(workflow, /JWT_SECRET:\s*\$\{\{\s*secrets\.JWT_SECRET\s*\}\}/);
+  await assert.rejects(read(".github/workflows/deploy.yml"));
   assert.match(renderScript, /D1_DATABASE_ID/);
   assert.match(renderScript, /R2_BUCKET_NAME/);
   assert.match(renderScript, /ADMIN_EMAIL/);
@@ -251,6 +241,7 @@ test("standard cloudflare deployment configuration is documented and secret-safe
   assert.match(envExample, /JWT_SECRET=/);
   assert.match(envExample, /D1_DATABASE_ID/);
   assert.match(envExample, /R2_BUCKET_NAME/);
+  assert.doesNotMatch(envExample, /CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID/);
   assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
   assert.match(agents, /feature 分支/);
   assert.match(agents, /PR/);
@@ -263,7 +254,7 @@ test("standard cloudflare deployment configuration is documented and secret-safe
   assert.match(agents, /AUTH_MODE=standard/);
   assert.match(agents, /WAF Rate Limiting|Cloudflare Access/);
   assert.match(agents, /\.github\/workflows\/ci\.yml.*必要校验/s);
-  assert.match(agents, /\.github\/workflows\/deploy\.yml.*main.*部署/s);
+  assert.match(agents, /不维护默认 GitHub Actions 自动部署 workflow/);
   assert.match(agents, /\/api\/v1\/auth\/login/);
 });
 
@@ -296,11 +287,11 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   assert.match(feature, /Cloudflare self-hosting \/ Cloudflare 自托管/);
   assert.match(readme, /Deploy to Cloudflare Workers/);
   assert.match(readme, /Cloudflare Workers 连接 GitHub 仓库/);
-  assert.match(readme, /GitHub Actions 自动部署/);
   assert.match(readme, /一键部署/);
   assert.match(readme, /本地 Wrangler 部署/);
   assert.match(readme, /npm run build:standard/);
   assert.match(readme, /npx wrangler deploy --keep-vars/);
+  assert.doesNotMatch(readme, /GitHub Actions 自动部署/);
   assert.match(readme, /tests\/auth-token\.test\.mjs/);
   const quickStartIndex = readme.indexOf("## ⚡ 快速开始");
   const deployIndex = readme.indexOf("### 方式一：Cloudflare Workers 连接 GitHub 仓库（推荐）");
