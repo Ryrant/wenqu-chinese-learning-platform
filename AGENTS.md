@@ -7,6 +7,14 @@
 - Commit message 使用中文。
 - 修改认证、部署、D1/R2、API 权限或数据持久化逻辑后，至少运行 `npm test`；可行时同时运行 `npm run lint`。
 
+## README 维护规则
+
+- 用户已经手动调整过 README 时，不得擅自撤回、重写或恢复为模板化内容；如需调整结构，优先移动原文。
+- README 的 `## ⚡ 快速开始` 放安装、运行、部署、自托管、一键部署、Wrangler 和 GitHub Actions 等“如何先跑起来”的内容。
+- README 的 `## 📖 使用说明` 只放平台内部功能使用说明，例如学生端、教师端、家长端和机构端的实际使用流程。
+- 当前平台处于 demo 阶段时，`## 📖 使用说明` 可以留空或保留极简占位，不应把部署说明放入该章节。
+- 参考 `start-your-python` 的 README 信息分层：快速开始负责启动路径，使用说明负责应用内部功能。
+
 ## 部署规则
 
 - ChatGPT Platform Sites 继续使用 `.openai/hosting.json`，不要删除该文件。

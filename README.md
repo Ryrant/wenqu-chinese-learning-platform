@@ -58,8 +58,6 @@ AUTH_MODE=local
 DEV_USER_EMAIL=your-name@wenqu.local
 ```
 
-## 📖 使用说明
-
 ### 📋 前置要求
 
 - [Cloudflare 账号](https://dash.cloudflare.com/)
@@ -177,6 +175,10 @@ https://你的项目名.你的子域.workers.dev/
 - GitHub Actions 自动部署：同步上游后推送到 `main`，Actions 会重新运行测试和部署。
 - 一键部署：建议重新部署，或迁移到 Cloudflare 连接 GitHub 仓库方式。
 - 本地 Wrangler 部署：拉取最新代码后重新执行 `npm ci` 和 `npm run cf:deploy`。
+
+## 📖 使用说明
+
+当前版本为 demo，平台内部功能使用说明待补充。
 
 ## 🧠 功能细节
 
