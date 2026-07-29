@@ -23,11 +23,9 @@
 - 标准 Cloudflare Workers 部署使用 `AUTH_MODE=standard`。
 - `DB` 是 D1 binding，`CONTENT` 是 R2 binding。
 - `ADMIN_PASSWORD`、`JWT_SECRET`、`CLOUDFLARE_API_TOKEN`、真实 D1 database id 和真实 R2 bucket 名称不得提交。
-- GitHub Actions 使用 Variables `D1_DATABASE_ID`、`R2_BUCKET_NAME`、`ADMIN_EMAIL`，使用 Secrets `CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`ADMIN_PASSWORD`、`JWT_SECRET`；缺失或占位配置必须在部署前失败。
 - 应用内 `/api/v1/auth/login` 限流只在单个 Worker isolate 内尽力生效。公开部署前必须配置 Cloudflare WAF Rate Limiting，或使用 Cloudflare Access 保护应用。
 - `.github/workflows/ci.yml` 只做 PR/push 的必要校验，不读取部署 secrets，不执行 Cloudflare 部署。
-- `.github/workflows/deploy.yml` 只负责 `main` 分支部署，部署前必须再次执行 `npm run lint` 和 `npm test`。
-- GitHub Actions 部署前必须先执行 `npm test`。
+- 本仓库不维护默认 GitHub Actions 自动部署 workflow，避免上游仓库缺少用户私有 Cloudflare secrets 时持续失败；用户如需 Actions 部署，应在自己的 Fork 中自行添加。
 
 ## 本地开发
 
