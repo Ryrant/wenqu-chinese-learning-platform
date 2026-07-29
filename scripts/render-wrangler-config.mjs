@@ -7,7 +7,6 @@ const values = Object.fromEntries(requiredVariables.map((name) => [name, process
 function isPlaceholder(name, value) {
   if (!value || /placeholder|replace[-_ ]?with|your[-_ ]/i.test(value)) return true;
   if (name === "D1_DATABASE_ID") return value === "00000000-0000-4000-8000-000000000000";
-  if (name === "R2_BUCKET_NAME") return value === "wenqu-platform-content";
   return /@example\.(com|org|net|invalid)$/i.test(value);
 }
 
