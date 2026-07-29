@@ -1,7 +1,7 @@
 <div align="center">
   <!-- <img src="./public/og.png" alt="文趣 · 华文趣味教学助手 Logo" width="120" /> -->
   <h1>文趣 · 华文趣味教学助手</h1>
-  <p>面向海外华文学校的多租户教学平台，覆盖学生、教师、家长和机构管理员</p>
+  <p>基于 Cloudflare Workers、D1 与 R2 构建的海外华文学校多租户教学平台</p>
 </div>
 
 <p align="center">
@@ -28,13 +28,13 @@
 
 ## ⚡ 快速开始
 
-### 前置要求
+### 📋 前置要求
 
 - Node.js `22.13.0` 或更高版本
 - npm（随 Node.js 安装）
 - Git
 
-### 安装与运行
+### 📦 安装与运行
 
 ```bash
 git clone https://github.com/Ryrant/wenqu-chinese-learning-platform.git
@@ -60,15 +60,10 @@ DEV_USER_EMAIL=your-name@wenqu.local
 
 ## 📖 使用说明
 
-### 自托管部署到 Cloudflare
-
-文趣的标准 Cloudflare 部署是给用户部署到自己的 Cloudflare 账号使用的。请先准备：
+### 📋 前置要求
 
 - [Cloudflare 账号](https://dash.cloudflare.com/)
-- [GitHub 账号](https://github.com/)（使用 Cloudflare 连接仓库或 GitHub Actions 时需要）
-- 一个 D1 数据库，binding 名称必须是 `DB`
-- 一个 R2 Bucket，binding 名称必须是 `CONTENT`
-- 管理员邮箱、管理员密码和 JWT 签名密钥
+- [GitHub 账号](https://github.com/)
 
 ### 方式一：Cloudflare Workers 连接 GitHub 仓库（推荐）
 
