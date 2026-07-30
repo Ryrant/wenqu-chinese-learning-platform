@@ -93,13 +93,16 @@ test("normal account login does not depend on bootstrap credentials", async () =
   } finally { await cleanup(); }
 });
 
-test("password change persists the cleared gate for the current account", async () => {
+test("password change clears the route-equivalent session and workspace gate flow", async () => {
   const { modules, cleanup } = await loadAuthModules();
   try {
     const db = fakeDb({ id: "usr_student", email: "student@wenqu.test", displayName: "学生", passwordHash: await modules.hashPassword("CurrentPass-1234"), mustChangePassword: 1, status: "active" });
-    assert.equal(modules.needsPasswordChange({ mustChangePassword: db.state.account.mustChangePassword === 1 }), true);
+    const blocked = modules.workspacePasswordChangeGate("standard", { mustChangePassword: db.state.account.mustChangePassword === 1 });
+    assert.equal(blocked?.status, 403);
+    assert.deepEqual(await blocked?.json(), { error: "password_change_required" });
     assert.equal(await modules.changeAccountPassword({ db, tenantId: "tenant_school", userId: "usr_student", currentPassword: "CurrentPass-1234", newPassword: "NewPass-5678" }), true);
     assert.equal(db.state.account.mustChangePassword, 0);
-    assert.equal(modules.needsPasswordChange({ mustChangePassword: db.state.account.mustChangePassword === 1 }), false);
+    assert.deepEqual(modules.sessionPasswordChangeState({ mustChangePassword: db.state.account.mustChangePassword === 1 }), { mustChangePassword: false });
+    assert.equal(modules.workspacePasswordChangeGate("standard", { mustChangePassword: db.state.account.mustChangePassword === 1 }), null);
   } finally { await cleanup(); }
 });
