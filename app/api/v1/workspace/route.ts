@@ -1,11 +1,14 @@
 import { env } from "cloudflare:workers";
-import { platformApiError, platformContext } from "../../../lib/platform-store";
+import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
     const context = await platformContext(request);
+    if (getAuthMode() === "standard" && context.mustChangePassword) {
+      return Response.json({ error: "password_change_required" }, { status: 403, headers: { "cache-control": "no-store" } });
+    }
     const { db, tenantId, userId, userEmail, displayName, roles } = context;
     const admin = roles.includes("admin");
     const classClauses: string[] = [];

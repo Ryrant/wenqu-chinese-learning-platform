@@ -286,6 +286,25 @@ test("login has best-effort throttling and malformed cookies fail closed", async
   assert.match(store, /try \{[\s\S]*decodeURIComponent[\s\S]*\} catch \{[\s\S]*return "";/);
 });
 
+test("standard login uses account password hashes and change-password gate", async () => {
+  const [login, session, changePassword, store, envTypes] = await Promise.all([
+    read("app/api/v1/auth/login/route.ts"),
+    read("app/api/v1/auth/session/route.ts"),
+    read("app/api/v1/auth/change-password/route.ts"),
+    read("app/lib/platform-store.ts"),
+    read("cloudflare-env.d.ts"),
+  ]);
+  assert.match(login, /verifyPassword/);
+  assert.match(login, /must_change_password AS mustChangePassword/);
+  assert.match(login, /status='active'/);
+  assert.doesNotMatch(login, /password !== bindings\.ADMIN_PASSWORD/);
+  assert.match(session, /mustChangePassword/);
+  assert.match(changePassword, /hashPassword/);
+  assert.match(changePassword, /must_change_password=0/);
+  assert.match(store, /mustChangePassword/);
+  assert.match(envTypes, /ADMIN_PASSWORD\?: string/);
+});
+
 test("repository infrastructure includes issue forms and self-hosted Cloudflare deployment docs", async () => {
   const [config, bug, feature, readme] = await Promise.all([
     read(".github/ISSUE_TEMPLATE/config.yml"),

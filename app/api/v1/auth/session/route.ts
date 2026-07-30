@@ -7,7 +7,7 @@ export async function GET(request: Request) {
     return Response.json({
       authenticated: true,
       authMode,
-      user: { email: context.userEmail, displayName: context.displayName, roles: context.roles },
+      user: { email: context.userEmail, displayName: context.displayName, roles: context.roles, mustChangePassword: context.mustChangePassword },
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unexpected_error";
