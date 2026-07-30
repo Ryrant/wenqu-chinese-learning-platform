@@ -45,7 +45,10 @@ function fakeDb(account) {
         query,
         values: [],
         bind(...values) { this.values = values; return this; },
-        async first() { return /FROM users/.test(query) ? state.account : null; },
+        async first() {
+          if (/COUNT\(\*\) AS count FROM users/.test(query)) return { count: state.account ? 1 : 0 };
+          return /FROM users/.test(query) ? state.account : null;
+        },
         async run() {
           if (/UPDATE users SET password_hash/.test(query)) {
             state.account.passwordHash = this.values[0];
@@ -73,13 +76,34 @@ test("standard login rejects an inactive account even with bootstrap credentials
   } finally { await cleanup(); }
 });
 
-test("bootstrap runs only when no user exists", async () => {
+test("initial admin setup creates the first account without deploy-time secrets", async () => {
+  const { modules, cleanup } = await loadAuthModules();
+  try {
+    const db = fakeDb(null);
+    const account = await modules.createInitialAdminAccount({ db, email: "admin@wenqu.test", password: "Bootstrap-1234", displayName: "管理员" });
+    assert.equal(account?.status, "active");
+    assert.equal(account?.displayName, "管理员");
+    assert.equal(db.state.batchCalls, 1);
+  } finally { await cleanup(); }
+});
+
+test("initial admin setup is closed once any user exists", async () => {
+  const { modules, cleanup } = await loadAuthModules();
+  try {
+    const db = fakeDb({ id: "usr_existing", email: "existing@wenqu.test", displayName: "已有用户", passwordHash: await modules.hashPassword("ExistingPass-1234"), mustChangePassword: 0, status: "active" });
+    const account = await modules.createInitialAdminAccount({ db, email: "admin@wenqu.test", password: "Bootstrap-1234", displayName: "管理员" });
+    assert.equal(account, null);
+    assert.equal(db.state.batchCalls, 0);
+  } finally { await cleanup(); }
+});
+
+test("standard login no longer bootstraps from deploy-time admin password", async () => {
   const { modules, cleanup } = await loadAuthModules();
   try {
     const db = fakeDb(null);
     const account = await modules.authenticateStandardAccount({ db, email: "admin@wenqu.test", password: "Bootstrap-1234", adminEmail: "admin@wenqu.test", adminPassword: "Bootstrap-1234" });
-    assert.equal(account?.status, "active");
-    assert.equal(db.state.batchCalls, 1);
+    assert.equal(account, null);
+    assert.equal(db.state.batchCalls, 0);
   } finally { await cleanup(); }
 });
 

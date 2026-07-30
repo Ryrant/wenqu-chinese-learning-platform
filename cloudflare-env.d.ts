@@ -20,9 +20,6 @@ declare module "cloudflare:workers" {
     DB: D1Database;
     CONTENT: R2Bucket;
     AUTH_MODE?: "standard" | "local";
-    ADMIN_EMAIL?: string;
-    ADMIN_DISPLAY_NAME?: string;
-    ADMIN_PASSWORD?: string;
     JWT_SECRET?: string;
     JWT_TTL_SECONDS?: string;
     DEV_USER_EMAIL?: string;

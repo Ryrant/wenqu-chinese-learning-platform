@@ -42,19 +42,18 @@ function tokenFromRequest(request: Request) {
   }
 }
 
-async function standardIdentity(request: Request) {
+async function standardIdentity(request: Request, db: D1Database) {
   const bindings = env as unknown as { JWT_SECRET?: string };
-  if (!bindings.JWT_SECRET) throw new Error("authentication_config_missing");
   const token = tokenFromRequest(request);
   if (!token) throw new Error("authentication_required");
-  const session = await verifySessionToken(token, bindings.JWT_SECRET);
+  const session = await verifySessionToken(token, await ensureSiteJwtSecret(db, bindings.JWT_SECRET));
   if (!session) throw new Error("authentication_required");
   return { email: session.email.trim().toLowerCase(), displayName: session.displayName };
 }
 
-async function identity(request: Request) {
+async function identity(request: Request, db: D1Database) {
   const mode = getAuthMode();
-  if (mode === "standard") return standardIdentity(request);
+  if (mode === "standard") return standardIdentity(request, db);
   return localIdentity(request);
 }
 
@@ -108,6 +107,7 @@ async function ensureCoreSchema(db: D1Database) {
     db.prepare("CREATE INDEX IF NOT EXISTS feedback_tenant_idx ON feedback (tenant_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, actor_user_id TEXT NOT NULL, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, detail_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS audit_tenant_created_idx ON audit_logs (tenant_id,created_at)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
   ]);
   for (const statement of [
     "ALTER TABLE users ADD COLUMN password_hash TEXT",
@@ -120,6 +120,35 @@ async function ensureCoreSchema(db: D1Database) {
     "ALTER TABLE submissions ADD COLUMN feedback TEXT",
     "ALTER TABLE submissions ADD COLUMN reviewed_at TEXT",
   ]) await trySchema(db, statement);
+}
+
+export async function ensurePlatformSchema(db: D1Database) {
+  if (!schemaReady) {
+    schemaReady = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); })().catch((error) => { schemaReady = null; throw error; });
+  }
+  await schemaReady;
+}
+
+export async function isInitialSetupRequired(db: D1Database) {
+  const row = await db.prepare("SELECT COUNT(*) AS count FROM users").first<{ count: number }>();
+  return Number(row?.count ?? 0) === 0;
+}
+
+function randomSecret() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function ensureSiteJwtSecret(db: D1Database, configuredSecret?: string) {
+  const configured = configuredSecret?.trim();
+  if (configured) return configured;
+  const stored = await db.prepare("SELECT value FROM app_settings WHERE key='jwt_secret'").first<{ value: string }>();
+  if (stored?.value) return stored.value;
+  const generated = randomSecret();
+  await db.prepare("INSERT OR IGNORE INTO app_settings (key,value) VALUES ('jwt_secret',?)").bind(generated).run();
+  const saved = await db.prepare("SELECT value FROM app_settings WHERE key='jwt_secret'").first<{ value: string }>();
+  return saved?.value ?? generated;
 }
 async function ensureExtendedSchema(db: D1Database) {
   await db.batch([
@@ -175,14 +204,15 @@ async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
   if (!mastery?.count) await db.batch(objectives.map(([id,,, , score], index) => db.prepare("INSERT INTO mastery_snapshots (tenant_id,student_user_id,objective_id,mastery,evidence_count) VALUES (?,?,?,?,?)").bind(tenantId, userId, id, score, index + 3)));
 }
 
+export async function seedInitialWorkspace(context: Omit<PlatformContext, "roles">) {
+  await seedWorkspace(context);
+}
+
 export async function platformContext(request: Request, requiredRole?: PlatformRole): Promise<PlatformContext> {
   const db = (env as unknown as { DB?: D1Database }).DB;
   if (!db) throw new Error("database_unavailable");
-  if (!schemaReady) {
-    schemaReady = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); })().catch((error) => { schemaReady = null; throw error; });
-  }
-  await schemaReady;
-  const { email, displayName } = await identity(request);
+  await ensurePlatformSchema(db);
+  const { email, displayName } = await identity(request, db);
   const userId = `usr_${idPart(email)}`;
   const memberships = await db.prepare(`SELECT rm.tenant_id AS tenantId, rm.role AS role
 FROM role_memberships rm

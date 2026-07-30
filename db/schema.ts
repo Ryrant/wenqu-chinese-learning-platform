@@ -120,6 +120,14 @@ export const feedback = sqliteTable("feedback", {
 export const auditLogs = sqliteTable("audit_logs", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), actorUserId: text("actor_user_id").notNull(), action: text("action").notNull(), targetType: text("target_type").notNull(), targetId: text("target_id").notNull(), detailJson: text("detail_json").notNull().default("{}"), createdAt: createdAt(),
 }, (table) => [index("audit_tenant_created_idx").on(table.tenantId, table.createdAt)]);
+
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  createdAt: createdAt(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const lessonPlans = sqliteTable("lesson_plans", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), topic: text("topic").notNull(), level: text("level").notNull(), durationMinutes: integer("duration_minutes").notNull(), objectivesJson: text("objectives_json").notNull().default("[]"), activitiesJson: text("activities_json").notNull().default("[]"), citationsJson: text("citations_json").notNull().default("[]"), status: text("status").notNull().default("draft"), createdBy: text("created_by").notNull(), createdAt: createdAt(),
 }, (table) => [index("lesson_plans_tenant_idx").on(table.tenantId, table.createdAt)]);
