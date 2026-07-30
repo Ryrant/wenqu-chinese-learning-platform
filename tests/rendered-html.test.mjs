@@ -345,6 +345,18 @@ test("pilot workspace UI exposes member content ai review and password change fl
   assert.match(workspaceRoute, /submissionReviewsQuery = \(admin \|\| roles\.includes\("teacher"\)\)/);
 });
 
+test("README documents pilot workflow without exposing secrets", async () => {
+  const [readme, envExample] = await Promise.all([read("README.md"), read(".env.example")]);
+  assert.match(readme, /成员账号/);
+  assert.match(readme, /首次登录修改临时密码/);
+  assert.match(readme, /PDF\/DOCX\/TXT/);
+  assert.match(readme, /AI 辅助批阅/);
+  assert.match(readme, /教师确认/);
+  assert.match(envExample, /OPENAI_API_KEY=/);
+  assert.match(envExample, /AI_MODEL=gpt-5\.6-luna/);
+  assert.doesNotMatch(`${readme}\n${envExample}`, /sk-|password123|JWT_SECRET=.{12,}/);
+});
+
 test("repository infrastructure includes issue forms and self-hosted Cloudflare deployment docs", async () => {
   const [config, bug, feature, readme] = await Promise.all([
     read(".github/ISSUE_TEMPLATE/config.yml"),
@@ -373,7 +385,8 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   const usageIndex = readme.indexOf("## 📖 使用说明");
   const localDevIndex = readme.indexOf("## 👨‍💻 本地开发");
   assert.ok(quickStartIndex >= 0 && deployIndex > quickStartIndex && usageIndex > deployIndex);
-  assert.match(readme.slice(usageIndex), /当前版本为 demo，平台内部功能使用说明待补充。/);
+  assert.match(readme.slice(usageIndex, localDevIndex), /机构管理员/);
+  assert.match(readme.slice(usageIndex, localDevIndex), /教师确认/);
   assert.ok(localDevIndex > usageIndex);
   assert.match(readme.slice(localDevIndex), /git clone https:\/\/github\.com\/Ryrant\/wenqu-chinese-learning-platform\.git/);
   assert.match(readme.slice(localDevIndex), /npm ci/);
