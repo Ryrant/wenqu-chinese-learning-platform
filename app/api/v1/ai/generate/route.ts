@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       .bind(crypto.randomUUID(), context.tenantId, sessionId, item.id, item.excerpt.slice(0, 500))));
     const encoder = new TextEncoder();
     const stream = new ReadableStream({ start(controller) {
-      controller.enqueue(encoder.encode(`event: meta\ndata: ${JSON.stringify({ provider: result.provider, model: result.model, safety: "pass", sessionId })}\n\n`));
+      controller.enqueue(encoder.encode(`event: meta\ndata: ${JSON.stringify({ provider: result.provider, model: result.model, status: result.status, safety: "pass", sessionId })}\n\n`));
       for (const paragraph of result.text.split("\n\n")) controller.enqueue(encoder.encode(`event: token\ndata: ${JSON.stringify({ text: `${paragraph}\n\n` })}\n\n`));
       controller.enqueue(encoder.encode(`event: citations\ndata: ${JSON.stringify(result.citations)}\n\n`));
       controller.enqueue(encoder.encode("event: done\ndata: {}\n\n")); controller.close();
