@@ -5,7 +5,7 @@ export type GuardianLinkRow = Row & { guardianUserId: string; studentUserId: str
 export type WorkspaceData = {
   workspace: { tenantId: string; name: string; region: string; sampleData: boolean };
   user: { id: string; email: string; displayName: string; roles: Role[] };
-  classes: Row[]; assignments: Row[]; submissions: Row[]; mastery: Row[]; documents: Row[];
+  classes: Row[]; assignments: Row[]; submissions: Row[]; submissionReviews: Row[]; mastery: Row[]; documents: Row[];
   lessonPlans: Row[]; notifications: Row[]; consents: Row[]; audits: Row[]; invitations: Row[]; members: Row[]; guardianLinks: Row[];
   services: Record<string, { status: string; label: string }>;
   generatedAt: string;

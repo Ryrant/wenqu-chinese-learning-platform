@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { generateGroundedText } from "../../../../lib/ai/grounding";
-import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
+import { confirmSubmissionReview, suggestTextReview } from "../../../../lib/assessment-service";
 import { assertSubmissionReviewAccess } from "../../../../lib/access-control";
+import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
 import { publishContent } from "../../../../lib/content-processing";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 import { searchPublishedKnowledge } from "../../../../lib/retrieval";
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
     const body = await request.json() as ActionBody;
     const action = requireText(body.action, "action", 60);
     const roleByAction: Record<string, PlatformRole> = {
-      create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", review_submission: "teacher",
+      create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
       create_invitation: "admin", review_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", mark_notification: "student",
       submit_text: "student",
@@ -122,14 +123,23 @@ export async function POST(request: Request) {
       return Response.json({ id, reviewStatus: "human_review" }, { status: 201 });
     }
 
-    if (action === "review_submission") {
+    if (action === "suggest_text_review") {
+      const id = requireText(body.id, "submission_id");
+      const result = await suggestTextReview(db, context, id, {
+        openAiKey: (env as unknown as { OPENAI_API_KEY?: string; AI_API_KEY?: string }).OPENAI_API_KEY ?? (env as unknown as { AI_API_KEY?: string }).AI_API_KEY,
+        model: (env as unknown as { AI_MODEL?: string }).AI_MODEL,
+      });
+      await audit(db, tenantId, userId, "submission.ai_review_suggested", "submission", id);
+      return Response.json(result);
+    }
+
+    if (action === "review_submission" || action === "confirm_submission_review") {
       const id = requireText(body.id, "submission_id");
       const score = Math.max(0, Math.min(number(body.score, 0), 100));
-      await assertSubmissionReviewAccess(db, context, id);
-      const result = await db.prepare("UPDATE submissions SET score=?,confidence=1,review_status='reviewed' WHERE id=? AND tenant_id=?").bind(score, id, tenantId).run();
-      if (!result.meta.changes) return Response.json({ error: "submission_not_found" }, { status: 404 });
+      if (action === "review_submission") await assertSubmissionReviewAccess(db, context, id);
+      const result = await confirmSubmissionReview(db, context, { submissionId: id, score, comment: text(body.comment, 2000) });
       await audit(db, tenantId, userId, "submission.reviewed", "submission", id, { score });
-      return Response.json({ id, score, reviewStatus: "reviewed" });
+      return Response.json({ ...result, id, reviewStatus: "reviewed" });
     }
 
     if (action === "create_reminder") {
