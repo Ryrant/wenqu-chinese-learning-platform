@@ -29,7 +29,7 @@ export async function GET(request: Request) {
     const assignmentsQuery = db.prepare(`SELECT a.*,c.name AS className,COUNT(s.id) AS submissionCount FROM assignments a JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id LEFT JOIN submissions s ON s.assignment_id=a.id AND s.tenant_id=a.tenant_id WHERE a.tenant_id=? AND ${classAccess} GROUP BY a.id ORDER BY a.created_at DESC`).bind(...classArgs);
     const submissionsQuery = db.prepare(`SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id LEFT JOIN users u ON u.id=s.student_user_id WHERE s.tenant_id=? AND ${submissionAccess} ORDER BY s.created_at DESC LIMIT 50`).bind(...submissionArgs);
     const empty = { results: [] };
-    const [classes, assignments, submissions, mastery, documents, plans, notifications, consents, audits, invitations] = await Promise.all([
+    const [classes, assignments, submissions, mastery, documents, plans, notifications, consents, audits, invitations, members, guardianLinks] = await Promise.all([
       classesQuery.all(), assignmentsQuery.all(), submissionsQuery.all(),
       db.prepare(`SELECT lo.title,lo.skill,ms.mastery,ms.evidence_count AS evidenceCount,ms.created_at AS measuredAt FROM mastery_snapshots ms JOIN learning_objectives lo ON lo.id=ms.objective_id AND lo.tenant_id=ms.tenant_id WHERE ms.tenant_id=? AND (ms.student_user_id=? OR EXISTS (SELECT 1 FROM guardian_student_links gl WHERE gl.tenant_id=ms.tenant_id AND gl.student_user_id=ms.student_user_id AND gl.guardian_user_id=?)) ORDER BY ms.created_at DESC`).bind(tenantId,userId,userId).all(),
       admin || roles.includes("teacher") ? db.prepare(`SELECT d.*,COUNT(k.id) AS chunkCount FROM source_documents d LEFT JOIN knowledge_chunks k ON k.source_document_id=d.id AND k.tenant_id=d.tenant_id WHERE d.tenant_id=? GROUP BY d.id ORDER BY d.created_at DESC`).bind(tenantId).all() : Promise.resolve(empty),
@@ -38,13 +38,15 @@ export async function GET(request: Request) {
       db.prepare("SELECT * FROM consent_records WHERE tenant_id=? AND (student_user_id=? OR guardian_user_id=?) ORDER BY created_at DESC").bind(tenantId,userId,userId).all(),
       admin ? db.prepare("SELECT * FROM audit_logs WHERE tenant_id=? ORDER BY created_at DESC LIMIT 30").bind(tenantId).all() : Promise.resolve(empty),
       admin ? db.prepare("SELECT id,email,role,status,expires_at AS expiresAt,created_at AS createdAt FROM invitations WHERE tenant_id=? ORDER BY created_at DESC LIMIT 20").bind(tenantId).all() : Promise.resolve(empty),
+      admin ? db.prepare("SELECT u.id,u.email,u.display_name AS displayName,u.status,u.must_change_password AS mustChangePassword, group_concat(rm.role) AS roles FROM users u JOIN role_memberships rm ON rm.user_id=u.id WHERE rm.tenant_id=? GROUP BY u.id ORDER BY u.created_at DESC").bind(tenantId).all() : Promise.resolve(empty),
+      admin ? db.prepare("SELECT guardian_user_id AS guardianUserId, student_user_id AS studentUserId, status, verified_at AS verifiedAt FROM guardian_student_links WHERE tenant_id=? AND status='active' ORDER BY created_at DESC").bind(tenantId).all() : Promise.resolve(empty),
     ]);
     const config = env as unknown as Record<string, unknown>;
     return Response.json({
       workspace: { tenantId, name: "华文趣味试用学校", region: "sg", sampleData: true },
       user: { id: userId, email: userEmail, displayName, roles },
       classes: classes.results, assignments: assignments.results, submissions: submissions.results, mastery: mastery.results,
-      documents: documents.results, lessonPlans: plans.results, notifications: notifications.results, consents: consents.results, audits: audits.results, invitations: invitations.results,
+      documents: documents.results, lessonPlans: plans.results, notifications: notifications.results, consents: consents.results, audits: audits.results, invitations: invitations.results, members: members.results, guardianLinks: guardianLinks.results,
       services: {
         database: { status: "available", label: "D1 业务数据" }, storage: { status: "available", label: "R2 文件存储" }, retrieval: { status: "available", label: "已发布知识片段检索" },
         generation: config.AI_API_KEY ? { status: "configured", label: "外部模型已配置" } : { status: "template", label: "未配置外部模型，使用来源化教学模板" },

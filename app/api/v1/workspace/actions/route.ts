@@ -1,3 +1,4 @@
+import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 
 type ActionBody = { action?: string; [key: string]: unknown };
@@ -18,12 +19,39 @@ export async function POST(request: Request) {
     const roleByAction: Record<string, PlatformRole> = {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", review_submission: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
-      create_invitation: "admin", review_content: "admin", mark_notification: "student",
+      create_invitation: "admin", review_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", mark_notification: "student",
       submit_text: "student",
     };
     const context = await platformContext(request, roleByAction[action]);
     const { db, tenantId, userId } = context;
     const isAdmin = context.roles.includes("admin");
+
+    if (action === "create_member") {
+      const member = await createMember(db, {
+        tenantId, actorUserId: userId, email: requireText(body.email, "member_email", 200),
+        displayName: text(body.displayName, 120), role: requireText(body.role, "member_role", 20) as PlatformRole,
+        temporaryPassword: requireText(body.temporaryPassword, "temporary_password", 200),
+      });
+      return Response.json(member, { status: 201 });
+    }
+
+    if (action === "reset_member_password") {
+      await resetMemberPassword(db, { tenantId, actorUserId: userId, userId: requireText(body.userId, "member_id", 120), temporaryPassword: requireText(body.temporaryPassword, "temporary_password", 200) });
+      return Response.json({ ok: true });
+    }
+
+    if (action === "set_member_status") {
+      const status = body.status === "disabled" ? "disabled" : body.status === "active" ? "active" : null;
+      if (!status) throw new Error("invalid_member_status");
+      await setMemberStatus(db, { tenantId, actorUserId: userId, userId: requireText(body.userId, "member_id", 120), status });
+      return Response.json({ ok: true, status });
+    }
+
+    if (action === "set_guardian_links") {
+      const studentUserIds = Array.isArray(body.studentUserIds) ? body.studentUserIds.map((value) => text(value, 120)).filter(Boolean) : [];
+      await setGuardianLinks(db, { tenantId, actorUserId: userId, guardianUserId: requireText(body.guardianUserId, "guardian_user_id", 120), studentUserIds });
+      return Response.json({ ok: true });
+    }
 
     if (action === "create_class") {
       const id = crypto.randomUUID();
