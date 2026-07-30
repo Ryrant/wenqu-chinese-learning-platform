@@ -58,8 +58,8 @@ test("defines tenant-scoped durable data, migrations and production bindings", a
 });
 
 test("versioned APIs enforce tenant scope, honest provider state and review fallbacks", async () => {
-  const [generate, search, upload, speech, actions, health] = await Promise.all([
-    read("app/api/v1/ai/generate/route.ts"), read("app/api/v1/knowledge/search/route.ts"), read("app/api/v1/content/upload/route.ts"), read("app/api/v1/speech/submissions/route.ts"), read("app/api/v1/workspace/actions/route.ts"), read("app/api/v1/health/route.ts"),
+  const [generate, search, upload, speech, actions, health, contentProcessing] = await Promise.all([
+    read("app/api/v1/ai/generate/route.ts"), read("app/api/v1/knowledge/search/route.ts"), read("app/api/v1/content/upload/route.ts"), read("app/api/v1/speech/submissions/route.ts"), read("app/api/v1/workspace/actions/route.ts"), read("app/api/v1/health/route.ts"), read("app/lib/content-processing.ts"),
   ]);
   assert.match(generate, /text\/event-stream/); assert.match(generate, /source-grounded-template/); assert.match(generate, /citations/);
   assert.match(search, /tenant_id=\?/); assert.match(search, /processing_status='published'/);
@@ -67,7 +67,11 @@ test("versioned APIs enforce tenant scope, honest provider state and review fall
   assert.match(upload, /source\.processed/); assert.match(upload, /processing_error/);
   assert.match(speech, /human_review/); assert.match(speech, /R2Bucket|CONTENT/);
   assert.match(actions, /WHERE id=\? AND tenant_id=\?/); assert.match(actions, /audit_logs/);
-  assert.match(actions, /knowledge_chunks SET published=1/); assert.match(actions, /processing_status='processed'/);
+  assert.match(contentProcessing, /knowledge_chunks SET published=1/); assert.match(contentProcessing, /processing_status='processed'/);
+  assert.match(actions, /invalid_content_review_status/);
+  assert.match(actions, /body\.status !== "published" && body\.status !== "rejected"/);
+  assert.match(actions, /await publishContent\(db, \{ tenantId, sourceDocumentId: id \}\)/);
+  assert.match(actions, /await db\.batch\(\[/);
   assert.match(health, /not_configured_manual_review/); assert.doesNotMatch(health, /99\.9|healthy/);
   await access(new URL("dist/server/index.js", root));
 });
