@@ -61,7 +61,7 @@ test("versioned APIs enforce tenant scope, honest provider state and review fall
   const [generate, search, upload, speech, actions, health, contentProcessing] = await Promise.all([
     read("app/api/v1/ai/generate/route.ts"), read("app/api/v1/knowledge/search/route.ts"), read("app/api/v1/content/upload/route.ts"), read("app/api/v1/speech/submissions/route.ts"), read("app/api/v1/workspace/actions/route.ts"), read("app/api/v1/health/route.ts"), read("app/lib/content-processing.ts"),
   ]);
-  assert.match(generate, /text\/event-stream/); assert.match(generate, /source-grounded-template/); assert.match(generate, /citations/);
+  assert.match(generate, /text\/event-stream/); assert.match(generate, /generateGroundedText/); assert.match(generate, /citations/);
   assert.match(search, /tenant_id=\?/); assert.match(search, /processing_status='published'/);
   assert.match(upload, /bucket\.put/); assert.match(upload, /rightsStatus/);
   assert.match(upload, /source\.processed/); assert.match(upload, /processing_error/);

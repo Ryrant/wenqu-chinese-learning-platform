@@ -14,6 +14,7 @@ export function StudentView({ nav, data, act, refresh, notify }: Props) {
   const [question, setQuestion] = useState("中秋节为什么代表团圆？");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
+  const [generationMeta, setGenerationMeta] = useState<{ provider?: string; model?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(String(data.assignments.find((item) => item.status === "published")?.id ?? ""));
   const [textAnswer, setTextAnswer] = useState("");
@@ -32,7 +33,7 @@ export function StudentView({ nav, data, act, refresh, notify }: Props) {
   }
 
   async function askTutor(event: React.FormEvent) {
-    event.preventDefault(); setBusy(true); setAnswer(""); setSources([]);
+    event.preventDefault(); setBusy(true); setAnswer(""); setSources([]); setGenerationMeta(null);
     try {
       const response = await fetch("/api/v1/ai/generate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: question, purpose: "tutor", level: "A2" }) });
       if (!response.ok) throw new Error("回答生成失败");
@@ -41,6 +42,7 @@ export function StudentView({ nav, data, act, refresh, notify }: Props) {
         const eventName = block.split("\n").find((line) => line.startsWith("event:"))?.slice(6).trim();
         const payload = block.split("\n").find((line) => line.startsWith("data:"))?.slice(5).trim();
         if (!payload) continue;
+        if (eventName === "meta") setGenerationMeta(JSON.parse(payload) as { provider?: string; model?: string });
         if (eventName === "token") built += (JSON.parse(payload) as { text: string }).text;
         if (eventName === "citations") found = JSON.parse(payload) as Array<Record<string, unknown>>;
       }
@@ -76,7 +78,7 @@ export function StudentView({ nav, data, act, refresh, notify }: Props) {
     } catch { notify("麦克风未授权", "请允许浏览器访问麦克风后再试。", "error"); }
   }
 
-  if (nav === "AI 课堂") return <section><PageTitle eyebrow="来源透明 · 学生问答" title="AI 课堂" detail="回答只基于本租户已发布内容；找不到来源时会明确拒答。"/><form className="panel query-panel" onSubmit={askTutor}><label>想问什么？<textarea value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={4000} required/></label><button className="primary-button" disabled={busy}>{busy ? "正在检索…" : "检索并生成回答"}</button></form>{answer && <article className="panel result-card"><span className="safe-chip">来源化教学模板 · 需教师确认</span><h3>回答</h3><p className="generated-copy">{answer}</p><h4>引用来源（{sources.length}）</h4>{sources.map((source) => <div className="citation" key={String(source.id)}><strong>{String(source.title)}</strong><p>{String(source.excerpt)}</p></div>)}</article>}</section>;
+  if (nav === "AI 课堂") return <section><PageTitle eyebrow="来源透明 · 学生问答" title="AI 课堂" detail="回答只基于本租户已发布内容；找不到来源时会明确拒答。"/><form className="panel query-panel" onSubmit={askTutor}><label>想问什么？<textarea value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={4000} required/></label><button className="primary-button" disabled={busy}>{busy ? "正在检索…" : "检索并生成回答"}</button></form>{answer && <article className="panel result-card"><span className="safe-chip">{generationMeta?.provider && generationMeta?.model ? `${generationMeta.provider} · ${generationMeta.model}` : "来源化生成 · 需教师确认"}</span><h3>回答</h3><p className="generated-copy">{answer}</p><h4>引用来源（{sources.length}）</h4>{sources.map((source) => <div className="citation" key={String(source.id)}><strong>{String(source.title)}</strong><p>{String(source.excerpt)}</p></div>)}</article>}</section>;
 
   if (nav === "学习任务") return <section><PageTitle eyebrow="真实作业提交" title="我的学习任务" detail={`${published.length} 项已发布任务；提交后进入教师审核。`}/><div className="cards-list">{published.map((item) => <article className="panel task-card" key={String(item.id)}><span className="status published">进行中</span><h3>{stringValue(item.title)}</h3><p>{stringValue(item.activity_type)} · 截止 {stringValue(item.due_at)}</p></article>)}</div><form className="panel form-card" onSubmit={submitText}><h3>提交文字作业</h3><label>任务<select value={selectedAssignment} onChange={(event) => setSelectedAssignment(event.target.value)} required>{published.map((item) => <option value={String(item.id)} key={String(item.id)}>{stringValue(item.title)}</option>)}</select></label><label>我的回答<textarea value={textAnswer} onChange={(event) => setTextAnswer(event.target.value)} placeholder="写下你的完整句子或小故事" required maxLength={10000}/></label><button className="primary-button" disabled={busy || !selectedAssignment}>提交给老师审核</button></form></section>;
 

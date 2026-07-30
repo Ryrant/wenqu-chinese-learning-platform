@@ -33,3 +33,19 @@ test("knowledge search route delegates to retrieval service", async () => {
   assert.match(retrieval, /matchReason/);
   assert.match(route, /searchPublishedKnowledge/);
 });
+
+test("student and teacher generation use grounded provider chain", async () => {
+  const [generate, actions, student, staff] = await Promise.all([
+    read("app/api/v1/ai/generate/route.ts"),
+    read("app/api/v1/workspace/actions/route.ts"),
+    read("app/student-view.tsx"),
+    read("app/staff-views.tsx"),
+  ]);
+  assert.match(generate, /searchPublishedKnowledge/);
+  assert.match(generate, /generateGroundedText/);
+  assert.match(generate, /OPENAI_API_KEY/);
+  assert.match(actions, /generateGroundedText/);
+  assert.match(actions, /input_tokens,output_tokens/);
+  assert.match(student, /引用来源/);
+  assert.match(staff, /provider|engine/);
+});
