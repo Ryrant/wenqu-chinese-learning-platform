@@ -64,8 +64,10 @@ test("versioned APIs enforce tenant scope, honest provider state and review fall
   assert.match(generate, /text\/event-stream/); assert.match(generate, /source-grounded-template/); assert.match(generate, /citations/);
   assert.match(search, /tenant_id=\?/); assert.match(search, /processing_status='published'/);
   assert.match(upload, /bucket\.put/); assert.match(upload, /rightsStatus/);
+  assert.match(upload, /source\.processed/); assert.match(upload, /processing_error/);
   assert.match(speech, /human_review/); assert.match(speech, /R2Bucket|CONTENT/);
   assert.match(actions, /WHERE id=\? AND tenant_id=\?/); assert.match(actions, /audit_logs/);
+  assert.match(actions, /knowledge_chunks SET published=1/); assert.match(actions, /processing_status='processed'/);
   assert.match(health, /not_configured_manual_review/); assert.doesNotMatch(health, /99\.9|healthy/);
   await access(new URL("dist/server/index.js", root));
 });

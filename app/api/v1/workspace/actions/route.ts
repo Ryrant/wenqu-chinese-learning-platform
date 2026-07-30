@@ -157,10 +157,13 @@ export async function POST(request: Request) {
 
     if (action === "review_content") {
       const id = requireText(body.id, "document_id");
-      const next = body.status === "published" ? "published" : body.status === "rejected" ? "rejected" : "review";
-      const rights = next === "published" ? "approved" : "pending";
-      const result = await db.prepare("UPDATE source_documents SET processing_status=?,rights_status=? WHERE id=? AND tenant_id=?").bind(next, rights, id, tenantId).run();
+      const next = body.status === "published" ? "published" : "rejected";
+      const result = next === "published"
+        ? await db.prepare("UPDATE source_documents SET processing_status='published',rights_status='approved' WHERE id=? AND tenant_id=? AND processing_status='processed'").bind(id, tenantId).run()
+        : await db.prepare("UPDATE source_documents SET processing_status='rejected',rights_status='pending' WHERE id=? AND tenant_id=?").bind(id, tenantId).run();
       if (!result.meta.changes) return Response.json({ error: "document_not_found" }, { status: 404 });
+      if (next === "published") await db.prepare("UPDATE knowledge_chunks SET published=1 WHERE tenant_id=? AND source_document_id=?").bind(tenantId, id).run();
+      else await db.prepare("UPDATE knowledge_chunks SET published=0 WHERE tenant_id=? AND source_document_id=?").bind(tenantId, id).run();
       await audit(db, tenantId, userId, "source.reviewed", "source_document", id, { status: next });
       return Response.json({ id, status: next });
     }
