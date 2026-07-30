@@ -149,13 +149,17 @@ test("build uses the standard Wrangler configuration without Sites packaging", a
   ]);
   const pkg = JSON.parse(pkgRaw);
   assert.equal(pkg.scripts["build:standard"], "node scripts/build-standard.mjs");
-  assert.equal(pkg.scripts["cf:preview"], "npm run build:standard && npx wrangler dev");
-  assert.equal(pkg.scripts["cf:deploy"], "npm run build:standard && npx wrangler deploy");
+  assert.equal(pkg.scripts.deploy, "wrangler deploy");
+  assert.match(pkg.scripts.lint, /\.wrangler-dry-run/);
+  assert.equal(pkg.scripts["cf:preview"], "npm run build && npx wrangler dev");
+  assert.equal(pkg.scripts["cf:deploy"], "npm run build && npm run deploy");
   assert.match(vite, /\.\/wrangler\.toml/);
   assert.doesNotMatch(vite, /sites\(|sites-vite-plugin|wrangler\.chatgpt|WENQU_DEPLOY_TARGET/);
   assert.match(standardWrangler, /AUTH_MODE = "standard"/);
   assert.match(standardWrangler, /binding = "DB"/);
   assert.match(standardWrangler, /binding = "CONTENT"/);
+  assert.match(standardWrangler, /database_name = "wenqu-platform-db"/);
+  assert.doesNotMatch(standardWrangler, /database_id|bucket_name|00000000-0000-4000-8000-000000000000|replace-with-r2-bucket-name/);
   await assert.rejects(read(".openai/hosting.json"));
   await assert.rejects(read("wrangler.chatgpt.toml"));
   await assert.rejects(read("build/sites-vite-plugin.ts"));
@@ -163,14 +167,8 @@ test("build uses the standard Wrangler configuration without Sites packaging", a
 });
 
 test("CI is lightweight and default deployment workflow is not committed", async () => {
-  const [ciWorkflow, renderScript] = await Promise.all([
-    read(".github/workflows/ci.yml"),
-    read("scripts/render-wrangler-config.mjs"),
-  ]);
+  const ciWorkflow = await read(".github/workflows/ci.yml");
   await assert.rejects(read(".github/workflows/deploy.yml"));
-  assert.match(renderScript, /D1_DATABASE_ID/);
-  assert.match(renderScript, /R2_BUCKET_NAME/);
-  assert.match(renderScript, /ADMIN_EMAIL/);
   assert.match(ciWorkflow, /^name: CI/m);
   assert.match(ciWorkflow, /permissions:\s*\n\s*contents: read/);
   assert.match(ciWorkflow, /pull_request:\s*\n\s*branches:\s*\n\s*- main/);
@@ -184,41 +182,21 @@ test("CI is lightweight and default deployment workflow is not committed", async
   assert.doesNotMatch(ciWorkflow, /wrangler-action|CLOUDFLARE_API_TOKEN|ADMIN_PASSWORD|JWT_SECRET/);
 });
 
-test("Wrangler renderer rejects placeholders and writes controlled CI values without logging secrets", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "wenqu-wrangler-"));
-  try {
-    await writeFile(join(directory, "wrangler.toml"), await read("wrangler.toml"), "utf8");
-    const script = fileURLToPath(new URL("../scripts/render-wrangler-config.mjs", import.meta.url));
-    await assert.rejects(execFileAsync(process.execPath, [script], {
-      cwd: directory,
-      env: {
-        ...process.env,
-        D1_DATABASE_ID: "00000000-0000-4000-8000-000000000000",
-        R2_BUCKET_NAME: "replace-with-r2-bucket-name",
-        ADMIN_EMAIL: "admin@example.com",
-      },
-    }));
-
-    const secretFixture = "must-not-appear-in-output";
-    const { stdout, stderr } = await execFileAsync(process.execPath, [script], {
-      cwd: directory,
-      env: {
-        ...process.env,
-        D1_DATABASE_ID: "12345678-1234-4abc-8def-1234567890ab",
-        R2_BUCKET_NAME: "wenqu-platform-content",
-        ADMIN_EMAIL: "admin@wenqu.test",
-        ADMIN_PASSWORD: secretFixture,
-        JWT_SECRET: secretFixture,
-      },
-    });
-    const rendered = await readFile(join(directory, "wrangler.toml"), "utf8");
-    assert.match(rendered, /database_id = "12345678-1234-4abc-8def-1234567890ab"/);
-    assert.match(rendered, /bucket_name = "wenqu-platform-content"/);
-    assert.match(rendered, /ADMIN_EMAIL = "admin@wenqu.test"/);
-    assert.doesNotMatch(`${stdout}\n${stderr}`, new RegExp(secretFixture));
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+test("deployment relies on Cloudflare automatic D1 and R2 provisioning", async () => {
+  const [standardWrangler, pkgRaw, envExample, readme] = await Promise.all([
+    read("wrangler.toml"),
+    read("package.json"),
+    read(".env.example"),
+    read("README.md"),
+  ]);
+  const pkg = JSON.parse(pkgRaw);
+  assert.equal(pkg.scripts.deploy, "wrangler deploy");
+  assert.doesNotMatch(JSON.stringify(pkg.scripts), /render-wrangler-config|D1_DATABASE_ID|R2_BUCKET_NAME/);
+  assert.doesNotMatch(standardWrangler, /database_id|bucket_name|replace-with|00000000/);
+  assert.doesNotMatch(envExample, /D1_DATABASE_ID|R2_BUCKET_NAME/);
+  assert.match(readme, /D1\/R2.*自动创建/s);
+  assert.doesNotMatch(readme, /把 `wrangler\.toml` 中的占位值替换|D1_DATABASE_ID|R2_BUCKET_NAME|replace-with-r2-bucket-name/);
+  await assert.rejects(read("scripts/render-wrangler-config.mjs"));
 });
 
 test("standard build launcher delegates through the active npm CLI", async () => {
@@ -257,12 +235,12 @@ test("standard cloudflare deployment configuration is documented and secret-safe
   assert.match(standardWrangler, /main = "worker\/index\.ts"/);
   assert.match(standardWrangler, /binding = "DB"/);
   assert.match(standardWrangler, /binding = "CONTENT"/);
+  assert.doesNotMatch(standardWrangler, /database_id|bucket_name|replace-with|00000000/);
   assert.match(standardWrangler, /required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
   assert.doesNotMatch(standardWrangler, /ADMIN_PASSWORD =|JWT_SECRET =|CLOUDFLARE_API_TOKEN/);
   assert.match(envExample, /AUTH_MODE=standard/);
   assert.match(envExample, /JWT_SECRET=/);
-  assert.match(envExample, /D1_DATABASE_ID/);
-  assert.match(envExample, /R2_BUCKET_NAME/);
+  assert.doesNotMatch(envExample, /D1_DATABASE_ID|R2_BUCKET_NAME/);
   assert.doesNotMatch(envExample, /CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID/);
   assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
   assert.match(agents, /feature 分支/);
@@ -386,7 +364,8 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   assert.match(readme, /本地 Wrangler 部署/);
   assert.match(readme, /npm run build:standard/);
   assert.match(readme, /npm run build/);
-  assert.match(readme, /npx wrangler deploy --keep-vars/);
+  assert.match(readme, /npx wrangler deploy/);
+  assert.doesNotMatch(readme, /--keep-vars/);
   assert.doesNotMatch(readme, /GitHub Actions 自动部署/);
   assert.doesNotMatch(bug, /ChatGPT Sites|Platform Sites/i);
   assert.match(readme, /tests\/auth-token\.test\.mjs/);
