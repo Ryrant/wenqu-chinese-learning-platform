@@ -19,15 +19,6 @@ declare module "cloudflare:workers" {
   export const env: {
     DB: D1Database;
     CONTENT: R2Bucket;
-    AUTH_MODE?: "standard" | "local";
-    JWT_SECRET?: string;
-    JWT_TTL_SECONDS?: string;
-    DEV_USER_EMAIL?: string;
-    AI_API_KEY?: string;
-    OPENAI_API_KEY?: string;
-    AI_MODEL?: string;
-    SPEECH_API_KEY?: string;
-    MODERATION_API_KEY?: string;
     [key: string]: unknown;
   };
 }

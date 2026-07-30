@@ -54,14 +54,14 @@
    npx wrangler deploy
    ```
 
-8. Cloudflare 会根据 `wrangler.toml` 自动创建并绑定 D1/R2。部署前不需要手动填写变量、D1 database ID 或 R2 bucket 名称。部署后在项目绑定中确认：
+8. Cloudflare 会根据 `wrangler.toml` 自动创建并绑定 D1/R2。部署前是零变量、零密钥配置，不需要手动填写 D1 database ID、R2 bucket 名称或任何运行参数。部署后在项目绑定中确认：
 
    - D1 binding：`DB`
    - R2 binding：`CONTENT`
 
 部署成功后，访问 Cloudflare 分配的 `workers.dev` 域名，页面会提示初始化文趣工作区。按提示创建首个管理员邮箱和密码后即可进入后台。
 
-如需接入外部模型、语音评测或内容审核，可在部署成功后到 **Settings** → **Variables and Secrets** 添加可选 Secret：`AI_API_KEY` / `OPENAI_API_KEY`、`SPEECH_API_KEY`、`MODERATION_API_KEY`。不配置时，系统会使用来源化模板或教师复核降级，不影响基础部署。
+如需接入外部模型、语音评测或内容审核，进入后台 **平台设置** 添加 OpenAI Key、通用 AI Key、模型名、语音评测 Key 和内容审核 Key。配置会保存到你自己的 D1，不配置时系统会使用来源化模板或教师复核降级，不影响基础部署。
 
 ### 方式二：一键部署
 
@@ -76,7 +76,7 @@
 - D1 binding：`DB`
 - R2 binding：`CONTENT`
 
-D1/R2 会在一键部署流程中自动创建，不需要手动填写变量、D1 database ID、R2 bucket 名称、管理员密码或 JWT 密钥。部署完成后打开站点，按页面提示完成首次初始化。
+D1/R2 会在一键部署流程中自动创建，不需要手动填写变量、D1 database ID、R2 bucket 名称、管理员密码或登录签名密钥。部署完成后打开站点，按页面提示完成首次初始化。
 
 一键部署后续同步更新不如 GitHub 仓库连接方式方便；长期使用建议迁移到方式一。
 
@@ -90,7 +90,7 @@ npx wrangler login
 npm run cf:deploy
 ```
 
-本地 Wrangler 部署同样使用 `wrangler.toml` 中的 `DB` / `CONTENT` 绑定。首次部署时 Wrangler 会为缺少资源 ID 或 bucket 名的绑定自动创建 D1/R2；不要提交密码、JWT 密钥或 Cloudflare Token。
+本地 Wrangler 部署同样使用 `wrangler.toml` 中的 `DB` / `CONTENT` 绑定。首次部署时 Wrangler 会为缺少资源 ID 或 bucket 名的绑定自动创建 D1/R2；不要提交密码、登录签名密钥或 Cloudflare Token。
 
 ### 访问后台
 
@@ -100,7 +100,7 @@ npm run cf:deploy
 https://你的项目名.你的子域.workers.dev/
 ```
 
-首次打开时会显示初始化表单。填写管理员邮箱、显示名称和密码后，系统会创建首个管理员、租户、四端角色、示例工作区，并在 D1 中生成站点级 JWT 签名密钥。初始化完成后再次访问会显示登录页。
+首次打开时会显示初始化表单。填写管理员邮箱、显示名称和密码后，系统会创建首个管理员、租户、四端角色、示例工作区，并在 D1 中生成站点级登录签名密钥。初始化完成后再次访问会显示登录页。
 
 ### 升级 Cloudflare Workers
 
@@ -145,7 +145,7 @@ https://你的项目名.你的子域.workers.dev/
 
 | 模式 | 适用场景 | 身份来源 |
 | --- | --- | --- |
-| `local` | 本地开发 | `x-wenqu-dev-user` 或 `DEV_USER_EMAIL` |
+| `local` | 本地开发 | 默认测试身份，或请求头 `x-wenqu-dev-user` |
 | `standard` | 用户自托管 Cloudflare Workers | 部署后首次初始化管理员 + HttpOnly JWT Cookie |
 
 默认 `npm run build` 使用 `wrangler.toml` 生成标准 Cloudflare Workers 构建。`npm run build:standard` 保留为兼容入口，当前同样用于标准 Workers 部署。
@@ -213,18 +213,7 @@ npm run dev
 
 ### 本地测试身份
 
-本地开发默认使用 `dev@wenqu.local` 作为测试身份。若要指定自己的测试身份：
-
-```bash
-cp .env.example .env.local
-```
-
-然后修改：
-
-```dotenv
-AUTH_MODE=local
-DEV_USER_EMAIL=your-name@wenqu.local
-```
+本地开发默认使用 `dev@wenqu.local` 作为测试身份。需要模拟其他账号时，可在请求中带上 `x-wenqu-dev-user` 请求头；不需要为本地启动配置认证环境变量。
 
 ### 命令
 

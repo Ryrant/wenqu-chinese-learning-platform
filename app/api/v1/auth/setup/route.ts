@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { createSessionToken, sessionCookieName } from "../../../../lib/auth-token";
+import { loadPlatformSettings } from "../../../../lib/platform-settings";
 import { ensurePlatformSchema, ensureSiteJwtSecret, getAuthMode, isInitialSetupRequired, seedInitialWorkspace } from "../../../../lib/platform-store";
 import { createInitialAdminAccount } from "../../../../lib/standard-login";
 
@@ -16,7 +17,7 @@ function cookieValue(token: string, maxAge: number) {
 
 export async function POST(request: Request) {
   if (getAuthMode() !== "standard") return json("auth_mode_not_standard", 404);
-  const bindings = env as unknown as { DB?: D1Database; JWT_SECRET?: string; JWT_TTL_SECONDS?: string };
+  const bindings = env as unknown as { DB?: D1Database };
   if (!bindings.DB) return json("database_unavailable", 500);
   await ensurePlatformSchema(bindings.DB);
   if (!(await isInitialSetupRequired(bindings.DB))) return json("setup_closed", 409);
@@ -33,9 +34,9 @@ export async function POST(request: Request) {
   await seedInitialWorkspace({ db: bindings.DB, tenantId: `tenant_${account.id.slice("usr_".length)}`, userId: account.id, userEmail: account.email, displayName: account.displayName });
 
   const now = Math.floor(Date.now() / 1000);
-  const ttl = Number.parseInt(bindings.JWT_TTL_SECONDS ?? "604800", 10);
-  const maxAge = Number.isFinite(ttl) && ttl > 0 ? ttl : 604800;
-  const token = await createSessionToken({ email: account.email, displayName: account.displayName, iat: now, exp: now + maxAge }, await ensureSiteJwtSecret(bindings.DB, bindings.JWT_SECRET));
+  const settings = await loadPlatformSettings(bindings.DB);
+  const maxAge = settings.jwtTtlSeconds;
+  const token = await createSessionToken({ email: account.email, displayName: account.displayName, iat: now, exp: now + maxAge }, await ensureSiteJwtSecret(bindings.DB));
   return Response.json({ user: { email: account.email, displayName: account.displayName, roles: ["student", "teacher", "guardian", "admin"], mustChangePassword: false } }, {
     status: 200,
     headers: { "cache-control": "no-store", "set-cookie": cookieValue(token, maxAge) },

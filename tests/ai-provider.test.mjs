@@ -16,11 +16,10 @@ test("ai provider modules use Responses API and keep template fallback", async (
   assert.match(provider, /export type AiProvider/);
   assert.match(openai, /https:\/\/api\.openai\.com\/v1\/responses/);
   assert.match(openai, /gpt-5\.6-luna/);
-  assert.match(openai, /OPENAI_API_KEY/);
+  assert.doesNotMatch(openai, /OPENAI_API_KEY|AI_API_KEY/);
   assert.match(template, /source-grounded-template/);
   assert.match(grounding, /no_reviewed_sources/);
-  assert.match(envExample, /OPENAI_API_KEY=/);
-  assert.match(envExample, /AI_MODEL=gpt-5\.6-luna/);
+  assert.doesNotMatch(envExample, /OPENAI_API_KEY=|AI_API_KEY=|AI_MODEL=/);
 });
 
 test("knowledge search route delegates to retrieval service", async () => {
@@ -44,9 +43,14 @@ test("student and teacher generation use grounded provider chain", async () => {
   ]);
   assert.match(generate, /searchPublishedKnowledge/);
   assert.match(generate, /generateGroundedText/);
-  assert.match(generate, /OPENAI_API_KEY/);
+  assert.match(generate, /loadPlatformSettings/);
+  assert.match(generate, /aiProviderSettings/);
+  assert.doesNotMatch(generate, /OPENAI_API_KEY|AI_API_KEY|AI_MODEL/);
   assert.match(generate, /status: result\.status/);
   assert.match(actions, /generateGroundedText/);
+  assert.match(actions, /loadPlatformSettings/);
+  assert.match(actions, /aiProviderSettings/);
+  assert.doesNotMatch(actions, /OPENAI_API_KEY|AI_API_KEY|AI_MODEL/);
   assert.match(actions, /input_tokens,output_tokens/);
   assert.match(student, /no_reviewed_sources/);
   assert.match(student, /引用来源/);

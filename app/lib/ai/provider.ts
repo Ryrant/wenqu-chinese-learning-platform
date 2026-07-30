@@ -25,6 +25,6 @@ export type AiProvider = {
   generateText(input: AiGenerationInput): Promise<AiGenerationResult>;
 };
 
-export function createAiProvider(env: { OPENAI_API_KEY?: string; AI_MODEL?: string }): AiProvider {
-  return createOpenAiProvider({ apiKey: env.OPENAI_API_KEY, model: env.AI_MODEL }) ?? createTemplateProvider();
+export function createAiProvider(config: { apiKey?: string; model?: string }): AiProvider {
+  return createOpenAiProvider(config) ?? createTemplateProvider();
 }

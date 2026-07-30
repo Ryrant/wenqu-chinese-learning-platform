@@ -1,5 +1,5 @@
-import { env } from "cloudflare:workers";
 import { classAccessClause, submissionAccessClause } from "../../../lib/access-control";
+import { loadPlatformSettings, publicPlatformSettings } from "../../../lib/platform-settings";
 import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
 import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
 
@@ -32,16 +32,18 @@ export async function GET(request: Request) {
       admin ? db.prepare("SELECT u.id,u.email,u.display_name AS displayName,u.status,u.must_change_password AS mustChangePassword, group_concat(rm.role) AS roles FROM users u JOIN role_memberships rm ON rm.user_id=u.id WHERE rm.tenant_id=? GROUP BY u.id ORDER BY u.created_at DESC").bind(tenantId).all() : Promise.resolve(empty),
       admin ? db.prepare("SELECT guardian_user_id AS guardianUserId, student_user_id AS studentUserId, status, verified_at AS verifiedAt FROM guardian_student_links WHERE tenant_id=? AND status='active' ORDER BY created_at DESC").bind(tenantId).all() : Promise.resolve(empty),
     ]);
-    const config = env as unknown as Record<string, unknown>;
+    const settings = await loadPlatformSettings(db);
     return Response.json({
       workspace: { tenantId, name: "华文趣味试用学校", region: "sg", sampleData: true },
       user: { id: userId, email: userEmail, displayName, roles },
       classes: classes.results, assignments: assignments.results, submissions: submissions.results, submissionReviews: submissionReviews.results, mastery: mastery.results,
       documents: documents.results, lessonPlans: plans.results, notifications: notifications.results, consents: consents.results, audits: audits.results, invitations: invitations.results, members: members.results, guardianLinks: guardianLinks.results,
+      platformSettings: admin ? publicPlatformSettings(settings) : undefined,
       services: {
         database: { status: "available", label: "D1 业务数据" }, storage: { status: "available", label: "R2 文件存储" }, retrieval: { status: "available", label: "已发布知识片段检索" },
-        generation: config.AI_API_KEY ? { status: "configured", label: "外部模型已配置" } : { status: "template", label: "未配置外部模型，使用来源化教学模板" },
-        speech: config.SPEECH_API_KEY ? { status: "configured", label: "语音评分已配置" } : { status: "manual", label: "录音真实保存，评分转教师复核" },
+        generation: settings.openAiKey || settings.aiKey ? { status: "configured", label: `外部模型已配置：${settings.aiModel}` } : { status: "template", label: "未配置外部模型，使用来源化教学模板" },
+        speech: settings.speechKey ? { status: "configured", label: "语音评分已配置" } : { status: "manual", label: "录音真实保存，评分转教师复核" },
+        moderation: settings.moderationKey ? { status: "configured", label: "内容审核服务已配置" } : { status: "rules", label: "未配置内容审核服务，使用基础规则" },
       }, generatedAt: new Date().toISOString(),
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) { return platformApiError(error); }

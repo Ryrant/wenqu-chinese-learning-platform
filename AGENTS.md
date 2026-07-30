@@ -20,11 +20,11 @@
 
 - 本仓库只维护标准 Cloudflare Workers 自托管部署路径，不再维护平台托管专用配置。
 - 默认 `npm run build` 使用 `wrangler.toml`；`npm run build:standard` 仅作为标准 Workers 构建兼容入口保留。
-- Cloudflare Workers 部署使用 `AUTH_MODE=standard`。
+- Cloudflare Workers 部署前必须保持零变量、零密钥；`wrangler.toml` 不写 `[vars]` 或 `[secrets]` 前置要求。
 - `DB` 是 D1 binding，`CONTENT` 是 R2 binding；一键部署依赖 Cloudflare 自动 provision D1/R2，不要提交假的 `database_id` 或 `bucket_name`。
-- 标准部署不得要求用户在部署前填写管理员密码或 JWT 密钥；首次打开站点时进入首次初始化页面，创建首个管理员，并在 D1 中生成站点级 JWT 密钥。
-- `ADMIN_PASSWORD`、真实 `JWT_SECRET`、`CLOUDFLARE_API_TOKEN` 不得提交。`JWT_SECRET` 只能作为可选生产覆盖项，不得作为部署前置要求。
-- `OPENAI_API_KEY`、`AI_API_KEY` 和 `AI_MODEL` 属于可选 AI provider 配置；不得删除 AI 功能或来源化模板降级路径。
+- 标准部署首次打开站点时进入首次初始化页面，创建首个管理员，并在 D1 中生成站点级登录签名密钥。
+- 管理员密码、真实登录签名密钥、Cloudflare Token 不得提交。
+- OpenAI、通用 AI、模型名、语音评测和内容审核配置由后台“平台设置”写入 D1；不得重新引入部署前环境变量或 Secret 要求，也不得删除 AI 功能或来源化模板降级路径。
 - 应用内 `/api/v1/auth/login` 限流只在单个 Worker isolate 内尽力生效。公开部署前必须配置 Cloudflare WAF Rate Limiting，或使用 Cloudflare Access 保护应用。
 - `.github/workflows/ci.yml` 只做 PR/push 的必要校验，不读取部署 secrets，不执行 Cloudflare 部署。
 - 本仓库不维护默认 GitHub Actions 自动部署 workflow，避免上游仓库缺少用户私有 Cloudflare secrets 时持续失败；用户如需 Actions 部署，应在自己的 Fork 中自行添加。
@@ -33,6 +33,5 @@
 ## 本地开发
 
 - Node.js 版本要求为 `>=22.13.0`。
-- 本地开发可使用 `AUTH_MODE=local` 和 `DEV_USER_EMAIL`。
-- 标准登录本地预览可直接使用页面首次初始化；需要测试密钥轮换时，才在本地忽略文件或 Cloudflare 控制台覆盖 JWT secret。
+- 本地开发默认使用 local 模式和 `x-wenqu-dev-user` 请求头；标准登录本地预览可直接使用页面首次初始化。
 - `.wrangler/`、`.env*`、`node_modules/` 和构建产物不得提交。
