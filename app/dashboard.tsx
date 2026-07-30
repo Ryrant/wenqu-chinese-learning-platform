@@ -12,7 +12,7 @@ const navigation: Record<Role, string[]> = {
   student: ["学习总览", "AI 课堂", "学习任务", "成长档案"],
   teacher: ["教学总览", "来源化备课", "班级管理", "作业批阅"],
   guardian: ["孩子概览", "成长报告", "家庭任务", "授权管理"],
-  admin: ["机构总览", "内容中心", "知识检索", "权限审计"],
+  admin: ["机构总览", "内容中心", "知识检索", "成员管理", "权限审计"],
 };
 
 type Toast = { title: string; detail: string; tone: "success" | "error" } | null;
@@ -27,6 +27,9 @@ export function Dashboard() {
   const [authMode, setAuthMode] = useState<"chatgpt" | "standard" | "local" | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [noticesOpen, setNoticesOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -39,8 +42,9 @@ export function Dashboard() {
 
   async function loadAuthMode() {
     const response = await fetch("/api/v1/auth/session", { cache: "no-store" });
-    const payload = await response.json() as { authMode?: "chatgpt" | "standard" | "local" };
+    const payload = await response.json() as { authMode?: "chatgpt" | "standard" | "local"; user?: { mustChangePassword?: boolean } };
     setAuthMode(payload.authMode ?? null);
+    setMustChangePassword(payload.user?.mustChangePassword === true);
     return payload.authMode ?? null;
   }
 
@@ -102,6 +106,7 @@ export function Dashboard() {
       if (!response.ok) throw new Error(result.error ?? "登录失败");
       setPassword("");
       setLoading(true);
+      await loadAuthMode();
       await refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "登录失败");
@@ -116,6 +121,7 @@ export function Dashboard() {
       const response = await fetch("/api/v1/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("退出登录失败");
       setData(null);
+      setMustChangePassword(false);
       setAuthMode("standard");
       setError("已退出登录");
     } catch (reason) {
@@ -123,10 +129,33 @@ export function Dashboard() {
     }
   }
 
+  async function changePassword(event: React.FormEvent) {
+    event.preventDefault();
+    setLoginBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/v1/auth/change-password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword, newPassword }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) {
+        if (response.status < 500) { setCurrentPassword(""); setNewPassword(""); }
+        throw new Error(result.error ?? "修改密码失败");
+      }
+      setCurrentPassword("");
+      setNewPassword("");
+      await loadAuthMode();
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "修改密码失败");
+    } finally {
+      setLoginBusy(false);
+    }
+  }
+
   const unread = useMemo(() => data?.notifications.filter((item) => !item.read_at).length ?? 0, [data]);
   const visibleRoles = roles.filter((item) => data?.user.roles.includes(item.id));
 
   if (loading) return <main className="center-state"><div className="loader"/><h1>正在连接真实工作区…</h1><p>加载班级、任务、内容与审计记录</p></main>;
+  if (authMode === "standard" && (mustChangePassword || data?.user.mustChangePassword)) return <main className="center-state"><form className="login-card password-change-card" onSubmit={changePassword}><span className="eyebrow">首次登录安全设置</span><h1>请修改临时密码</h1><p>修改完成后才能进入工作区。</p><label>当前密码<input value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" autoComplete="current-password" required /></label><label>新密码<input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "修改中…" : "修改密码并进入工作区"}</button></form></main>;
   if ((error || !data) && authMode === "standard") return <main className="center-state"><form className="login-card" onSubmit={login}><span className="eyebrow">标准 Cloudflare 登录</span><h1>进入文趣工作区</h1><p>使用部署时配置的管理员邮箱和密码登录。</p><label>邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" required /></label><label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "登录中…" : "登录"}</button></form></main>;
   if (error || !data) return <main className="center-state"><h1>暂时无法进入工作区</h1><p>{error || "未知错误"}</p><button className="primary-button" onClick={() => { setLoading(true); refresh().catch((reason: Error) => setError(reason.message)).finally(() => setLoading(false)); }}>重新加载</button></main>;
 

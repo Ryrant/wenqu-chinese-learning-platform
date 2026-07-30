@@ -319,6 +319,27 @@ test("standard login uses account password hashes and change-password gate", asy
   assert.match(envTypes, /ADMIN_PASSWORD\?: string/);
 });
 
+test("pilot workspace UI exposes member content ai review and password change flows", async () => {
+  const [dashboard, staff, student, css, types] = await Promise.all([
+    read("app/dashboard.tsx"),
+    read("app/staff-views.tsx"),
+    read("app/student-view.tsx"),
+    read("app/globals.css"),
+    read("app/lib/platform-types.ts"),
+  ]);
+  assert.match(dashboard, /change-password/);
+  assert.match(dashboard, /mustChangePassword/);
+  assert.ok(dashboard.indexOf("password-change-card") < dashboard.indexOf("标准 Cloudflare 登录"));
+  assert.match(staff, /成员管理/);
+  assert.match(staff, /监护人绑定/);
+  assert.match(staff, /预览片段/);
+  assert.match(staff, /AI 建议/);
+  assert.match(student, /教师确认/);
+  assert.match(css, /\.member-table/);
+  assert.match(css, /\.content-preview/);
+  assert.match(types, /submissionReviews/);
+});
+
 test("repository infrastructure includes issue forms and self-hosted Cloudflare deployment docs", async () => {
   const [config, bug, feature, readme] = await Promise.all([
     read(".github/ISSUE_TEMPLATE/config.yml"),
