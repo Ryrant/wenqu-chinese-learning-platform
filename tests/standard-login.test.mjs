@@ -23,10 +23,12 @@ async function loadAuthModules() {
   };
   await compile("app/lib/auth-password.ts", "auth-password.js");
   await compile("app/lib/standard-login.ts", "standard-login.js");
+  await compile("app/lib/password-change.ts", "password-change.js");
   await compile("app/lib/password-change-state.ts", "password-change-state.js");
   return {
     modules: {
       ...await import(`${pathToFileURL(join(directory, "standard-login.js")).href}?${Date.now()}`),
+      ...await import(`${pathToFileURL(join(directory, "password-change.js")).href}?${Date.now()}`),
       ...await import(`${pathToFileURL(join(directory, "password-change-state.js")).href}?${Date.now()}`),
       ...await import(`${pathToFileURL(join(directory, "auth-password.js")).href}?${Date.now()}`),
     },
@@ -44,6 +46,13 @@ function fakeDb(account) {
         values: [],
         bind(...values) { this.values = values; return this; },
         async first() { return /FROM users/.test(query) ? state.account : null; },
+        async run() {
+          if (/UPDATE users SET password_hash/.test(query)) {
+            state.account.passwordHash = this.values[0];
+            state.account.mustChangePassword = 0;
+          }
+          return { success: true, results: [], meta: { changes: 1 } };
+        },
       };
     },
     async batch(statements) {
@@ -84,10 +93,13 @@ test("normal account login does not depend on bootstrap credentials", async () =
   } finally { await cleanup(); }
 });
 
-test("password-change gate clears after the current account state is updated", async () => {
+test("password change persists the cleared gate for the current account", async () => {
   const { modules, cleanup } = await loadAuthModules();
   try {
-    assert.equal(modules.needsPasswordChange({ mustChangePassword: true }), true);
-    assert.equal(modules.needsPasswordChange({ mustChangePassword: false }), false);
+    const db = fakeDb({ id: "usr_student", email: "student@wenqu.test", displayName: "学生", passwordHash: await modules.hashPassword("CurrentPass-1234"), mustChangePassword: 1, status: "active" });
+    assert.equal(modules.needsPasswordChange({ mustChangePassword: db.state.account.mustChangePassword === 1 }), true);
+    assert.equal(await modules.changeAccountPassword({ db, tenantId: "tenant_school", userId: "usr_student", currentPassword: "CurrentPass-1234", newPassword: "NewPass-5678" }), true);
+    assert.equal(db.state.account.mustChangePassword, 0);
+    assert.equal(modules.needsPasswordChange({ mustChangePassword: db.state.account.mustChangePassword === 1 }), false);
   } finally { await cleanup(); }
 });
