@@ -70,6 +70,15 @@ async function identity(request: Request) {
   return chatGptIdentity(request);
 }
 
+async function trySchema(db: D1Database, sql: string) {
+  try {
+    await db.prepare(sql).run();
+  } catch (error) {
+    if (error instanceof Error && /duplicate column name|already exists/i.test(error.message)) return;
+    throw error;
+  }
+}
+
 async function ensureCoreSchema(db: D1Database) {
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, region TEXT NOT NULL DEFAULT 'sg', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -112,6 +121,17 @@ async function ensureCoreSchema(db: D1Database) {
     db.prepare(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, actor_user_id TEXT NOT NULL, action TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL, detail_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS audit_tenant_created_idx ON audit_logs (tenant_id,created_at)"),
   ]);
+  for (const statement of [
+    "ALTER TABLE users ADD COLUMN password_hash TEXT",
+    "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+    "ALTER TABLE users ADD COLUMN last_login_at TEXT",
+    "ALTER TABLE role_memberships ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+    "ALTER TABLE guardian_student_links ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+    "ALTER TABLE source_documents ADD COLUMN processing_error TEXT",
+    "ALTER TABLE submissions ADD COLUMN feedback TEXT",
+    "ALTER TABLE submissions ADD COLUMN reviewed_at TEXT",
+  ]) await trySchema(db, statement);
 }
 async function ensureExtendedSchema(db: D1Database) {
   await db.batch([
@@ -121,6 +141,14 @@ async function ensureExtendedSchema(db: D1Database) {
     db.prepare("CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (tenant_id, user_id, created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL, role TEXT NOT NULL, token TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', invited_by TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS invitations_token_idx ON invitations (token)"),
+  ]);
+  await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS submission_reviews (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, submission_id TEXT NOT NULL, reviewer_user_id TEXT NOT NULL, final_score REAL, final_comment TEXT, ai_suggested_score REAL, ai_comment TEXT, weakness_tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS submission_reviews_tenant_idx ON submission_reviews (tenant_id)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS submission_reviews_submission_idx ON submission_reviews (tenant_id,submission_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS assignment_objectives (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, assignment_id TEXT NOT NULL, objective_id TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS assignment_objectives_assignment_idx ON assignment_objectives (tenant_id,assignment_id)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS assignment_objective_unique_idx ON assignment_objectives (tenant_id,assignment_id,objective_id)"),
   ]);
 }
 
