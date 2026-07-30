@@ -37,7 +37,7 @@ export async function createMember(db: D1Database, input: MemberInput) {
 
 export async function resetMemberPassword(db: D1Database, input: { tenantId: string; actorUserId: string; userId: string; temporaryPassword: string }) {
   if (input.temporaryPassword.length < 10) throw new Error("weak_password");
-  const account = await db.prepare("SELECT u.status FROM users u JOIN role_memberships rm ON rm.user_id=u.id WHERE u.id=? AND rm.tenant_id=? LIMIT 1")
+  const account = await db.prepare("SELECT u.status FROM users u JOIN role_memberships rm ON rm.user_id=u.id WHERE u.id=? AND rm.tenant_id=? AND rm.status='active' LIMIT 1")
     .bind(input.userId, input.tenantId)
     .first<{ status: string }>();
   if (!account) throw new Error("member_not_found");
@@ -63,14 +63,13 @@ export async function setMemberStatus(db: D1Database, input: { tenantId: string;
 }
 
 export async function setGuardianLinks(db: D1Database, input: { tenantId: string; actorUserId: string; guardianUserId: string; studentUserIds: string[] }) {
-  await db.prepare("DELETE FROM guardian_student_links WHERE tenant_id=? AND guardian_user_id=?")
-    .bind(input.tenantId, input.guardianUserId)
-    .run();
   const uniqueStudents = [...new Set(input.studentUserIds)].filter(Boolean);
-  if (uniqueStudents.length) {
-    await db.batch(uniqueStudents.map((studentUserId) => db.prepare("INSERT INTO guardian_student_links (tenant_id,guardian_user_id,student_user_id,verified_at,status) VALUES (?,?,?,CURRENT_TIMESTAMP,'active')")
-      .bind(input.tenantId, input.guardianUserId, studentUserId)));
-  }
+  await db.batch([
+    db.prepare("DELETE FROM guardian_student_links WHERE tenant_id=? AND guardian_user_id=?")
+      .bind(input.tenantId, input.guardianUserId),
+    ...uniqueStudents.map((studentUserId) => db.prepare("INSERT INTO guardian_student_links (tenant_id,guardian_user_id,student_user_id,verified_at,status) VALUES (?,?,?,CURRENT_TIMESTAMP,'active')")
+      .bind(input.tenantId, input.guardianUserId, studentUserId)),
+  ]);
   await db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)")
     .bind(crypto.randomUUID(), input.tenantId, input.actorUserId, "guardian_links.updated", "user", input.guardianUserId, JSON.stringify({ studentUserIds: uniqueStudents }))
     .run();
