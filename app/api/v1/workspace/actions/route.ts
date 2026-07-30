@@ -1,7 +1,10 @@
+import { env } from "cloudflare:workers";
+import { generateGroundedText } from "../../../../lib/ai/grounding";
 import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
 import { assertSubmissionReviewAccess } from "../../../../lib/access-control";
 import { publishContent } from "../../../../lib/content-processing";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
+import { searchPublishedKnowledge } from "../../../../lib/retrieval";
 
 type ActionBody = { action?: string; [key: string]: unknown };
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -89,21 +92,23 @@ export async function POST(request: Request) {
       const topic = requireText(body.topic, "topic");
       const level = text(body.level, 20) || "A2";
       const duration = Math.max(20, Math.min(number(body.duration, 40), 90));
-      const rows = await db.prepare(`SELECT k.id,k.content,d.title FROM knowledge_chunks k JOIN source_documents d ON d.id=k.source_document_id AND d.tenant_id=k.tenant_id WHERE k.tenant_id=? AND k.published=1 ORDER BY CASE WHEN k.content LIKE ? THEN 0 ELSE 1 END,k.created_at DESC LIMIT 5`).bind(tenantId, `%${topic.slice(0, 8)}%`).all<{ id: string; content: string; title: string }>();
-      if (!rows.results.length) return Response.json({ error: "no_reviewed_sources" }, { status: 422 });
+      const contextChunks = await searchPublishedKnowledge(db, { tenantId, query: topic, limit: 5 });
+      if (!contextChunks.length) return Response.json({ error: "no_reviewed_sources" }, { status: 422 });
+      const result = await generateGroundedText(
+        { purpose: "lesson", prompt: topic, contextChunks, role: "teacher", level },
+        { openAiKey: env.OPENAI_API_KEY ?? env.AI_API_KEY, model: env.AI_MODEL },
+      );
       const id = crypto.randomUUID();
+      const sessionId = crypto.randomUUID();
       const title = `《${topic}》互动课`;
       const objectives = [`能用完整句描述${topic}`, "能从人物、事物和动作组织表达", "能说明主题中的文化含义"];
-      const activities = [
-        { minutes: 6, title: "看图找线索", detail: "圈出人物、事物与动作，用词卡说短语。" },
-        { minutes: 10, title: "来源共读", detail: rows.results[0].content },
-        { minutes: Math.max(8, duration - 24), title: "同伴表达", detail: "使用目标句型完成两轮问答并互相追问。" },
-        { minutes: 8, title: "出口任务", detail: "录制 30 秒口语，教师依据完整度与准确度审核。" },
-      ];
-      const citations = rows.results.map((row) => ({ id: row.id, title: row.title, excerpt: row.content }));
+      const activities = [{ minutes: duration, title: "AI 来源化教学草稿", detail: result.text }];
+      const citations = result.citations;
       await db.prepare("INSERT INTO lesson_plans (id,tenant_id,title,topic,level,duration_minutes,objectives_json,activities_json,citations_json,status,created_by) VALUES (?,?,?,?,?,?,?,?,?,'draft',?)").bind(id, tenantId, title, topic, level, duration, JSON.stringify(objectives), JSON.stringify(activities), JSON.stringify(citations), userId).run();
-      await audit(db, tenantId, userId, "lesson_plan.generated", "lesson_plan", id, { sourceCount: citations.length, engine: "source-grounded-template" });
-      return Response.json({ id, title, topic, level, durationMinutes: duration, objectives, activities, citations, status: "draft", engine: "source-grounded-template" }, { status: 201 });
+      await db.prepare("INSERT INTO ai_sessions (id,tenant_id,user_id,purpose,provider,model,status,input_tokens,output_tokens) VALUES (?,?,?,?,?,?,?,?,?)").bind(sessionId, tenantId, userId, "lesson", result.provider, result.model, result.status, result.inputTokens, result.outputTokens).run();
+      if (citations.length) await db.batch(citations.map((item) => db.prepare("INSERT INTO citations (id,tenant_id,ai_session_id,knowledge_chunk_id,quote) VALUES (?,?,?,?,?)").bind(crypto.randomUUID(), tenantId, sessionId, item.id, item.excerpt.slice(0, 500))));
+      await audit(db, tenantId, userId, "lesson_plan.generated", "lesson_plan", id, { sourceCount: citations.length, provider: result.provider, model: result.model });
+      return Response.json({ id, title, topic, level, durationMinutes: duration, objectives, activities, citations, status: "draft", provider: result.provider, model: result.model }, { status: 201 });
     }
 
     if (action === "submit_text") {
