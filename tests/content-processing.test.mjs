@@ -10,6 +10,8 @@ test("content processing module supports txt docx and pdf without OCR", async ()
   assert.match(moduleText, /extractTxtText/);
   assert.match(moduleText, /extractDocxText/);
   assert.match(moduleText, /extractPdfText/);
+  assert.match(moduleText, /import\("pdfjs-dist\/legacy\/build\/pdf\.mjs"\)/);
+  assert.doesNotMatch(moduleText, /^import \* as pdfjs from "pdfjs-dist";$/m);
   assert.match(moduleText, /export function chunkText/);
   assert.match(moduleText, /content.length <= 1000/);
   assert.match(moduleText, /chunkIndex/);

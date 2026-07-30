@@ -1,5 +1,4 @@
 import { strFromU8, unzipSync } from "fflate";
-import * as pdfjs from "pdfjs-dist";
 
 export type ExtractedText = { text: string; kind: "txt" | "docx" | "pdf" };
 export type KnowledgeChunkInput = { id: string; tenantId: string; sourceDocumentId: string; content: string; metadataJson: string };
@@ -27,6 +26,7 @@ export async function extractDocxText(file: File): Promise<ExtractedText> {
 }
 
 export async function extractPdfText(file: File): Promise<ExtractedText> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()), disableWorker: true });
   const pdf = await loadingTask.promise;
   const pages: string[] = [];
