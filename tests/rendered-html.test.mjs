@@ -11,6 +11,22 @@ const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const execFileAsync = promisify(execFile);
 
+test("pilot readiness schema includes account content and assessment state", async () => {
+  const [schema, migration, store] = await Promise.all([
+    read("db/schema.ts"),
+    read("drizzle/0002_pilot_school_readiness.sql"),
+    read("app/lib/platform-store.ts"),
+  ]);
+  assert.match(schema, /passwordHash: text\("password_hash"\)/);
+  assert.match(schema, /mustChangePassword: integer\("must_change_password"/);
+  assert.match(schema, /submissionReviews/);
+  assert.match(schema, /assignmentObjectives/);
+  assert.match(schema, /processingError: text\("processing_error"\)/);
+  assert.match(migration, /ALTER TABLE `users` ADD `password_hash` text/);
+  assert.match(migration, /CREATE TABLE `submission_reviews`/);
+  assert.match(store, /CREATE TABLE IF NOT EXISTS submission_reviews/);
+});
+
 test("all four role workspaces expose real operations instead of timer shells", async () => {
   const [dashboard, student, staff] = await Promise.all([read("app/dashboard.tsx"), read("app/student-view.tsx"), read("app/staff-views.tsx")]);
   assert.match(dashboard, /student.*teacher.*guardian.*admin/s);
