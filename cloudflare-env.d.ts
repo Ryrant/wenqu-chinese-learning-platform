@@ -19,7 +19,7 @@ declare module "cloudflare:workers" {
   export const env: {
     DB: D1Database;
     CONTENT: R2Bucket;
-    AUTH_MODE?: "chatgpt" | "standard" | "local";
+    AUTH_MODE?: "standard" | "local";
     ADMIN_EMAIL?: string;
     ADMIN_DISPLAY_NAME?: string;
     ADMIN_PASSWORD?: string;

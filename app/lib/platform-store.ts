@@ -2,32 +2,21 @@ import { env } from "cloudflare:workers";
 import { sessionCookieName, verifySessionToken } from "./auth-token";
 
 export type PlatformRole = "student" | "teacher" | "guardian" | "admin";
-export type AuthMode = "chatgpt" | "standard" | "local";
+export type AuthMode = "standard" | "local";
 export type PlatformContext = { db: D1Database; tenantId: string; userId: string; userEmail: string; displayName: string; roles: PlatformRole[]; mustChangePassword?: boolean };
 const ROLE_SET = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
 let schemaReady: Promise<void> | null = null;
 
 export function getAuthMode(): AuthMode {
   const configured = (env as unknown as { AUTH_MODE?: string }).AUTH_MODE?.trim().toLowerCase();
-  if (configured === "chatgpt" || configured === "standard" || configured === "local") return configured;
-  return process.env.NODE_ENV === "development" ? "local" : "chatgpt";
+  if (configured === "standard" || configured === "local") return configured;
+  return process.env.NODE_ENV === "development" ? "local" : "standard";
 }
 
 function idPart(value: string) {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) { hash ^= value.charCodeAt(index); hash = Math.imul(hash, 16777619); }
   return (hash >>> 0).toString(36);
-}
-
-function chatGptIdentity(request: Request) {
-  const email = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase();
-  if (!email) throw new Error("authentication_required");
-  let displayName = email.split("@")[0];
-  const encoded = request.headers.get("oai-authenticated-user-full-name");
-  if (encoded && request.headers.get("oai-authenticated-user-full-name-encoding") === "percent-encoded-utf-8") {
-    try { displayName = decodeURIComponent(encoded); } catch { /* fall back to email prefix */ }
-  }
-  return { email, displayName };
 }
 
 function localIdentity(request: Request) {
@@ -66,8 +55,7 @@ async function standardIdentity(request: Request) {
 async function identity(request: Request) {
   const mode = getAuthMode();
   if (mode === "standard") return standardIdentity(request);
-  if (mode === "local") return localIdentity(request);
-  return chatGptIdentity(request);
+  return localIdentity(request);
 }
 
 async function trySchema(db: D1Database, sql: string) {
