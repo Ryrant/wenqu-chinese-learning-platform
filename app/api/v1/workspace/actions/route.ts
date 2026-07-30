@@ -1,5 +1,6 @@
 import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
 import { assertSubmissionReviewAccess } from "../../../../lib/access-control";
+import { publishContent } from "../../../../lib/content-processing";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 
 type ActionBody = { action?: string; [key: string]: unknown };
@@ -157,13 +158,19 @@ export async function POST(request: Request) {
 
     if (action === "review_content") {
       const id = requireText(body.id, "document_id");
-      const next = body.status === "published" ? "published" : "rejected";
-      const result = next === "published"
-        ? await db.prepare("UPDATE source_documents SET processing_status='published',rights_status='approved' WHERE id=? AND tenant_id=? AND processing_status='processed'").bind(id, tenantId).run()
-        : await db.prepare("UPDATE source_documents SET processing_status='rejected',rights_status='pending' WHERE id=? AND tenant_id=?").bind(id, tenantId).run();
-      if (!result.meta.changes) return Response.json({ error: "document_not_found" }, { status: 404 });
-      if (next === "published") await db.prepare("UPDATE knowledge_chunks SET published=1 WHERE tenant_id=? AND source_document_id=?").bind(tenantId, id).run();
-      else await db.prepare("UPDATE knowledge_chunks SET published=0 WHERE tenant_id=? AND source_document_id=?").bind(tenantId, id).run();
+      if (body.status !== "published" && body.status !== "rejected") return Response.json({ error: "invalid_content_review_status" }, { status: 400 });
+      const next = body.status;
+      const document = await db.prepare("SELECT processing_status AS processingStatus FROM source_documents WHERE id=? AND tenant_id=?").bind(id, tenantId).first<{ processingStatus: string }>();
+      if (!document) return Response.json({ error: "document_not_found" }, { status: 404 });
+      if (next === "published") {
+        if (document.processingStatus !== "processed") return Response.json({ error: "document_not_publishable" }, { status: 409 });
+        await publishContent(db, { tenantId, sourceDocumentId: id });
+      } else {
+        await db.batch([
+          db.prepare("UPDATE source_documents SET processing_status='rejected',rights_status='pending' WHERE id=? AND tenant_id=?").bind(id, tenantId),
+          db.prepare("UPDATE knowledge_chunks SET published=0 WHERE tenant_id=? AND source_document_id=?").bind(tenantId, id),
+        ]);
+      }
       await audit(db, tenantId, userId, "source.reviewed", "source_document", id, { status: next });
       return Response.json({ id, status: next });
     }
