@@ -1,4 +1,5 @@
 import { getAuthMode, platformContext } from "../../../../lib/platform-store";
+import { sessionPasswordChangeState } from "../../../../lib/password-change-state";
 
 export async function GET(request: Request) {
   const authMode = getAuthMode();
@@ -7,7 +8,7 @@ export async function GET(request: Request) {
     return Response.json({
       authenticated: true,
       authMode,
-      user: { email: context.userEmail, displayName: context.displayName, roles: context.roles },
+      user: { email: context.userEmail, displayName: context.displayName, roles: context.roles, ...sessionPasswordChangeState(context) },
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unexpected_error";

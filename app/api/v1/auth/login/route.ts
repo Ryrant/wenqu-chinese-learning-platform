@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createSessionToken, sessionCookieName } from "../../../../lib/auth-token";
 import { getAuthMode } from "../../../../lib/platform-store";
+import { authenticateStandardAccount } from "../../../../lib/standard-login";
 
 const LOGIN_ATTEMPT_LIMIT = 5;
 const LOGIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
@@ -53,8 +54,8 @@ function cookieValue(token: string, maxAge: number) {
 
 export async function POST(request: Request) {
   if (getAuthMode() !== "standard") return json("auth_mode_not_standard", 404);
-  const bindings = env as unknown as { ADMIN_EMAIL?: string; ADMIN_DISPLAY_NAME?: string; ADMIN_PASSWORD?: string; JWT_SECRET?: string; JWT_TTL_SECONDS?: string };
-  if (!bindings.ADMIN_EMAIL || !bindings.ADMIN_PASSWORD || !bindings.JWT_SECRET) return json("authentication_config_missing", 500);
+  const bindings = env as unknown as { DB?: D1Database; ADMIN_EMAIL?: string; ADMIN_DISPLAY_NAME?: string; ADMIN_PASSWORD?: string; JWT_SECRET?: string; JWT_TTL_SECONDS?: string };
+  if (!bindings.DB || !bindings.JWT_SECRET) return json("authentication_config_missing", 500);
   const key = clientKey(request);
   const nowMilliseconds = Date.now();
   const retryAfterSeconds = retryAfter(key, nowMilliseconds);
@@ -62,17 +63,27 @@ export async function POST(request: Request) {
   const payload = await request.json().catch(() => null) as { email?: unknown; password?: unknown } | null;
   const email = typeof payload?.email === "string" ? payload.email.trim().toLowerCase() : "";
   const password = typeof payload?.password === "string" ? payload.password : "";
-  if (email !== bindings.ADMIN_EMAIL.trim().toLowerCase() || password !== bindings.ADMIN_PASSWORD) {
+  const account = await authenticateStandardAccount({
+    db: bindings.DB,
+    email,
+    password,
+    adminEmail: bindings.ADMIN_EMAIL,
+    adminDisplayName: bindings.ADMIN_DISPLAY_NAME,
+    adminPassword: bindings.ADMIN_PASSWORD,
+  });
+  if (!account) {
     recordFailedLogin(key, nowMilliseconds);
     return json("invalid_credentials", 401);
   }
   loginAttempts.delete(key);
+  await bindings.DB.prepare("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?").bind(account.id).run();
   const now = Math.floor(Date.now() / 1000);
   const ttl = Number.parseInt(bindings.JWT_TTL_SECONDS ?? "604800", 10);
   const maxAge = Number.isFinite(ttl) && ttl > 0 ? ttl : 604800;
-  const displayName = bindings.ADMIN_DISPLAY_NAME?.trim() || email.split("@")[0];
-  const token = await createSessionToken({ email, displayName, iat: now, exp: now + maxAge }, bindings.JWT_SECRET);
-  return Response.json({ user: { email, displayName } }, {
+  const displayName = account.displayName;
+  const mustChangePassword = account.mustChangePassword === 1;
+  const token = await createSessionToken({ email: account.email, displayName, iat: now, exp: now + maxAge }, bindings.JWT_SECRET);
+  return Response.json({ user: { email: account.email, displayName, mustChangePassword } }, {
     status: 200,
     headers: { "cache-control": "no-store", "set-cookie": cookieValue(token, maxAge) },
   });

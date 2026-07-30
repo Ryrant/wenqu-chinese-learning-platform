@@ -16,6 +16,10 @@ export const users = sqliteTable("users", {
   email: text("email").notNull(),
   displayName: text("display_name").notNull(),
   locale: text("locale").notNull().default("zh-CN"),
+  passwordHash: text("password_hash"),
+  mustChangePassword: integer("must_change_password", { mode: "boolean" }).notNull().default(false),
+  status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
+  lastLoginAt: text("last_login_at"),
   createdAt: createdAt(),
 }, (table) => [uniqueIndex("users_email_idx").on(table.email)]);
 
@@ -24,11 +28,12 @@ export const roleMemberships = sqliteTable("role_memberships", {
   tenantId: text("tenant_id").notNull(),
   userId: text("user_id").notNull(),
   role: text("role", { enum: ["student", "teacher", "guardian", "admin", "reviewer"] }).notNull(),
+  status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
   createdAt: createdAt(),
 }, (table) => [index("memberships_tenant_idx").on(table.tenantId), uniqueIndex("membership_unique_idx").on(table.tenantId, table.userId, table.role)]);
 
 export const guardianStudentLinks = sqliteTable("guardian_student_links", {
-  id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), guardianUserId: text("guardian_user_id").notNull(), studentUserId: text("student_user_id").notNull(), verifiedAt: text("verified_at"), createdAt: createdAt(),
+  id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), guardianUserId: text("guardian_user_id").notNull(), studentUserId: text("student_user_id").notNull(), verifiedAt: text("verified_at"), status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"), createdAt: createdAt(),
 }, (table) => [index("guardian_links_tenant_idx").on(table.tenantId)]);
 
 export const classes = sqliteTable("classes", {
@@ -48,15 +53,44 @@ export const assignments = sqliteTable("assignments", {
 }, (table) => [index("assignments_tenant_idx").on(table.tenantId), index("assignments_class_idx").on(table.classId)]);
 
 export const submissions = sqliteTable("submissions", {
-  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), assignmentId: text("assignment_id").notNull(), studentUserId: text("student_user_id").notNull(), textAnswer: text("text_answer"), assetKey: text("asset_key"), score: real("score"), confidence: real("confidence"), reviewStatus: text("review_status").notNull().default("auto"), submittedAt: createdAt(),
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), assignmentId: text("assignment_id").notNull(), studentUserId: text("student_user_id").notNull(), textAnswer: text("text_answer"), assetKey: text("asset_key"), score: real("score"), confidence: real("confidence"), reviewStatus: text("review_status").notNull().default("auto"), feedback: text("feedback"), reviewedAt: text("reviewed_at"), submittedAt: createdAt(),
 }, (table) => [index("submissions_tenant_idx").on(table.tenantId), index("submissions_assignment_idx").on(table.assignmentId)]);
+
+export const submissionReviews = sqliteTable("submission_reviews", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  submissionId: text("submission_id").notNull(),
+  reviewerUserId: text("reviewer_user_id").notNull(),
+  finalScore: real("final_score"),
+  finalComment: text("final_comment"),
+  aiSuggestedScore: real("ai_suggested_score"),
+  aiComment: text("ai_comment"),
+  weaknessTagsJson: text("weakness_tags_json").notNull().default("[]"),
+  status: text("status", { enum: ["ai_suggested", "confirmed"] }).notNull(),
+  createdAt: createdAt(),
+}, (table) => [
+  index("submission_reviews_tenant_idx").on(table.tenantId),
+  index("submission_reviews_submission_idx").on(table.tenantId, table.submissionId),
+]);
+
+export const assignmentObjectives = sqliteTable("assignment_objectives", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tenantId: text("tenant_id").notNull(),
+  assignmentId: text("assignment_id").notNull(),
+  objectiveId: text("objective_id").notNull(),
+  weight: real("weight").notNull().default(1),
+  createdAt: createdAt(),
+}, (table) => [
+  index("assignment_objectives_assignment_idx").on(table.tenantId, table.assignmentId),
+  uniqueIndex("assignment_objective_unique_idx").on(table.tenantId, table.assignmentId, table.objectiveId),
+]);
 
 export const masterySnapshots = sqliteTable("mastery_snapshots", {
   id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), studentUserId: text("student_user_id").notNull(), objectiveId: text("objective_id").notNull(), mastery: real("mastery").notNull(), evidenceCount: integer("evidence_count").notNull().default(0), measuredAt: createdAt(),
 }, (table) => [index("mastery_student_idx").on(table.tenantId, table.studentUserId)]);
 
 export const sourceDocuments = sqliteTable("source_documents", {
-  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), objectKey: text("object_key"), mediaType: text("media_type").notNull(), rightsStatus: text("rights_status").notNull().default("pending"), processingStatus: text("processing_status").notNull().default("uploaded"), version: integer("version").notNull().default(1), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), objectKey: text("object_key"), mediaType: text("media_type").notNull(), rightsStatus: text("rights_status").notNull().default("pending"), processingStatus: text("processing_status").notNull().default("uploaded"), processingError: text("processing_error"), version: integer("version").notNull().default(1), createdBy: text("created_by").notNull(), createdAt: createdAt(),
 }, (table) => [index("source_documents_tenant_idx").on(table.tenantId)]);
 
 export const knowledgeChunks = sqliteTable("knowledge_chunks", {

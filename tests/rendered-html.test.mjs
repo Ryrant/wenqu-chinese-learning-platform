@@ -11,6 +11,22 @@ const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const execFileAsync = promisify(execFile);
 
+test("pilot readiness schema includes account content and assessment state", async () => {
+  const [schema, migration, store] = await Promise.all([
+    read("db/schema.ts"),
+    read("drizzle/0002_pilot_school_readiness.sql"),
+    read("app/lib/platform-store.ts"),
+  ]);
+  assert.match(schema, /passwordHash: text\("password_hash"\)/);
+  assert.match(schema, /mustChangePassword: integer\("must_change_password"/);
+  assert.match(schema, /submissionReviews/);
+  assert.match(schema, /assignmentObjectives/);
+  assert.match(schema, /processingError: text\("processing_error"\)/);
+  assert.match(migration, /ALTER TABLE `users` ADD `password_hash` text/);
+  assert.match(migration, /CREATE TABLE `submission_reviews`/);
+  assert.match(store, /CREATE TABLE IF NOT EXISTS submission_reviews/);
+});
+
 test("all four role workspaces expose real operations instead of timer shells", async () => {
   const [dashboard, student, staff] = await Promise.all([read("app/dashboard.tsx"), read("app/student-view.tsx"), read("app/staff-views.tsx")]);
   assert.match(dashboard, /student.*teacher.*guardian.*admin/s);
@@ -42,14 +58,20 @@ test("defines tenant-scoped durable data, migrations and production bindings", a
 });
 
 test("versioned APIs enforce tenant scope, honest provider state and review fallbacks", async () => {
-  const [generate, search, upload, speech, actions, health] = await Promise.all([
-    read("app/api/v1/ai/generate/route.ts"), read("app/api/v1/knowledge/search/route.ts"), read("app/api/v1/content/upload/route.ts"), read("app/api/v1/speech/submissions/route.ts"), read("app/api/v1/workspace/actions/route.ts"), read("app/api/v1/health/route.ts"),
+  const [generate, search, upload, speech, actions, health, contentProcessing] = await Promise.all([
+    read("app/api/v1/ai/generate/route.ts"), read("app/api/v1/knowledge/search/route.ts"), read("app/api/v1/content/upload/route.ts"), read("app/api/v1/speech/submissions/route.ts"), read("app/api/v1/workspace/actions/route.ts"), read("app/api/v1/health/route.ts"), read("app/lib/content-processing.ts"),
   ]);
-  assert.match(generate, /text\/event-stream/); assert.match(generate, /source-grounded-template/); assert.match(generate, /citations/);
+  assert.match(generate, /text\/event-stream/); assert.match(generate, /generateGroundedText/); assert.match(generate, /citations/);
   assert.match(search, /tenant_id=\?/); assert.match(search, /processing_status='published'/);
   assert.match(upload, /bucket\.put/); assert.match(upload, /rightsStatus/);
+  assert.match(upload, /source\.processed/); assert.match(upload, /processing_error/);
   assert.match(speech, /human_review/); assert.match(speech, /R2Bucket|CONTENT/);
   assert.match(actions, /WHERE id=\? AND tenant_id=\?/); assert.match(actions, /audit_logs/);
+  assert.match(contentProcessing, /knowledge_chunks SET published=1/); assert.match(contentProcessing, /processing_status='processed'/);
+  assert.match(actions, /invalid_content_review_status/);
+  assert.match(actions, /body\.status !== "published" && body\.status !== "rejected"/);
+  assert.match(actions, /await publishContent\(db, \{ tenantId, sourceDocumentId: id \}\)/);
+  assert.match(actions, /await db\.batch\(\[/);
   assert.match(health, /not_configured_manual_review/); assert.doesNotMatch(health, /99\.9|healthy/);
   await access(new URL("dist/server/index.js", root));
 });
@@ -270,6 +292,71 @@ test("login has best-effort throttling and malformed cookies fail closed", async
   assert.match(store, /try \{[\s\S]*decodeURIComponent[\s\S]*\} catch \{[\s\S]*return "";/);
 });
 
+test("standard login uses account password hashes and change-password gate", async () => {
+  const [login, session, changePassword, passwordChange, passwordChangeState, workspace, store, standardLogin, envTypes] = await Promise.all([
+    read("app/api/v1/auth/login/route.ts"),
+    read("app/api/v1/auth/session/route.ts"),
+    read("app/api/v1/auth/change-password/route.ts"),
+    read("app/lib/password-change.ts"),
+    read("app/lib/password-change-state.ts"),
+    read("app/api/v1/workspace/route.ts"),
+    read("app/lib/platform-store.ts"),
+    read("app/lib/standard-login.ts"),
+    read("cloudflare-env.d.ts"),
+  ]);
+  assert.match(login, /authenticateStandardAccount/);
+  assert.match(standardLogin, /verifyPassword/);
+  assert.match(standardLogin, /must_change_password AS mustChangePassword/);
+  assert.match(standardLogin, /u\.status AS status/);
+  assert.doesNotMatch(login, /password !== bindings\.ADMIN_PASSWORD/);
+  assert.match(session, /sessionPasswordChangeState/);
+  assert.match(passwordChangeState, /mustChangePassword/);
+  assert.match(changePassword, /changeAccountPassword/);
+  assert.match(passwordChange, /hashPassword/);
+  assert.match(passwordChange, /must_change_password=0/);
+  assert.match(workspace, /workspacePasswordChangeGate/);
+  assert.match(store, /mustChangePassword/);
+  assert.match(envTypes, /ADMIN_PASSWORD\?: string/);
+});
+
+test("pilot workspace UI exposes member content ai review and password change flows", async () => {
+  const [dashboard, staff, student, css, types, workspaceRoute] = await Promise.all([
+    read("app/dashboard.tsx"),
+    read("app/staff-views.tsx"),
+    read("app/student-view.tsx"),
+    read("app/globals.css"),
+    read("app/lib/platform-types.ts"),
+    read("app/api/v1/workspace/route.ts"),
+  ]);
+  assert.match(dashboard, /change-password/);
+  assert.match(dashboard, /mustChangePassword/);
+  assert.ok(dashboard.indexOf("password-change-card") < dashboard.indexOf("标准 Cloudflare 登录"));
+  assert.match(staff, /成员管理/);
+  assert.match(staff, /监护人绑定/);
+  assert.match(staff, /预览片段/);
+  assert.match(staff, /处理失败/);
+  assert.match(staff, /processing_status==="processed"/);
+  assert.match(staff, /AI 建议/);
+  assert.match(student, /教师确认/);
+  assert.match(css, /\.member-table/);
+  assert.match(css, /\.content-preview/);
+  assert.match(types, /submissionReviews/);
+  assert.match(workspaceRoute, /admin \|\| roles\.includes\("teacher"\)/);
+  assert.match(workspaceRoute, /submissionReviewsQuery = \(admin \|\| roles\.includes\("teacher"\)\)/);
+});
+
+test("README documents pilot workflow without exposing secrets", async () => {
+  const [readme, envExample] = await Promise.all([read("README.md"), read(".env.example")]);
+  assert.match(readme, /成员账号/);
+  assert.match(readme, /首次登录修改临时密码/);
+  assert.match(readme, /PDF\/DOCX\/TXT/);
+  assert.match(readme, /AI 辅助批阅/);
+  assert.match(readme, /教师确认/);
+  assert.match(envExample, /OPENAI_API_KEY=/);
+  assert.match(envExample, /AI_MODEL=gpt-5\.6-luna/);
+  assert.doesNotMatch(`${readme}\n${envExample}`, /sk-|password123|JWT_SECRET=.{12,}/);
+});
+
 test("repository infrastructure includes issue forms and self-hosted Cloudflare deployment docs", async () => {
   const [config, bug, feature, readme] = await Promise.all([
     read(".github/ISSUE_TEMPLATE/config.yml"),
@@ -298,7 +385,8 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   const usageIndex = readme.indexOf("## 📖 使用说明");
   const localDevIndex = readme.indexOf("## 👨‍💻 本地开发");
   assert.ok(quickStartIndex >= 0 && deployIndex > quickStartIndex && usageIndex > deployIndex);
-  assert.match(readme.slice(usageIndex), /当前版本为 demo，平台内部功能使用说明待补充。/);
+  assert.match(readme.slice(usageIndex, localDevIndex), /机构管理员/);
+  assert.match(readme.slice(usageIndex, localDevIndex), /教师确认/);
   assert.ok(localDevIndex > usageIndex);
   assert.match(readme.slice(localDevIndex), /git clone https:\/\/github\.com\/Ryrant\/wenqu-chinese-learning-platform\.git/);
   assert.match(readme.slice(localDevIndex), /npm ci/);
