@@ -21,8 +21,8 @@
 - 本仓库只维护标准 Cloudflare Workers 自托管部署路径，不再维护平台托管专用配置。
 - 默认 `npm run build` 使用 `wrangler.toml`；`npm run build:standard` 仅作为标准 Workers 构建兼容入口保留。
 - Cloudflare Workers 部署使用 `AUTH_MODE=standard`。
-- `DB` 是 D1 binding，`CONTENT` 是 R2 binding。
-- `ADMIN_PASSWORD`、`JWT_SECRET`、`CLOUDFLARE_API_TOKEN`、真实 D1 database id 和真实 R2 bucket 名称不得提交。
+- `DB` 是 D1 binding，`CONTENT` 是 R2 binding；一键部署依赖 Cloudflare 自动 provision D1/R2，不要提交假的 `database_id` 或 `bucket_name`。
+- `ADMIN_PASSWORD`、`JWT_SECRET`、`CLOUDFLARE_API_TOKEN` 不得提交。
 - `OPENAI_API_KEY`、`AI_API_KEY` 和 `AI_MODEL` 属于可选 AI provider 配置；不得删除 AI 功能或来源化模板降级路径。
 - 应用内 `/api/v1/auth/login` 限流只在单个 Worker isolate 内尽力生效。公开部署前必须配置 Cloudflare WAF Rate Limiting，或使用 Cloudflare Access 保护应用。
 - `.github/workflows/ci.yml` 只做 PR/push 的必要校验，不读取部署 secrets，不执行 Cloudflare 部署。

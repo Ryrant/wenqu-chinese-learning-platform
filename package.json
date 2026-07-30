@@ -11,11 +11,12 @@
     "build": "vinext build",
     "build:standard": "node scripts/build-standard.mjs",
     "start": "vinext start",
+    "deploy": "wrangler deploy",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .wrangler-dry-run",
     "db:generate": "drizzle-kit generate",
-    "cf:preview": "npm run build:standard && npx wrangler dev",
-    "cf:deploy": "npm run build:standard && npx wrangler deploy"
+    "cf:preview": "npm run build && npx wrangler dev",
+    "cf:deploy": "npm run build && npm run deploy"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

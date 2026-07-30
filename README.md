@@ -51,7 +51,7 @@
 7. Deploy command 填写：
 
    ```bash
-   npx wrangler deploy --keep-vars
+   npx wrangler deploy
    ```
 
 8. 在 Cloudflare 项目的 **Settings** → **Variables and Secrets** 中配置：
@@ -67,7 +67,7 @@
    | `SPEECH_API_KEY` | Secret，可选 | 语音评测服务密钥；不填时转人工复核 |
    | `MODERATION_API_KEY` | Secret，可选 | 内容审核服务密钥；不填时使用基础规则 |
 
-9. 在 Cloudflare 项目绑定中确认：
+9. Cloudflare 会根据 `wrangler.toml` 自动创建并绑定 D1/R2。部署后在项目绑定中确认：
 
    - D1 binding：`DB`
    - R2 binding：`CONTENT`
@@ -83,10 +83,12 @@
 一键部署适合快速试用。部署过程中或部署完成后，请在 Cloudflare 控制台确认：
 
 - Build command：`npm run build`
-- Deploy command：`npx wrangler deploy --keep-vars`
+- Deploy command：`npx wrangler deploy`
 - D1 binding：`DB`
 - R2 binding：`CONTENT`
 - 必填变量和密钥：`AUTH_MODE=standard`、`ADMIN_EMAIL`、`ADMIN_PASSWORD`、`JWT_SECRET`
+
+D1/R2 会在一键部署流程中自动创建，不需要手动填写 D1 database ID 或 R2 bucket 名称。
 
 一键部署后续同步更新不如 GitHub 仓库连接方式方便；长期使用建议迁移到方式一。
 
@@ -100,7 +102,7 @@ npx wrangler login
 npm run cf:deploy
 ```
 
-正式部署前请先在 Cloudflare 中创建 D1/R2，并把 `wrangler.toml` 中的占位值替换为你自己的资源名称和 ID。不要提交真实资源 ID、密码或密钥。
+本地 Wrangler 部署同样使用 `wrangler.toml` 中的 `DB` / `CONTENT` 绑定。首次部署时 Wrangler 会为缺少资源 ID 或 bucket 名的绑定自动创建 D1/R2；不要提交密码、JWT 密钥或 Cloudflare Token。
 
 ### 访问后台
 
@@ -164,14 +166,14 @@ https://你的项目名.你的子域.workers.dev/
 
 生产运行需要以下 Cloudflare 绑定：
 
-- `DB`：D1 数据库
-- `CONTENT`：R2 Bucket
+- `DB`：D1 数据库 binding，一键部署或首次 Wrangler 部署会自动创建默认数据库
+- `CONTENT`：R2 Bucket binding，一键部署或首次 Wrangler 部署会自动创建默认 Bucket
 
 基础表会在运行时进行幂等校验，正式数据库变更仍应通过 `drizzle/` 中的迁移文件管理。
 
 ### 安全注意事项
 
-- 不要提交 `.env.local`、真实 API Key、学生信息、Cloudflare Token、D1 ID、R2 Bucket 名称、管理员密码或 JWT 密钥。
+- 不要提交 `.env.local`、真实 API Key、学生信息、Cloudflare Token、管理员密码或 JWT 密钥。
 - `/api/v1/auth/login` 内置的是 Worker isolate 内的尽力限流。公开访问前，建议在 Cloudflare WAF 中对登录接口配置 Rate Limiting，或使用 Cloudflare Access 保护应用。
 - 学生数据、作业、音频和教材文件会存入你自己的 D1/R2，请按当地未成年人数据保护要求管理访问权限。
 
@@ -196,7 +198,7 @@ wenqu-chinese-learning-platform/
 ├── drizzle/                   # 数据库迁移
 ├── worker/                    # Cloudflare Worker 入口
 ├── public/                    # 静态资源
-├── scripts/                   # 标准 Cloudflare 构建与配置渲染脚本
+├── scripts/                   # 标准 Cloudflare 构建辅助脚本
 ├── tests/                     # 自动化回归测试
 ├── .github/ISSUE_TEMPLATE/    # GitHub Issue 表单
 └── wrangler.toml              # 标准 Cloudflare Workers 自托管配置
