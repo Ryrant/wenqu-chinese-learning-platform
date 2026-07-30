@@ -1,5 +1,5 @@
 const encoder = new TextEncoder();
-const iterations = 150_000;
+const iterations = 100_000;
 const keyLengthBits = 256;
 
 function base64UrlEncode(bytes: Uint8Array) {

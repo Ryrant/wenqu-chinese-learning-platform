@@ -19,14 +19,21 @@ assert.deepEqual(errors, []);
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled.outputText).toString("base64")}`;
 const { hashPassword, verifyPassword } = await import(moduleUrl);
 
+test("password hashing stays within Cloudflare Workers PBKDF2 iteration limit", () => {
+  const match = source.match(/const iterations = ([\d_]+);/);
+  assert.ok(match, "iterations constant should be explicit");
+  const iterations = Number(match[1].replaceAll("_", ""));
+  assert.ok(iterations <= 100000, "Cloudflare Workers rejects PBKDF2 iteration counts above 100000");
+});
+
 test("password hashes verify the original password and reject another password", async () => {
   const hash = await hashPassword("TempPass-1234", new Uint8Array(16).fill(7));
-  assert.match(hash, /^pbkdf2-sha256\$150000\$/);
+  assert.match(hash, /^pbkdf2-sha256\$100000\$/);
   assert.equal(await verifyPassword("TempPass-1234", hash), true);
   assert.equal(await verifyPassword("wrong-password", hash), false);
 });
 
 test("malformed password hashes fail closed", async () => {
   assert.equal(await verifyPassword("TempPass-1234", "not-a-valid-hash"), false);
-  assert.equal(await verifyPassword("TempPass-1234", "pbkdf2-sha256$150000$bad$bad"), false);
+  assert.equal(await verifyPassword("TempPass-1234", "pbkdf2-sha256$100000$bad$bad"), false);
 });
