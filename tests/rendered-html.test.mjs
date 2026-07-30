@@ -287,11 +287,13 @@ test("login has best-effort throttling and malformed cookies fail closed", async
 });
 
 test("standard login uses account password hashes and change-password gate", async () => {
-  const [login, session, changePassword, passwordChange, store, standardLogin, envTypes] = await Promise.all([
+  const [login, session, changePassword, passwordChange, passwordChangeState, workspace, store, standardLogin, envTypes] = await Promise.all([
     read("app/api/v1/auth/login/route.ts"),
     read("app/api/v1/auth/session/route.ts"),
     read("app/api/v1/auth/change-password/route.ts"),
     read("app/lib/password-change.ts"),
+    read("app/lib/password-change-state.ts"),
+    read("app/api/v1/workspace/route.ts"),
     read("app/lib/platform-store.ts"),
     read("app/lib/standard-login.ts"),
     read("cloudflare-env.d.ts"),
@@ -301,10 +303,12 @@ test("standard login uses account password hashes and change-password gate", asy
   assert.match(standardLogin, /must_change_password AS mustChangePassword/);
   assert.match(standardLogin, /u\.status AS status/);
   assert.doesNotMatch(login, /password !== bindings\.ADMIN_PASSWORD/);
-  assert.match(session, /mustChangePassword/);
+  assert.match(session, /sessionPasswordChangeState/);
+  assert.match(passwordChangeState, /mustChangePassword/);
   assert.match(changePassword, /changeAccountPassword/);
   assert.match(passwordChange, /hashPassword/);
   assert.match(passwordChange, /must_change_password=0/);
+  assert.match(workspace, /workspacePasswordChangeGate/);
   assert.match(store, /mustChangePassword/);
   assert.match(envTypes, /ADMIN_PASSWORD\?: string/);
 });
