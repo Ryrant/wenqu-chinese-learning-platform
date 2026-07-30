@@ -320,12 +320,13 @@ test("standard login uses account password hashes and change-password gate", asy
 });
 
 test("pilot workspace UI exposes member content ai review and password change flows", async () => {
-  const [dashboard, staff, student, css, types] = await Promise.all([
+  const [dashboard, staff, student, css, types, workspaceRoute] = await Promise.all([
     read("app/dashboard.tsx"),
     read("app/staff-views.tsx"),
     read("app/student-view.tsx"),
     read("app/globals.css"),
     read("app/lib/platform-types.ts"),
+    read("app/api/v1/workspace/route.ts"),
   ]);
   assert.match(dashboard, /change-password/);
   assert.match(dashboard, /mustChangePassword/);
@@ -333,11 +334,15 @@ test("pilot workspace UI exposes member content ai review and password change fl
   assert.match(staff, /成员管理/);
   assert.match(staff, /监护人绑定/);
   assert.match(staff, /预览片段/);
+  assert.match(staff, /处理失败/);
+  assert.match(staff, /processing_status==="processed"/);
   assert.match(staff, /AI 建议/);
   assert.match(student, /教师确认/);
   assert.match(css, /\.member-table/);
   assert.match(css, /\.content-preview/);
   assert.match(types, /submissionReviews/);
+  assert.match(workspaceRoute, /admin \|\| roles\.includes\("teacher"\)/);
+  assert.match(workspaceRoute, /submissionReviewsQuery = \(admin \|\| roles\.includes\("teacher"\)\)/);
 });
 
 test("repository infrastructure includes issue forms and self-hosted Cloudflare deployment docs", async () => {
