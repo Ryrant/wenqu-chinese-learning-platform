@@ -15,12 +15,17 @@ const transpiled = ts.transpileModule(executableSource, {
 });
 assert.deepEqual((transpiled.diagnostics ?? []).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error), []);
 const membershipService = await import(`data:text/javascript;base64,${Buffer.from(transpiled.outputText).toString("base64")}`);
+const [actionsSource, workspaceSource] = await Promise.all([
+  readFile(new URL("app/api/v1/workspace/actions/route.ts", root), "utf8"),
+  readFile(new URL("app/api/v1/workspace/route.ts", root), "utf8"),
+]);
 
 function createDb({ users = [], memberships = [], links = [] } = {}) {
   const state = {
     users: new Map(users.map((user) => [user.id, { ...user }])),
     memberships: memberships.map((membership) => ({ ...membership })),
     links: links.map((link) => ({ ...link })),
+    batches: [],
   };
   const execute = (sql, args) => {
     if (sql.startsWith("INSERT INTO users")) {
@@ -83,15 +88,25 @@ function createDb({ users = [], memberships = [], links = [] } = {}) {
     prepare(sql) {
       let args = [];
       return {
+        sql,
         bind(...nextArgs) { args = nextArgs; return this; },
         run: async () => execute(sql, args),
         first: async () => {
-          if (sql.includes("FROM users")) return state.users.get(args[0]) ?? null;
+          if (sql.includes("FROM users")) {
+            const user = state.users.get(args[0]) ?? null;
+            if (!user || !sql.includes("JOIN role_memberships")) return user;
+            const membership = state.memberships.find((item) => item.userId === args[0] && item.tenantId === args[1]);
+            if (!membership || (sql.includes("rm.status='active'") && membership.status !== "active")) return null;
+            return user;
+          }
           return null;
         },
       };
     },
-    batch: async (statements) => Promise.all(statements.map((statement) => statement.run())),
+    batch: async (statements) => {
+      state.batches.push(statements.map((statement) => statement.sql));
+      return Promise.all(statements.map((statement) => statement.run()));
+    },
   };
   return { db, state };
 }
@@ -107,6 +122,12 @@ test("member password reset does not reactivate a globally disabled account", as
   const { db, state } = createDb({ users: [{ id: "member-1", email: "member@example.com", displayName: "Member", passwordHash: "original-hash", mustChangePassword: 0, status: "disabled" }], memberships: [{ tenantId: "tenant-a", userId: "member-1", role: "teacher", status: "active" }] });
   await assert.rejects(() => membershipService.resetMemberPassword(db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", temporaryPassword: "NewTemporary1" }), /member_inactive/);
   assert.deepEqual(state.users.get("member-1"), { id: "member-1", email: "member@example.com", displayName: "Member", passwordHash: "original-hash", mustChangePassword: 0, status: "disabled" });
+});
+
+test("member password reset rejects a disabled current-tenant membership", async () => {
+  const { db, state } = createDb({ users: [{ id: "member-1", email: "member@example.com", displayName: "Member", passwordHash: "original-hash", mustChangePassword: 0, status: "active" }], memberships: [{ tenantId: "tenant-a", userId: "member-1", role: "teacher", status: "disabled" }] });
+  await assert.rejects(() => membershipService.resetMemberPassword(db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", temporaryPassword: "NewTemporary1" }), /member_not_found/);
+  assert.equal(state.users.get("member-1").passwordHash, "original-hash");
 });
 
 test("member status changes stay within the current tenant membership", async () => {
@@ -126,5 +147,12 @@ test("replacing guardian links is idempotent within the current tenant", async (
   const input = { tenantId: "tenant-a", actorUserId: "admin-a", guardianUserId: "guardian-1", studentUserIds: ["student-1", "student-2", "student-1"] };
   await membershipService.setGuardianLinks(db, input);
   await membershipService.setGuardianLinks(db, input);
+  assert.ok(state.batches.every((batch) => batch.some((sql) => sql.startsWith("DELETE FROM guardian_student_links")) && batch.filter((sql) => sql.startsWith("INSERT INTO guardian_student_links")).length === 2));
   assert.deepEqual(state.links, [{ tenantId: "tenant-b", guardianUserId: "guardian-1", studentUserId: "student-other", status: "active" }, { tenantId: "tenant-a", guardianUserId: "guardian-1", studentUserId: "student-1", status: "active" }, { tenantId: "tenant-a", guardianUserId: "guardian-1", studentUserId: "student-2", status: "active" }]);
+});
+
+test("workspace routes expose member and guardian management operations", () => {
+  for (const action of ["create_member", "reset_member_password", "set_member_status", "set_guardian_links"]) assert.match(actionsSource, new RegExp(action));
+  assert.match(workspaceSource, /members:/);
+  assert.match(workspaceSource, /guardianLinks:/);
 });
