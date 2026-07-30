@@ -17,6 +17,16 @@ const navigation: Record<Role, string[]> = {
 
 type Toast = { title: string; detail: string; tone: "success" | "error" } | null;
 
+async function readJson<T extends Record<string, unknown>>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return { error: `接口返回的不是有效 JSON（HTTP ${response.status}）` } as T;
+  }
+}
+
 export function Dashboard() {
   const [data, setData] = useState<WorkspaceData | null>(null);
   const [role, setRole] = useState<Role>("student");
@@ -44,7 +54,8 @@ export function Dashboard() {
 
   async function loadAuthMode() {
     const response = await fetch("/api/v1/auth/session", { cache: "no-store" });
-    const payload = await response.json() as { authMode?: "standard" | "local"; setupRequired?: boolean; user?: { mustChangePassword?: boolean } };
+    const payload = await readJson<{ authMode?: "standard" | "local"; setupRequired?: boolean; user?: { mustChangePassword?: boolean }; error?: string }>(response);
+    if (!response.ok) throw new Error(payload.error ?? "会话状态加载失败");
     setAuthMode(payload.authMode ?? null);
     setSetupRequired(payload.setupRequired === true);
     setMustChangePassword(payload.user?.mustChangePassword === true);
@@ -54,7 +65,7 @@ export function Dashboard() {
   async function refresh() {
     setError("");
     const response = await fetch("/api/v1/workspace", { cache: "no-store" });
-    const payload = await response.json() as WorkspaceData | { error?: string };
+    const payload = await readJson<WorkspaceData | { error?: string }>(response);
     if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
     const next = payload as WorkspaceData;
     setData(next);
@@ -68,7 +79,7 @@ export function Dashboard() {
     let active = true;
     fetch("/api/v1/workspace", { cache: "no-store" })
       .then(async (response) => {
-        const payload = await response.json() as WorkspaceData | { error?: string };
+        const payload = await readJson<WorkspaceData | { error?: string }>(response);
         if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
         return payload as WorkspaceData;
       })
@@ -89,7 +100,7 @@ export function Dashboard() {
 
   async function act(action: string, payload: Record<string, unknown> = {}) {
     const response = await fetch("/api/v1/workspace/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...payload }) });
-    const result = await response.json() as Record<string, unknown>;
+    const result = await readJson<Record<string, unknown>>(response);
     if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "操作失败");
     await refresh();
     return result;
@@ -105,7 +116,7 @@ export function Dashboard() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const result = await response.json() as { error?: string };
+      const result = await readJson<{ error?: string }>(response);
       if (!response.ok) throw new Error(result.error ?? "登录失败");
       setPassword("");
       setLoading(true);
@@ -129,7 +140,7 @@ export function Dashboard() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password, displayName }),
       });
-      const result = await response.json() as { error?: string };
+      const result = await readJson<{ error?: string }>(response);
       if (!response.ok) throw new Error(result.error ?? "初始化失败");
       setPassword("");
       setSetupRequired(false);
@@ -163,7 +174,7 @@ export function Dashboard() {
     setError("");
     try {
       const response = await fetch("/api/v1/auth/change-password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword, newPassword }) });
-      const result = await response.json() as { error?: string };
+      const result = await readJson<{ error?: string }>(response);
       if (!response.ok) {
         if (response.status < 500) { setCurrentPassword(""); setNewPassword(""); }
         throw new Error(result.error ?? "修改密码失败");

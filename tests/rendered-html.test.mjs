@@ -315,6 +315,19 @@ test("standard login uses account password hashes and change-password gate", asy
   assert.doesNotMatch(envTypes, /ADMIN_PASSWORD\?: string/);
 });
 
+test("initial setup and startup requests never expose empty JSON responses", async () => {
+  const [dashboard, setupRoute] = await Promise.all([
+    read("app/dashboard.tsx"),
+    read("app/api/v1/auth/setup/route.ts"),
+  ]);
+  assert.match(setupRoute, /try \{/);
+  assert.match(setupRoute, /catch \(error\)/);
+  assert.match(setupRoute, /platformApiError\(error\)/);
+  assert.match(dashboard, /async function readJson/);
+  assert.match(dashboard, /response\.text\(\)/);
+  assert.doesNotMatch(dashboard, /await response\.json\(\)/);
+});
+
 test("runtime service status reads platform settings from D1", async () => {
   const [workspace, health] = await Promise.all([
     read("app/api/v1/workspace/route.ts"),
