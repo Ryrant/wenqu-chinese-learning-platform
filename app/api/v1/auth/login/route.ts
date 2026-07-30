@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { createSessionToken, sessionCookieName } from "../../../../lib/auth-token";
-import { getAuthMode } from "../../../../lib/platform-store";
+import { ensurePlatformSchema, ensureSiteJwtSecret, getAuthMode } from "../../../../lib/platform-store";
 import { authenticateStandardAccount } from "../../../../lib/standard-login";
 
 const LOGIN_ATTEMPT_LIMIT = 5;
@@ -54,8 +54,9 @@ function cookieValue(token: string, maxAge: number) {
 
 export async function POST(request: Request) {
   if (getAuthMode() !== "standard") return json("auth_mode_not_standard", 404);
-  const bindings = env as unknown as { DB?: D1Database; ADMIN_EMAIL?: string; ADMIN_DISPLAY_NAME?: string; ADMIN_PASSWORD?: string; JWT_SECRET?: string; JWT_TTL_SECONDS?: string };
-  if (!bindings.DB || !bindings.JWT_SECRET) return json("authentication_config_missing", 500);
+  const bindings = env as unknown as { DB?: D1Database; JWT_SECRET?: string; JWT_TTL_SECONDS?: string };
+  if (!bindings.DB) return json("database_unavailable", 500);
+  await ensurePlatformSchema(bindings.DB);
   const key = clientKey(request);
   const nowMilliseconds = Date.now();
   const retryAfterSeconds = retryAfter(key, nowMilliseconds);
@@ -67,9 +68,6 @@ export async function POST(request: Request) {
     db: bindings.DB,
     email,
     password,
-    adminEmail: bindings.ADMIN_EMAIL,
-    adminDisplayName: bindings.ADMIN_DISPLAY_NAME,
-    adminPassword: bindings.ADMIN_PASSWORD,
   });
   if (!account) {
     recordFailedLogin(key, nowMilliseconds);
@@ -82,7 +80,8 @@ export async function POST(request: Request) {
   const maxAge = Number.isFinite(ttl) && ttl > 0 ? ttl : 604800;
   const displayName = account.displayName;
   const mustChangePassword = account.mustChangePassword === 1;
-  const token = await createSessionToken({ email: account.email, displayName, iat: now, exp: now + maxAge }, bindings.JWT_SECRET);
+  const jwtSecret = await ensureSiteJwtSecret(bindings.DB, bindings.JWT_SECRET);
+  const token = await createSessionToken({ email: account.email, displayName, iat: now, exp: now + maxAge }, jwtSecret);
   return Response.json({ user: { email: account.email, displayName, mustChangePassword } }, {
     status: 200,
     headers: { "cache-control": "no-store", "set-cookie": cookieValue(token, maxAge) },

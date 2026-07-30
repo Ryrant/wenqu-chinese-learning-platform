@@ -54,25 +54,14 @@
    npx wrangler deploy
    ```
 
-8. 在 Cloudflare 项目的 **Settings** → **Variables and Secrets** 中配置：
-
-   | 名称 | 类型 | 说明 |
-   | --- | --- | --- |
-   | `AUTH_MODE` | Variable | 固定填写 `standard` |
-   | `ADMIN_EMAIL` | Variable | 管理员登录邮箱 |
-   | `JWT_TTL_SECONDS` | Variable | 会话有效期，默认 `604800` |
-   | `ADMIN_PASSWORD` | Secret | 管理员登录密码，建议使用随机强密码 |
-   | `JWT_SECRET` | Secret | JWT 签名密钥，建议至少 32 位随机字符串 |
-   | `AI_API_KEY` | Secret，可选 | 文本生成服务密钥；不填时使用来源化模板 |
-   | `SPEECH_API_KEY` | Secret，可选 | 语音评测服务密钥；不填时转人工复核 |
-   | `MODERATION_API_KEY` | Secret，可选 | 内容审核服务密钥；不填时使用基础规则 |
-
-9. Cloudflare 会根据 `wrangler.toml` 自动创建并绑定 D1/R2。部署后在项目绑定中确认：
+8. Cloudflare 会根据 `wrangler.toml` 自动创建并绑定 D1/R2。部署前不需要手动填写变量、D1 database ID 或 R2 bucket 名称。部署后在项目绑定中确认：
 
    - D1 binding：`DB`
    - R2 binding：`CONTENT`
 
-部署成功后，访问 Cloudflare 分配的 `workers.dev` 域名即可进入登录页。
+部署成功后，访问 Cloudflare 分配的 `workers.dev` 域名，页面会提示初始化文趣工作区。按提示创建首个管理员邮箱和密码后即可进入后台。
+
+如需接入外部模型、语音评测或内容审核，可在部署成功后到 **Settings** → **Variables and Secrets** 添加可选 Secret：`AI_API_KEY` / `OPENAI_API_KEY`、`SPEECH_API_KEY`、`MODERATION_API_KEY`。不配置时，系统会使用来源化模板或教师复核降级，不影响基础部署。
 
 ### 方式二：一键部署
 
@@ -80,15 +69,14 @@
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ryrant/wenqu-chinese-learning-platform)
 
-一键部署适合快速试用。部署过程中或部署完成后，请在 Cloudflare 控制台确认：
+一键部署适合快速试用。部署过程中只需确认：
 
 - Build command：`npm run build`
 - Deploy command：`npx wrangler deploy`
 - D1 binding：`DB`
 - R2 binding：`CONTENT`
-- 必填变量和密钥：`AUTH_MODE=standard`、`ADMIN_EMAIL`、`ADMIN_PASSWORD`、`JWT_SECRET`
 
-D1/R2 会在一键部署流程中自动创建，不需要手动填写 D1 database ID 或 R2 bucket 名称。
+D1/R2 会在一键部署流程中自动创建，不需要手动填写变量、D1 database ID、R2 bucket 名称、管理员密码或 JWT 密钥。部署完成后打开站点，按页面提示完成首次初始化。
 
 一键部署后续同步更新不如 GitHub 仓库连接方式方便；长期使用建议迁移到方式一。
 
@@ -112,7 +100,7 @@ npm run cf:deploy
 https://你的项目名.你的子域.workers.dev/
 ```
 
-使用部署时配置的 `ADMIN_EMAIL` 和 `ADMIN_PASSWORD` 登录。首次进入会自动初始化租户、用户、四端角色和示例工作区。
+首次打开时会显示初始化表单。填写管理员邮箱、显示名称和密码后，系统会创建首个管理员、租户、四端角色、示例工作区，并在 D1 中生成站点级 JWT 签名密钥。初始化完成后再次访问会显示登录页。
 
 ### 升级 Cloudflare Workers
 
@@ -158,7 +146,7 @@ https://你的项目名.你的子域.workers.dev/
 | 模式 | 适用场景 | 身份来源 |
 | --- | --- | --- |
 | `local` | 本地开发 | `x-wenqu-dev-user` 或 `DEV_USER_EMAIL` |
-| `standard` | 用户自托管 Cloudflare Workers | 管理员密码登录 + HttpOnly JWT Cookie |
+| `standard` | 用户自托管 Cloudflare Workers | 部署后首次初始化管理员 + HttpOnly JWT Cookie |
 
 默认 `npm run build` 使用 `wrangler.toml` 生成标准 Cloudflare Workers 构建。`npm run build:standard` 保留为兼容入口，当前同样用于标准 Workers 部署。
 

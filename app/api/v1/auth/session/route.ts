@@ -1,9 +1,19 @@
-import { getAuthMode, platformContext } from "../../../../lib/platform-store";
+import { env } from "cloudflare:workers";
+import { ensurePlatformSchema, getAuthMode, isInitialSetupRequired, platformContext } from "../../../../lib/platform-store";
 import { sessionPasswordChangeState } from "../../../../lib/password-change-state";
 
 export async function GET(request: Request) {
   const authMode = getAuthMode();
   try {
+    if (authMode === "standard") {
+      const db = (env as unknown as { DB?: D1Database }).DB;
+      if (db) {
+        await ensurePlatformSchema(db);
+        if (await isInitialSetupRequired(db)) {
+          return Response.json({ authenticated: false, authMode, setupRequired: true }, { headers: { "cache-control": "no-store" } });
+        }
+      }
+    }
     const context = await platformContext(request);
     return Response.json({
       authenticated: true,

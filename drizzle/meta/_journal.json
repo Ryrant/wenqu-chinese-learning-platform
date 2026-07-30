@@ -22,6 +22,13 @@
       "when": 1785396363543,
       "tag": "0002_pilot_school_readiness",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785433093000,
+      "tag": "0003_initial_setup_settings",
+      "breakpoints": true
     }
   ]
 }

@@ -21,9 +21,11 @@ test("pilot readiness schema includes account content and assessment state", asy
   assert.match(schema, /mustChangePassword: integer\("must_change_password"/);
   assert.match(schema, /submissionReviews/);
   assert.match(schema, /assignmentObjectives/);
+  assert.match(schema, /appSettings/);
   assert.match(schema, /processingError: text\("processing_error"\)/);
   assert.match(migration, /ALTER TABLE `users` ADD `password_hash` text/);
   assert.match(migration, /CREATE TABLE `submission_reviews`/);
+  assert.match(await read("drizzle/0003_initial_setup_settings.sql"), /CREATE TABLE `app_settings`/);
   assert.match(store, /CREATE TABLE IF NOT EXISTS submission_reviews/);
 });
 
@@ -99,22 +101,25 @@ test("platform identity supports standard and local auth modes only", async () =
   assert.match(store, /Authorization/);
   assert.match(store, /wenqu_session/);
   assert.match(envTypes, /AUTH_MODE\?: "standard" \| "local"/);
-  assert.match(envTypes, /ADMIN_EMAIL\?: string/);
   assert.match(envTypes, /JWT_SECRET\?: string/);
+  assert.match(store, /ensureSiteJwtSecret/);
+  assert.match(store, /app_settings/);
 });
 
 test("standard auth API exposes login logout and session endpoints", async () => {
-  const [login, logout, session] = await Promise.all([
+  const [login, logout, session, setup] = await Promise.all([
     read("app/api/v1/auth/login/route.ts"),
     read("app/api/v1/auth/logout/route.ts"),
     read("app/api/v1/auth/session/route.ts"),
+    read("app/api/v1/auth/setup/route.ts"),
   ]);
-  assert.match(login, /ADMIN_EMAIL/);
-  assert.match(login, /ADMIN_PASSWORD/);
-  assert.match(login, /JWT_SECRET/);
+  assert.match(login, /ensureSiteJwtSecret/);
   assert.match(login, /createSessionToken/);
   assert.match(login, /HttpOnly/);
   assert.match(login, /SameSite=Lax/);
+  assert.match(setup, /createInitialAdminAccount/);
+  assert.match(setup, /setup_closed/);
+  assert.match(session, /setupRequired/);
   assert.doesNotMatch(login, /console\.log\([^)]*password|console\.error\([^)]*password/);
   assert.match(logout, /Max-Age=0/);
   assert.match(session, /getAuthMode/);
@@ -126,9 +131,11 @@ test("dashboard exposes standard mode login and logout flow", async () => {
   assert.match(dashboard, /authMode/);
   assert.match(dashboard, /\/api\/v1\/auth\/session/);
   assert.match(dashboard, /\/api\/v1\/auth\/login/);
+  assert.match(dashboard, /\/api\/v1\/auth\/setup/);
   assert.match(dashboard, /\/api\/v1\/auth\/logout/);
   assert.match(dashboard, /type="password"/);
-  assert.match(dashboard, /标准 Cloudflare 登录/);
+  assert.match(dashboard, /初始化文趣工作区/);
+  assert.match(dashboard, /创建管理员并进入工作区/);
   assert.match(css, /\.login-card/);
   assert.match(css, /\.logout-button/);
 });
@@ -159,7 +166,7 @@ test("build uses the standard Wrangler configuration without Sites packaging", a
   assert.match(standardWrangler, /binding = "DB"/);
   assert.match(standardWrangler, /binding = "CONTENT"/);
   assert.match(standardWrangler, /database_name = "wenqu-platform-db"/);
-  assert.doesNotMatch(standardWrangler, /database_id|bucket_name|00000000-0000-4000-8000-000000000000|replace-with-r2-bucket-name/);
+  assert.doesNotMatch(standardWrangler, /database_id|bucket_name|00000000-0000-4000-8000-000000000000|replace-with-r2-bucket-name|required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
   await assert.rejects(read(".openai/hosting.json"));
   await assert.rejects(read("wrangler.chatgpt.toml"));
   await assert.rejects(read("build/sites-vite-plugin.ts"));
@@ -226,7 +233,7 @@ test("standard build launcher delegates through the active npm CLI", async () =>
   }
 });
 
-test("standard cloudflare deployment configuration is documented and secret-safe", async () => {
+test("standard cloudflare deployment configuration has no variable prerequisites and remains secret-safe", async () => {
   const [standardWrangler, envExample, agents] = await Promise.all([
     read("wrangler.toml"),
     read(".env.example"),
@@ -236,10 +243,9 @@ test("standard cloudflare deployment configuration is documented and secret-safe
   assert.match(standardWrangler, /binding = "DB"/);
   assert.match(standardWrangler, /binding = "CONTENT"/);
   assert.doesNotMatch(standardWrangler, /database_id|bucket_name|replace-with|00000000/);
-  assert.match(standardWrangler, /required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
-  assert.doesNotMatch(standardWrangler, /ADMIN_PASSWORD =|JWT_SECRET =|CLOUDFLARE_API_TOKEN/);
+  assert.doesNotMatch(standardWrangler, /ADMIN_PASSWORD|JWT_SECRET|required =|CLOUDFLARE_API_TOKEN/);
   assert.match(envExample, /AUTH_MODE=standard/);
-  assert.match(envExample, /JWT_SECRET=/);
+  assert.doesNotMatch(envExample, /ADMIN_PASSWORD=|JWT_SECRET=/);
   assert.doesNotMatch(envExample, /D1_DATABASE_ID|R2_BUCKET_NAME/);
   assert.doesNotMatch(envExample, /CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID/);
   assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
@@ -252,6 +258,7 @@ test("standard cloudflare deployment configuration is documented and secret-safe
   assert.match(agents, /本地开发.*clone.*依赖安装.*dev server/s);
   assert.match(agents, /demo 阶段/);
   assert.match(agents, /AUTH_MODE=standard/);
+  assert.match(agents, /首次初始化/);
   assert.match(agents, /WAF Rate Limiting|Cloudflare Access/);
   assert.match(agents, /\.github\/workflows\/ci\.yml.*必要校验/s);
   assert.match(agents, /不维护默认 GitHub Actions 自动部署 workflow/);
@@ -288,6 +295,7 @@ test("standard login uses account password hashes and change-password gate", asy
   assert.match(standardLogin, /verifyPassword/);
   assert.match(standardLogin, /must_change_password AS mustChangePassword/);
   assert.match(standardLogin, /u\.status AS status/);
+  assert.match(standardLogin, /createInitialAdminAccount/);
   assert.doesNotMatch(login, /password !== bindings\.ADMIN_PASSWORD/);
   assert.match(session, /sessionPasswordChangeState/);
   assert.match(passwordChangeState, /mustChangePassword/);
@@ -296,7 +304,7 @@ test("standard login uses account password hashes and change-password gate", asy
   assert.match(passwordChange, /must_change_password=0/);
   assert.match(workspace, /workspacePasswordChangeGate/);
   assert.match(store, /mustChangePassword/);
-  assert.match(envTypes, /ADMIN_PASSWORD\?: string/);
+  assert.doesNotMatch(envTypes, /ADMIN_PASSWORD\?: string/);
 });
 
 test("pilot workspace UI exposes member content ai review and password change flows", async () => {
