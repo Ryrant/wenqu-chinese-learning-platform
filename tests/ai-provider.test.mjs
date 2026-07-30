@@ -45,8 +45,10 @@ test("student and teacher generation use grounded provider chain", async () => {
   assert.match(generate, /searchPublishedKnowledge/);
   assert.match(generate, /generateGroundedText/);
   assert.match(generate, /OPENAI_API_KEY/);
+  assert.match(generate, /status: result\.status/);
   assert.match(actions, /generateGroundedText/);
   assert.match(actions, /input_tokens,output_tokens/);
+  assert.match(student, /no_reviewed_sources/);
   assert.match(student, /引用来源/);
   assert.match(staff, /provider|engine/);
 });
