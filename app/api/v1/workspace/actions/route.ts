@@ -125,10 +125,16 @@ export async function POST(request: Request) {
 
     if (action === "suggest_text_review") {
       const id = requireText(body.id, "submission_id");
-      const result = await suggestTextReview(db, context, id, {
-        openAiKey: (env as unknown as { OPENAI_API_KEY?: string; AI_API_KEY?: string }).OPENAI_API_KEY ?? (env as unknown as { AI_API_KEY?: string }).AI_API_KEY,
-        model: (env as unknown as { AI_MODEL?: string }).AI_MODEL,
-      });
+      let result;
+      try {
+        result = await suggestTextReview(db, context, id, {
+          openAiKey: (env as unknown as { OPENAI_API_KEY?: string; AI_API_KEY?: string }).OPENAI_API_KEY ?? (env as unknown as { AI_API_KEY?: string }).AI_API_KEY,
+          model: (env as unknown as { AI_MODEL?: string }).AI_MODEL,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message === "no_reviewed_sources") return Response.json({ error: "no_reviewed_sources" }, { status: 422 });
+        throw error;
+      }
       await audit(db, tenantId, userId, "submission.ai_review_suggested", "submission", id);
       return Response.json(result);
     }
