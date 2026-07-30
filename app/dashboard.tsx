@@ -24,7 +24,7 @@ export function Dashboard() {
   const [toast, setToast] = useState<Toast>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [authMode, setAuthMode] = useState<"chatgpt" | "standard" | "local" | null>(null);
+  const [authMode, setAuthMode] = useState<"standard" | "local" | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mustChangePassword, setMustChangePassword] = useState(false);
@@ -42,7 +42,7 @@ export function Dashboard() {
 
   async function loadAuthMode() {
     const response = await fetch("/api/v1/auth/session", { cache: "no-store" });
-    const payload = await response.json() as { authMode?: "chatgpt" | "standard" | "local"; user?: { mustChangePassword?: boolean } };
+    const payload = await response.json() as { authMode?: "standard" | "local"; user?: { mustChangePassword?: boolean } };
     setAuthMode(payload.authMode ?? null);
     setMustChangePassword(payload.user?.mustChangePassword === true);
     return payload.authMode ?? null;
@@ -52,7 +52,7 @@ export function Dashboard() {
     setError("");
     const response = await fetch("/api/v1/workspace", { cache: "no-store" });
     const payload = await response.json() as WorkspaceData | { error?: string };
-    if (!response.ok) throw new Error(response.status === 401 ? "请先完成 ChatGPT 登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
+    if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
     const next = payload as WorkspaceData;
     setData(next);
     if (!next.user.roles.includes(role)) {
@@ -66,7 +66,7 @@ export function Dashboard() {
     fetch("/api/v1/workspace", { cache: "no-store" })
       .then(async (response) => {
         const payload = await response.json() as WorkspaceData | { error?: string };
-        if (!response.ok) throw new Error(response.status === 401 ? "请先完成 ChatGPT 登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
+        if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
         return payload as WorkspaceData;
       })
       .then((next) => {
