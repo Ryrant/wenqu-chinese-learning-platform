@@ -24,7 +24,7 @@
 - 机构端：内容上传、权属审核、知识检索、成员邀请、服务状态和审计日志。
 - 数据持久化：D1 保存租户、成员、作业、提交、反馈和审计记录；R2 保存教材和音频文件。
 - 安全降级：未配置模型或语音服务时，明确使用来源化模板或教师复核，不展示虚假 AI 状态。
-- 自托管部署：支持 ChatGPT Platform Sites、本地开发和标准 Cloudflare Workers 部署。
+- 自托管部署：支持本地开发和标准 Cloudflare Workers 部署。
 
 ## ⚡ 快速开始
 
@@ -45,7 +45,7 @@
 6. Build command 填写：
 
    ```bash
-   npm run build:standard
+   npm run build
    ```
 
 7. Deploy command 填写：
@@ -82,7 +82,7 @@
 
 一键部署适合快速试用。部署过程中或部署完成后，请在 Cloudflare 控制台确认：
 
-- Build command：`npm run build:standard`
+- Build command：`npm run build`
 - Deploy command：`npx wrangler deploy --keep-vars`
 - D1 binding：`DB`
 - R2 binding：`CONTENT`
@@ -151,15 +151,14 @@ https://你的项目名.你的子域.workers.dev/
 
 ### 认证模式
 
-项目支持三种认证模式：
+项目支持两种认证模式：
 
 | 模式 | 适用场景 | 身份来源 |
 | --- | --- | --- |
 | `local` | 本地开发 | `x-wenqu-dev-user` 或 `DEV_USER_EMAIL` |
-| `chatgpt` | ChatGPT Platform Sites | `oai-authenticated-user-email` 平台身份头 |
 | `standard` | 用户自托管 Cloudflare Workers | 管理员密码登录 + HttpOnly JWT Cookie |
 
-默认 `npm run build` 使用 `wrangler.chatgpt.toml`，用于 ChatGPT/Sites 兼容构建。标准 Cloudflare Workers 部署使用 `npm run build:standard` 和 `wrangler.toml`。
+默认 `npm run build` 使用 `wrangler.toml` 生成标准 Cloudflare Workers 构建。`npm run build:standard` 保留为兼容入口，当前同样用于标准 Workers 部署。
 
 ### 数据与绑定
 
@@ -200,8 +199,6 @@ wenqu-chinese-learning-platform/
 ├── scripts/                   # 标准 Cloudflare 构建与配置渲染脚本
 ├── tests/                     # 自动化回归测试
 ├── .github/ISSUE_TEMPLATE/    # GitHub Issue 表单
-├── .openai/hosting.json       # ChatGPT Platform Sites 绑定声明
-├── wrangler.chatgpt.toml      # ChatGPT/Sites 兼容构建配置
 └── wrangler.toml              # 标准 Cloudflare Workers 自托管配置
 ```
 
@@ -256,8 +253,8 @@ npm run build:standard
 | `npm run dev` | 启动本地开发服务器和 Cloudflare 本地绑定 |
 | `npm run lint` | 运行代码规范检查 |
 | `npm test` | 默认构建并运行 `tests/` 下的回归测试 |
-| `npm run build` | 生成 ChatGPT/Sites 兼容构建 |
-| `npm run build:standard` | 生成标准 Cloudflare Workers 构建 |
+| `npm run build` | 生成标准 Cloudflare Workers 构建 |
+| `npm run build:standard` | 标准 Cloudflare Workers 构建兼容入口 |
 | `npm run cf:preview` | 使用标准 Cloudflare 配置启动 Wrangler 预览 |
 | `npm run cf:deploy` | 使用标准 Cloudflare 配置部署到当前账号 |
 | `npm run db:generate` | 根据 `db/schema.ts` 生成 Drizzle 迁移 |

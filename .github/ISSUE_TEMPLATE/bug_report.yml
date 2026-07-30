@@ -70,7 +70,7 @@ body:
         Node.js: 22.x
         npm: 10.x
         Browser: Chrome / Edge / Safari
-        Deploy mode: local / ChatGPT Sites / standard Cloudflare Workers
+        Deploy mode: local / standard Cloudflare Workers
         Bindings: D1=DB, R2=CONTENT
     validations:
       required: true

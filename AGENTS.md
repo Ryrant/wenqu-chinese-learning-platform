@@ -18,14 +18,16 @@
 
 ## 部署规则
 
-- ChatGPT Platform Sites 继续使用 `.openai/hosting.json`，不要删除该文件。
-- 默认 `npm run build` 使用 `wrangler.chatgpt.toml`，不得设置 `AUTH_MODE=standard`；标准 Workers 构建使用 `npm run build:standard` 和 `wrangler.toml`。
-- 标准 Cloudflare Workers 部署使用 `AUTH_MODE=standard`。
+- 本仓库只维护标准 Cloudflare Workers 自托管部署路径，不再维护平台托管专用配置。
+- 默认 `npm run build` 使用 `wrangler.toml`；`npm run build:standard` 仅作为标准 Workers 构建兼容入口保留。
+- Cloudflare Workers 部署使用 `AUTH_MODE=standard`。
 - `DB` 是 D1 binding，`CONTENT` 是 R2 binding。
 - `ADMIN_PASSWORD`、`JWT_SECRET`、`CLOUDFLARE_API_TOKEN`、真实 D1 database id 和真实 R2 bucket 名称不得提交。
+- `OPENAI_API_KEY`、`AI_API_KEY` 和 `AI_MODEL` 属于可选 AI provider 配置；不得删除 AI 功能或来源化模板降级路径。
 - 应用内 `/api/v1/auth/login` 限流只在单个 Worker isolate 内尽力生效。公开部署前必须配置 Cloudflare WAF Rate Limiting，或使用 Cloudflare Access 保护应用。
 - `.github/workflows/ci.yml` 只做 PR/push 的必要校验，不读取部署 secrets，不执行 Cloudflare 部署。
 - 本仓库不维护默认 GitHub Actions 自动部署 workflow，避免上游仓库缺少用户私有 Cloudflare secrets 时持续失败；用户如需 Actions 部署，应在自己的 Fork 中自行添加。
+- `docs/superpowers/` 只保存本地计划、交接和临时分析资料，必须保持忽略状态，不上传到 GitHub。
 
 ## 本地开发
 
