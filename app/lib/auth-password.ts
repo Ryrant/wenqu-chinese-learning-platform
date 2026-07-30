@@ -1,5 +1,4 @@
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 const iterations = 150_000;
 const keyLengthBits = 256;
 
@@ -44,7 +43,6 @@ export async function verifyPassword(password: string, encodedHash: string) {
     const actual = await derive(password, base64UrlDecode(saltText));
     return timingSafeEqual(actual, expected);
   } catch {
-    decoder.decode(new Uint8Array());
     return false;
   }
 }
