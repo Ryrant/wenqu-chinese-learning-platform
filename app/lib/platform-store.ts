@@ -3,7 +3,7 @@ import { sessionCookieName, verifySessionToken } from "./auth-token";
 
 export type PlatformRole = "student" | "teacher" | "guardian" | "admin";
 export type AuthMode = "chatgpt" | "standard" | "local";
-export type PlatformContext = { db: D1Database; tenantId: string; userId: string; userEmail: string; displayName: string; roles: PlatformRole[] };
+export type PlatformContext = { db: D1Database; tenantId: string; userId: string; userEmail: string; displayName: string; roles: PlatformRole[]; mustChangePassword?: boolean };
 const ROLE_SET = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
 let schemaReady: Promise<void> | null = null;
 
@@ -196,7 +196,11 @@ export async function platformContext(request: Request, requiredRole?: PlatformR
   await schemaReady;
   const { email, displayName } = await identity(request);
   const userId = `usr_${idPart(email)}`;
-  const memberships = await db.prepare(`SELECT rm.tenant_id AS tenantId, rm.role AS role FROM role_memberships rm JOIN users u ON u.id=rm.user_id WHERE lower(u.email)=? ORDER BY rm.created_at ASC`).bind(email).all<{ tenantId: string; role: string }>();
+  const memberships = await db.prepare(`SELECT rm.tenant_id AS tenantId, rm.role AS role
+FROM role_memberships rm
+JOIN users u ON u.id=rm.user_id
+WHERE lower(u.email)=? AND u.status='active' AND rm.status='active'
+ORDER BY rm.created_at ASC`).bind(email).all<{ tenantId: string; role: string }>();
   let tenantId = memberships.results[0]?.tenantId ?? `tenant_${idPart(email)}`;
   if (!memberships.results.length) {
     const invitation = await db.prepare("SELECT id,tenant_id AS tenantId,role FROM invitations WHERE lower(email)=? AND status='pending' AND expires_at>CURRENT_TIMESTAMP ORDER BY created_at DESC LIMIT 1").bind(email).first<{ id: string; tenantId: string; role: PlatformRole }>();
@@ -212,10 +216,11 @@ export async function platformContext(request: Request, requiredRole?: PlatformR
       await seedWorkspace({ db, tenantId, userId, userEmail: email, displayName });
     }
   }
-  const rows = await db.prepare("SELECT role FROM role_memberships WHERE tenant_id=? AND user_id=?").bind(tenantId, userId).all<{ role: string }>();
+  const rows = await db.prepare("SELECT role FROM role_memberships WHERE tenant_id=? AND user_id=? AND status='active'").bind(tenantId, userId).all<{ role: string }>();
   const roles = rows.results.map((item) => item.role).filter((role): role is PlatformRole => ROLE_SET.has(role as PlatformRole));
   if (requiredRole && !roles.includes(requiredRole) && !roles.includes("admin")) throw new Error("forbidden");
-  return { db, tenantId, userId, userEmail: email, displayName, roles };
+  const account = await db.prepare("SELECT must_change_password AS mustChangePassword FROM users WHERE id=? AND status='active'").bind(userId).first<{ mustChangePassword: number }>();
+  return { db, tenantId, userId, userEmail: email, displayName, roles, mustChangePassword: account?.mustChangePassword === 1 };
 }
 
 export function platformApiError(error: unknown) {
