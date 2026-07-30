@@ -1,4 +1,4 @@
-﻿import { env } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 
 export async function GET() {
   const bindings = env as unknown as Record<string, unknown>;
@@ -9,6 +9,8 @@ export async function GET() {
       database: bindings.DB ? "available" : "unavailable",
       storage: bindings.CONTENT ? "available" : "unavailable",
       textGeneration: bindings.AI_API_KEY ? "configured" : "not_configured_template_available",
+      openai: bindings.OPENAI_API_KEY ? "configured" : "not_configured_template_available",
+      aiModel: typeof bindings.AI_MODEL === "string" && bindings.AI_MODEL.trim() ? bindings.AI_MODEL : "gpt-5.6-luna",
       speechScoring: bindings.SPEECH_API_KEY ? "configured" : "not_configured_manual_review",
       retrieval: bindings.DB ? "published_keyword_available" : "unavailable",
       moderation: bindings.MODERATION_API_KEY ? "configured" : "rules_only",

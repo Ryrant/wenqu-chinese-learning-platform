@@ -1,4 +1,4 @@
-﻿type D1Result<T = unknown> = { results: T[]; success: boolean; meta: { changes: number; [key: string]: unknown } };
+type D1Result<T = unknown> = { results: T[]; success: boolean; meta: { changes: number; [key: string]: unknown } };
 type D1PreparedStatement = {
   bind(...values: unknown[]): D1PreparedStatement;
   first<T = Record<string, unknown>>(column?: string): Promise<T | null>;
@@ -27,6 +27,8 @@ declare module "cloudflare:workers" {
     JWT_TTL_SECONDS?: string;
     DEV_USER_EMAIL?: string;
     AI_API_KEY?: string;
+    OPENAI_API_KEY?: string;
+    AI_MODEL?: string;
     SPEECH_API_KEY?: string;
     MODERATION_API_KEY?: string;
     [key: string]: unknown;
