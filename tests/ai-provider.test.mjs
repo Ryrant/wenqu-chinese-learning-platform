@@ -31,6 +31,7 @@ test("knowledge search route delegates to retrieval service", async () => {
   assert.match(retrieval, /export async function searchPublishedKnowledge/);
   assert.match(retrieval, /processing_status='published'/);
   assert.match(retrieval, /matchReason/);
+  assert.match(retrieval, /cjkWindows/);
   assert.match(route, /searchPublishedKnowledge/);
 });
 

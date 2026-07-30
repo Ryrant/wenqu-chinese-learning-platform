@@ -12,13 +12,16 @@ export function normalizeQuery(query: string) {
 }
 
 export function queryTerms(query: string) {
-  return [...new Set(normalizeQuery(query).split(/[\s,，。！？、]+/).filter((term) => term.length >= 2))].slice(0, 8);
+  const normalized = normalizeQuery(query);
+  const explicitTerms = normalized.split(/[\s,，。！？、]+/).filter((term) => term.length >= 2);
+  const cjkRuns = normalized.match(/[\u4e00-\u9fff]{2,}/g) ?? [];
+  const cjkWindows = cjkRuns.flatMap((run) => Array.from({ length: Math.max(0, run.length - 1) }, (_, index) => run.slice(index, index + 2)));
+  return [...new Set([...explicitTerms, ...cjkRuns.map((run) => run.slice(0, 8)), ...cjkWindows])].slice(0, 16);
 }
 
 export async function searchPublishedKnowledge(db: D1Database, input: { tenantId: string; query: string; limit?: number }): Promise<RetrievedChunk[]> {
   const terms = queryTerms(input.query);
   if (!terms.length) return [];
-  const like = `%${terms[0]}%`;
   const rows = await db.prepare(`
     SELECT k.id,k.content,d.title
     FROM knowledge_chunks k
@@ -36,7 +39,7 @@ export async function searchPublishedKnowledge(db: D1Database, input: { tenantId
       content: row.content,
       excerpt: row.content.slice(0, 500),
       score: matched.length,
-      matchReason: matched.length ? `matched:${matched.join(",")}` : `fallback:${like}`,
+      matchReason: matched.length ? `matched:${matched.join(",")}` : "fallback:recent",
     };
   });
 }
