@@ -1,4 +1,5 @@
 import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
+import { assertSubmissionReviewAccess } from "../../../../lib/access-control";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 
 type ActionBody = { action?: string; [key: string]: unknown };
@@ -118,7 +119,8 @@ export async function POST(request: Request) {
     if (action === "review_submission") {
       const id = requireText(body.id, "submission_id");
       const score = Math.max(0, Math.min(number(body.score, 0), 100));
-      const result = await db.prepare("UPDATE submissions SET score=?,confidence=1,review_status='reviewed' WHERE id=? AND tenant_id=? AND (?=1 OR assignment_id IN (SELECT a.id FROM assignments a JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id WHERE a.tenant_id=? AND c.teacher_user_id=?))").bind(score, id, tenantId, isAdmin ? 1 : 0, tenantId, userId).run();
+      await assertSubmissionReviewAccess(db, context, id);
+      const result = await db.prepare("UPDATE submissions SET score=?,confidence=1,review_status='reviewed' WHERE id=? AND tenant_id=?").bind(score, id, tenantId).run();
       if (!result.meta.changes) return Response.json({ error: "submission_not_found" }, { status: 404 });
       await audit(db, tenantId, userId, "submission.reviewed", "submission", id, { score });
       return Response.json({ id, score, reviewStatus: "reviewed" });

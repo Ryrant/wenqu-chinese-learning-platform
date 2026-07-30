@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { classAccessClause, submissionAccessClause } from "../../../lib/access-control";
 import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
 import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
 
@@ -11,23 +12,12 @@ export async function GET(request: Request) {
     if (passwordChangeGate) return passwordChangeGate;
     const { db, tenantId, userId, userEmail, displayName, roles } = context;
     const admin = roles.includes("admin");
-    const classClauses: string[] = [];
-    const classArgs: unknown[] = [tenantId];
-    if (!admin && roles.includes("teacher")) { classClauses.push("c.teacher_user_id=?"); classArgs.push(userId); }
-    if (!admin && roles.includes("student")) { classClauses.push("EXISTS (SELECT 1 FROM enrollments ea WHERE ea.tenant_id=c.tenant_id AND ea.class_id=c.id AND ea.student_user_id=? AND ea.status='active')"); classArgs.push(userId); }
-    if (!admin && roles.includes("guardian")) { classClauses.push("EXISTS (SELECT 1 FROM enrollments eg JOIN guardian_student_links gl ON gl.tenant_id=eg.tenant_id AND gl.student_user_id=eg.student_user_id WHERE eg.tenant_id=c.tenant_id AND eg.class_id=c.id AND gl.guardian_user_id=?)"); classArgs.push(userId); }
-    const classAccess = admin ? "1=1" : classClauses.length ? `(${classClauses.join(" OR ")})` : "1=0";
+    const classAccess = classAccessClause(context, "c");
+    const submissionAccess = submissionAccessClause(context, "s", "c");
 
-    const submissionClauses: string[] = [];
-    const submissionArgs: unknown[] = [tenantId];
-    if (!admin && roles.includes("teacher")) { submissionClauses.push("c.teacher_user_id=?"); submissionArgs.push(userId); }
-    if (!admin && roles.includes("student")) { submissionClauses.push("s.student_user_id=?"); submissionArgs.push(userId); }
-    if (!admin && roles.includes("guardian")) { submissionClauses.push("EXISTS (SELECT 1 FROM guardian_student_links gl WHERE gl.tenant_id=s.tenant_id AND gl.student_user_id=s.student_user_id AND gl.guardian_user_id=?)"); submissionArgs.push(userId); }
-    const submissionAccess = admin ? "1=1" : submissionClauses.length ? `(${submissionClauses.join(" OR ")})` : "1=0";
-
-    const classesQuery = db.prepare(`SELECT c.*,COUNT(e.id) AS studentCount FROM classes c LEFT JOIN enrollments e ON e.class_id=c.id AND e.tenant_id=c.tenant_id AND e.status='active' WHERE c.tenant_id=? AND ${classAccess} GROUP BY c.id ORDER BY c.created_at DESC`).bind(...classArgs);
-    const assignmentsQuery = db.prepare(`SELECT a.*,c.name AS className,COUNT(s.id) AS submissionCount FROM assignments a JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id LEFT JOIN submissions s ON s.assignment_id=a.id AND s.tenant_id=a.tenant_id WHERE a.tenant_id=? AND ${classAccess} GROUP BY a.id ORDER BY a.created_at DESC`).bind(...classArgs);
-    const submissionsQuery = db.prepare(`SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id LEFT JOIN users u ON u.id=s.student_user_id WHERE s.tenant_id=? AND ${submissionAccess} ORDER BY s.created_at DESC LIMIT 50`).bind(...submissionArgs);
+    const classesQuery = db.prepare(`SELECT c.*,COUNT(e.id) AS studentCount FROM classes c LEFT JOIN enrollments e ON e.class_id=c.id AND e.tenant_id=c.tenant_id AND e.status='active' WHERE c.tenant_id=? AND ${classAccess.sql} GROUP BY c.id ORDER BY c.created_at DESC`).bind(tenantId, ...classAccess.args);
+    const assignmentsQuery = db.prepare(`SELECT a.*,c.name AS className,COUNT(s.id) AS submissionCount FROM assignments a JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id LEFT JOIN submissions s ON s.assignment_id=a.id AND s.tenant_id=a.tenant_id WHERE a.tenant_id=? AND ${classAccess.sql} GROUP BY a.id ORDER BY a.created_at DESC`).bind(tenantId, ...classAccess.args);
+    const submissionsQuery = db.prepare(`SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id LEFT JOIN users u ON u.id=s.student_user_id WHERE s.tenant_id=? AND ${submissionAccess.sql} ORDER BY s.created_at DESC LIMIT 50`).bind(tenantId, ...submissionAccess.args);
     const empty = { results: [] };
     const [classes, assignments, submissions, mastery, documents, plans, notifications, consents, audits, invitations, members, guardianLinks] = await Promise.all([
       classesQuery.all(), assignmentsQuery.all(), submissionsQuery.all(),
