@@ -1,9 +1,9 @@
-import { env } from "cloudflare:workers";
 import { generateGroundedText } from "../../../../lib/ai/grounding";
 import { confirmSubmissionReview, suggestTextReview } from "../../../../lib/assessment-service";
 import { assertSubmissionReviewAccess } from "../../../../lib/access-control";
 import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
 import { publishContent } from "../../../../lib/content-processing";
+import { aiProviderSettings, loadPlatformSettings } from "../../../../lib/platform-settings";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 import { searchPublishedKnowledge } from "../../../../lib/retrieval";
 
@@ -95,9 +95,10 @@ export async function POST(request: Request) {
       const duration = Math.max(20, Math.min(number(body.duration, 40), 90));
       const contextChunks = await searchPublishedKnowledge(db, { tenantId, query: topic, limit: 5 });
       if (!contextChunks.length) return Response.json({ error: "no_reviewed_sources" }, { status: 422 });
+      const settings = await loadPlatformSettings(db);
       const result = await generateGroundedText(
         { purpose: "lesson", prompt: topic, contextChunks, role: "teacher", level },
-        { openAiKey: env.OPENAI_API_KEY ?? env.AI_API_KEY, model: env.AI_MODEL },
+        aiProviderSettings(settings),
       );
       const id = crypto.randomUUID();
       const sessionId = crypto.randomUUID();
@@ -127,10 +128,7 @@ export async function POST(request: Request) {
       const id = requireText(body.id, "submission_id");
       let result;
       try {
-        result = await suggestTextReview(db, context, id, {
-          openAiKey: (env as unknown as { OPENAI_API_KEY?: string; AI_API_KEY?: string }).OPENAI_API_KEY ?? (env as unknown as { AI_API_KEY?: string }).AI_API_KEY,
-          model: (env as unknown as { AI_MODEL?: string }).AI_MODEL,
-        });
+        result = await suggestTextReview(db, context, id, aiProviderSettings(await loadPlatformSettings(db)));
       } catch (error) {
         if (error instanceof Error && error.message === "no_reviewed_sources") return Response.json({ error: "no_reviewed_sources" }, { status: 422 });
         throw error;

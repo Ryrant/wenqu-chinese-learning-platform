@@ -3,10 +3,6 @@ main = "worker/index.ts"
 compatibility_date = "2026-05-15"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-AUTH_MODE = "standard"
-JWT_TTL_SECONDS = "604800"
-
 [[d1_databases]]
 binding = "DB"
 database_name = "wenqu-platform-db"

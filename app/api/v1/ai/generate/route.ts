@@ -1,6 +1,6 @@
-import { env } from "cloudflare:workers";
 import { generateGroundedText } from "../../../../lib/ai/grounding";
 import type { AiPurpose } from "../../../../lib/ai/provider";
+import { aiProviderSettings, loadPlatformSettings } from "../../../../lib/platform-settings";
 import { platformApiError, platformContext } from "../../../../lib/platform-store";
 import { searchPublishedKnowledge } from "../../../../lib/retrieval";
 
@@ -18,9 +18,10 @@ export async function POST(request: Request) {
     if (/自残|色情|仇恨|暴力细节/.test(prompt)) return Response.json({ error: "content_requires_review" }, { status: 422 });
     const contextChunks = await searchPublishedKnowledge(context.db, { tenantId: context.tenantId, query: prompt, limit: 5 });
     if (!contextChunks.length) return Response.json({ error: "no_reviewed_sources" }, { status: 422 });
+    const settings = await loadPlatformSettings(context.db);
     const result = await generateGroundedText(
       { purpose, prompt, contextChunks, role, level: body.level?.trim().slice(0, 20) },
-      { openAiKey: env.OPENAI_API_KEY ?? env.AI_API_KEY, model: env.AI_MODEL },
+      aiProviderSettings(settings),
     );
     const sessionId = crypto.randomUUID();
     await context.db.prepare("INSERT INTO ai_sessions (id,tenant_id,user_id,purpose,provider,model,status,input_tokens,output_tokens) VALUES (?,?,?,?,?,?,?,?,?)")

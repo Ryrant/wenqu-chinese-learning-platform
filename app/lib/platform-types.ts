@@ -2,12 +2,22 @@
 export type Row = Record<string, unknown>;
 export type MemberRow = Row & { id: string; email: string; displayName: string; status: string; roles: string };
 export type GuardianLinkRow = Row & { guardianUserId: string; studentUserId: string; status: string };
+export type SecretStatus = { configured: boolean; suffix: string };
+export type PublicPlatformSettings = {
+  jwtTtlSeconds: number;
+  aiModel: string;
+  aiKey: SecretStatus;
+  openAiKey: SecretStatus;
+  speechKey: SecretStatus;
+  moderationKey: SecretStatus;
+};
 export type WorkspaceData = {
   workspace: { tenantId: string; name: string; region: string; sampleData: boolean };
   user: { id: string; email: string; displayName: string; roles: Role[]; mustChangePassword?: boolean };
   classes: Row[]; assignments: Row[]; submissions: Row[]; submissionReviews: Row[]; mastery: Row[]; documents: Row[];
   lessonPlans: Row[]; notifications: Row[]; consents: Row[]; audits: Row[]; invitations: Row[]; members: MemberRow[]; guardianLinks: GuardianLinkRow[];
   services: Record<string, { status: string; label: string }>;
+  platformSettings?: PublicPlatformSettings;
   generatedAt: string;
 };
 export type Notify = (title: string, detail: string, tone?: "success" | "error") => void;

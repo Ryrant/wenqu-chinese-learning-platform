@@ -8,8 +8,6 @@ const ROLE_SET = new Set<PlatformRole>(["student", "teacher", "guardian", "admin
 let schemaReady: Promise<void> | null = null;
 
 export function getAuthMode(): AuthMode {
-  const configured = (env as unknown as { AUTH_MODE?: string }).AUTH_MODE?.trim().toLowerCase();
-  if (configured === "standard" || configured === "local") return configured;
   return process.env.NODE_ENV === "development" ? "local" : "standard";
 }
 
@@ -20,10 +18,7 @@ function idPart(value: string) {
 }
 
 function localIdentity(request: Request) {
-  const bindings = env as unknown as { DEV_USER_EMAIL?: string };
   const email = request.headers.get("x-wenqu-dev-user")?.trim().toLowerCase()
-    ?? bindings.DEV_USER_EMAIL?.trim().toLowerCase()
-    ?? process.env.DEV_USER_EMAIL?.trim().toLowerCase()
     ?? "dev@wenqu.local";
   return { email, displayName: email.split("@")[0] };
 }
@@ -43,10 +38,9 @@ function tokenFromRequest(request: Request) {
 }
 
 async function standardIdentity(request: Request, db: D1Database) {
-  const bindings = env as unknown as { JWT_SECRET?: string };
   const token = tokenFromRequest(request);
   if (!token) throw new Error("authentication_required");
-  const session = await verifySessionToken(token, await ensureSiteJwtSecret(db, bindings.JWT_SECRET));
+  const session = await verifySessionToken(token, await ensureSiteJwtSecret(db));
   if (!session) throw new Error("authentication_required");
   return { email: session.email.trim().toLowerCase(), displayName: session.displayName };
 }
@@ -140,9 +134,7 @@ function randomSecret() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function ensureSiteJwtSecret(db: D1Database, configuredSecret?: string) {
-  const configured = configuredSecret?.trim();
-  if (configured) return configured;
+export async function ensureSiteJwtSecret(db: D1Database) {
   const stored = await db.prepare("SELECT value FROM app_settings WHERE key='jwt_secret'").first<{ value: string }>();
   if (stored?.value) return stored.value;
   const generated = randomSecret();

@@ -95,13 +95,12 @@ test("platform identity supports standard and local auth modes only", async () =
   const envTypes = await read("cloudflare-env.d.ts");
   assert.match(store, /export type AuthMode = "standard" \| "local"/);
   assert.match(store, /export function getAuthMode\(\): AuthMode/);
-  assert.match(store, /AUTH_MODE/);
+  assert.doesNotMatch(store, /AUTH_MODE/);
   assert.doesNotMatch(store, /chatGptIdentity|oai-authenticated-user-email|signin-with-chatgpt|signout-with-chatgpt/i);
   assert.match(store, /verifySessionToken/);
   assert.match(store, /Authorization/);
   assert.match(store, /wenqu_session/);
-  assert.match(envTypes, /AUTH_MODE\?: "standard" \| "local"/);
-  assert.match(envTypes, /JWT_SECRET\?: string/);
+  assert.doesNotMatch(envTypes, /AUTH_MODE\?:|JWT_SECRET\?:|AI_API_KEY|OPENAI_API_KEY|AI_MODEL|SPEECH_API_KEY|MODERATION_API_KEY|JWT_TTL_SECONDS/);
   assert.match(store, /ensureSiteJwtSecret/);
   assert.match(store, /app_settings/);
 });
@@ -124,6 +123,16 @@ test("standard auth API exposes login logout and session endpoints", async () =>
   assert.match(logout, /Max-Age=0/);
   assert.match(session, /getAuthMode/);
   assert.match(session, /platformContext/);
+});
+
+test("settings API is admin-only and never echoes full secrets", async () => {
+  const route = await read("app/api/v1/settings/route.ts");
+  assert.match(route, /platformContext\(request, "admin"\)/);
+  assert.match(route, /loadPlatformSettings/);
+  assert.match(route, /savePlatformSettings/);
+  assert.match(route, /publicPlatformSettings/);
+  assert.doesNotMatch(route, /OPENAI_API_KEY|AI_API_KEY|SPEECH_API_KEY|MODERATION_API_KEY/);
+  assert.doesNotMatch(route, /console\.log|console\.error/);
 });
 
 test("dashboard exposes standard mode login and logout flow", async () => {
@@ -162,11 +171,10 @@ test("build uses the standard Wrangler configuration without Sites packaging", a
   assert.equal(pkg.scripts["cf:deploy"], "npm run build && npm run deploy");
   assert.match(vite, /\.\/wrangler\.toml/);
   assert.doesNotMatch(vite, /sites\(|sites-vite-plugin|wrangler\.chatgpt|WENQU_DEPLOY_TARGET/);
-  assert.match(standardWrangler, /AUTH_MODE = "standard"/);
   assert.match(standardWrangler, /binding = "DB"/);
   assert.match(standardWrangler, /binding = "CONTENT"/);
   assert.match(standardWrangler, /database_name = "wenqu-platform-db"/);
-  assert.doesNotMatch(standardWrangler, /database_id|bucket_name|00000000-0000-4000-8000-000000000000|replace-with-r2-bucket-name|required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
+  assert.doesNotMatch(standardWrangler, /\[vars\]|AUTH_MODE|JWT_TTL_SECONDS|database_id|bucket_name|00000000-0000-4000-8000-000000000000|replace-with-r2-bucket-name|required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
   await assert.rejects(read(".openai/hosting.json"));
   await assert.rejects(read("wrangler.chatgpt.toml"));
   await assert.rejects(read("build/sites-vite-plugin.ts"));
@@ -243,9 +251,8 @@ test("standard cloudflare deployment configuration has no variable prerequisites
   assert.match(standardWrangler, /binding = "DB"/);
   assert.match(standardWrangler, /binding = "CONTENT"/);
   assert.doesNotMatch(standardWrangler, /database_id|bucket_name|replace-with|00000000/);
-  assert.doesNotMatch(standardWrangler, /ADMIN_PASSWORD|JWT_SECRET|required =|CLOUDFLARE_API_TOKEN/);
-  assert.match(envExample, /AUTH_MODE=standard/);
-  assert.doesNotMatch(envExample, /ADMIN_PASSWORD=|JWT_SECRET=/);
+  assert.doesNotMatch(standardWrangler, /\[vars\]|AUTH_MODE|JWT_TTL_SECONDS|ADMIN_PASSWORD|JWT_SECRET|required =|CLOUDFLARE_API_TOKEN/);
+  assert.doesNotMatch(envExample, /AUTH_MODE=|JWT_TTL_SECONDS=|ADMIN_PASSWORD=|JWT_SECRET=|OPENAI_API_KEY=|AI_API_KEY=|AI_MODEL=|SPEECH_API_KEY=|MODERATION_API_KEY=/);
   assert.doesNotMatch(envExample, /D1_DATABASE_ID|R2_BUCKET_NAME/);
   assert.doesNotMatch(envExample, /CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID/);
   assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
@@ -257,7 +264,7 @@ test("standard cloudflare deployment configuration has no variable prerequisites
   assert.match(agents, /使用说明.*平台内部功能使用说明/s);
   assert.match(agents, /本地开发.*clone.*依赖安装.*dev server/s);
   assert.match(agents, /demo 阶段/);
-  assert.match(agents, /AUTH_MODE=standard/);
+  assert.match(agents, /部署前.*零变量/s);
   assert.match(agents, /首次初始化/);
   assert.match(agents, /WAF Rate Limiting|Cloudflare Access/);
   assert.match(agents, /\.github\/workflows\/ci\.yml.*必要校验/s);
@@ -292,6 +299,7 @@ test("standard login uses account password hashes and change-password gate", asy
     read("cloudflare-env.d.ts"),
   ]);
   assert.match(login, /authenticateStandardAccount/);
+  assert.match(login, /loadPlatformSettings/);
   assert.match(standardLogin, /verifyPassword/);
   assert.match(standardLogin, /must_change_password AS mustChangePassword/);
   assert.match(standardLogin, /u\.status AS status/);
@@ -305,6 +313,17 @@ test("standard login uses account password hashes and change-password gate", asy
   assert.match(workspace, /workspacePasswordChangeGate/);
   assert.match(store, /mustChangePassword/);
   assert.doesNotMatch(envTypes, /ADMIN_PASSWORD\?: string/);
+});
+
+test("runtime service status reads platform settings from D1", async () => {
+  const [workspace, health] = await Promise.all([
+    read("app/api/v1/workspace/route.ts"),
+    read("app/api/v1/health/route.ts"),
+  ]);
+  assert.match(workspace, /loadPlatformSettings/);
+  assert.match(health, /loadPlatformSettings/);
+  assert.doesNotMatch(workspace, /AI_API_KEY|OPENAI_API_KEY|SPEECH_API_KEY|MODERATION_API_KEY/);
+  assert.doesNotMatch(health, /AI_API_KEY|OPENAI_API_KEY|AI_MODEL|SPEECH_API_KEY|MODERATION_API_KEY/);
 });
 
 test("pilot workspace UI exposes member content ai review and password change flows", async () => {
@@ -333,6 +352,24 @@ test("pilot workspace UI exposes member content ai review and password change fl
   assert.match(workspaceRoute, /submissionReviewsQuery = \(admin \|\| roles\.includes\("teacher"\)\)/);
 });
 
+test("admin UI exposes post-deploy platform settings stored in D1", async () => {
+  const [dashboard, staff, types, readme] = await Promise.all([
+    read("app/dashboard.tsx"),
+    read("app/staff-views.tsx"),
+    read("app/lib/platform-types.ts"),
+    read("README.md"),
+  ]);
+  assert.match(dashboard, /平台设置/);
+  assert.match(staff, /\/api\/v1\/settings/);
+  assert.match(staff, /保存平台设置/);
+  assert.match(staff, /OpenAI/);
+  assert.match(staff, /内容审核/);
+  assert.match(types, /platformSettings/);
+  assert.match(readme, /部署前.*零变量/s);
+  assert.match(readme, /平台设置.*OpenAI.*语音评测.*内容审核/s);
+  assert.doesNotMatch(readme, /Variables and Secrets|ADMIN_PASSWORD|JWT_SECRET|OPENAI_API_KEY|AI_API_KEY|SPEECH_API_KEY|MODERATION_API_KEY/);
+});
+
 test("README documents pilot workflow without exposing secrets", async () => {
   const [readme, envExample, openaiProvider] = await Promise.all([
     read("README.md"),
@@ -344,8 +381,7 @@ test("README documents pilot workflow without exposing secrets", async () => {
   assert.match(readme, /PDF\/DOCX\/TXT/);
   assert.match(readme, /AI 辅助批阅/);
   assert.match(readme, /教师确认/);
-  assert.match(envExample, /OPENAI_API_KEY=/);
-  assert.match(envExample, /AI_MODEL=gpt-5\.6-luna/);
+  assert.doesNotMatch(envExample, /OPENAI_API_KEY=|AI_MODEL=/);
   assert.match(openaiProvider, /https:\/\/api\.openai\.com\/v1\/responses/);
   assert.doesNotMatch(`${readme}\n${envExample}`, /sk-|password123|JWT_SECRET=.{12,}/);
   assert.doesNotMatch(`${readme}\n${envExample}`, /ChatGPT|Platform Sites|\.openai|wrangler\.chatgpt|oai-authenticated-user-email/i);
@@ -388,8 +424,8 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   assert.match(readme.slice(localDevIndex), /git clone https:\/\/github\.com\/Ryrant\/wenqu-chinese-learning-platform\.git/);
   assert.match(readme.slice(localDevIndex), /npm ci/);
   assert.match(readme.slice(localDevIndex), /npm run dev/);
-  assert.match(readme.slice(localDevIndex), /\.env\.local/);
-  assert.match(readme.slice(localDevIndex), /DEV_USER_EMAIL/);
+  assert.match(readme.slice(localDevIndex), /x-wenqu-dev-user/);
+  assert.doesNotMatch(readme.slice(localDevIndex), /AUTH_MODE|DEV_USER_EMAIL/);
 });
 
 test("local planning docs are ignored and ChatGPT Sites artifacts are untracked", async () => {

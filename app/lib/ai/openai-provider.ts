@@ -1,7 +1,7 @@
 import type { AiGenerationInput, AiGenerationResult, AiProvider } from "./provider";
 
 export function createOpenAiProvider(config: { apiKey?: string; model?: string }): AiProvider | null {
-  // apiKey is supplied from the server-only OPENAI_API_KEY environment variable.
+  // apiKey is supplied from the server-side platform settings store.
   if (!config.apiKey) return null;
   const model = config.model?.trim() || "gpt-5.6-luna";
   return {

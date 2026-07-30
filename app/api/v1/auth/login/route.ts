@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { createSessionToken, sessionCookieName } from "../../../../lib/auth-token";
+import { loadPlatformSettings } from "../../../../lib/platform-settings";
 import { ensurePlatformSchema, ensureSiteJwtSecret, getAuthMode } from "../../../../lib/platform-store";
 import { authenticateStandardAccount } from "../../../../lib/standard-login";
 
@@ -54,7 +55,7 @@ function cookieValue(token: string, maxAge: number) {
 
 export async function POST(request: Request) {
   if (getAuthMode() !== "standard") return json("auth_mode_not_standard", 404);
-  const bindings = env as unknown as { DB?: D1Database; JWT_SECRET?: string; JWT_TTL_SECONDS?: string };
+  const bindings = env as unknown as { DB?: D1Database };
   if (!bindings.DB) return json("database_unavailable", 500);
   await ensurePlatformSchema(bindings.DB);
   const key = clientKey(request);
@@ -76,11 +77,11 @@ export async function POST(request: Request) {
   loginAttempts.delete(key);
   await bindings.DB.prepare("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?").bind(account.id).run();
   const now = Math.floor(Date.now() / 1000);
-  const ttl = Number.parseInt(bindings.JWT_TTL_SECONDS ?? "604800", 10);
-  const maxAge = Number.isFinite(ttl) && ttl > 0 ? ttl : 604800;
+  const settings = await loadPlatformSettings(bindings.DB);
+  const maxAge = settings.jwtTtlSeconds;
   const displayName = account.displayName;
   const mustChangePassword = account.mustChangePassword === 1;
-  const jwtSecret = await ensureSiteJwtSecret(bindings.DB, bindings.JWT_SECRET);
+  const jwtSecret = await ensureSiteJwtSecret(bindings.DB);
   const token = await createSessionToken({ email: account.email, displayName, iat: now, exp: now + maxAge }, jwtSecret);
   return Response.json({ user: { email: account.email, displayName, mustChangePassword } }, {
     status: 200,
