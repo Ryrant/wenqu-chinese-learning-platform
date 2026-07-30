@@ -156,3 +156,17 @@ test("workspace routes expose member and guardian management operations", () => 
   assert.match(workspaceSource, /members:/);
   assert.match(workspaceSource, /guardianLinks:/);
 });
+
+test("access control helpers centralize teacher student and guardian filters", async () => {
+  const access = await readFile(new URL("app/lib/access-control.ts", root), "utf8");
+  const workspace = await readFile(new URL("app/api/v1/workspace/route.ts", root), "utf8");
+  const actions = await readFile(new URL("app/api/v1/workspace/actions/route.ts", root), "utf8");
+  assert.match(access, /export type AccessClause/);
+  assert.match(access, /export function classAccessClause/);
+  assert.match(access, /export function submissionAccessClause/);
+  assert.match(access, /guardian_student_links gl/);
+  assert.match(access, /gl.status='active'/);
+  assert.match(workspace, /classAccessClause/);
+  assert.match(workspace, /submissionAccessClause/);
+  assert.match(actions, /assertSubmissionReviewAccess/);
+});
