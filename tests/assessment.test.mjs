@@ -18,6 +18,8 @@ test("assessment service separates ai suggestion from final teacher confirmation
   assert.match(service, /confirmed/);
   assert.match(service, /mastery_snapshots/);
   assert.match(actions, /suggest_text_review/);
+  assert.match(actions, /no_reviewed_sources/);
+  assert.match(actions, /status: 422/);
   assert.match(actions, /confirm_submission_review/);
   assert.match(staff, /AI 建议/);
   assert.doesNotMatch(student, /ai_comment|aiSuggestedScore/);
