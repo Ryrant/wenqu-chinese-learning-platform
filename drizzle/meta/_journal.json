@@ -29,6 +29,13 @@
       "when": 1785433093000,
       "tag": "0003_initial_setup_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785466800000,
+      "tag": "0004_learning_loop",
+      "breakpoints": true
     }
   ]
 }

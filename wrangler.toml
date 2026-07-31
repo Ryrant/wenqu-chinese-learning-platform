@@ -6,6 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "wenqu-platform-db"
+migrations_dir = "drizzle"
 
 [[r2_buckets]]
 binding = "CONTENT"

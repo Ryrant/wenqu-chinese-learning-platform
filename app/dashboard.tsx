@@ -62,9 +62,11 @@ export function Dashboard() {
     return { mode: payload.authMode ?? null, setupRequired: payload.setupRequired === true };
   }
 
-  async function refresh() {
+  async function refresh(studentId?: string) {
     setError("");
-    const response = await fetch("/api/v1/workspace", { cache: "no-store" });
+    const selectedStudentId = studentId ?? data?.selectedStudent?.id;
+    const workspaceUrl = selectedStudentId ? `/api/v1/workspace?studentId=${encodeURIComponent(selectedStudentId)}` : "/api/v1/workspace";
+    const response = await fetch(workspaceUrl, { cache: "no-store" });
     const payload = await readJson<WorkspaceData | { error?: string }>(response);
     if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
     const next = payload as WorkspaceData;
@@ -223,9 +225,9 @@ export function Dashboard() {
         {noticesOpen && <div className="notice-drawer"><div className="panel-heading"><h3>通知</h3><button onClick={() => setNoticesOpen(false)}>关闭</button></div>{data.notifications.length ? data.notifications.map((item) => <button key={String(item.id)} className={item.read_at ? "read" : ""} onClick={async () => { await act("mark_notification", { id: item.id }); }}><strong>{String(item.title)}</strong><small>{String(item.detail)}</small></button>) : <p className="empty-state">暂无通知</p>}</div>}
       </header>
       <div className="content"><div className="truth-banner"><strong>✓ 已连接 D1 + R2</strong><span>所有数字来自当前租户数据；未配置的模型能力会明确标注，不展示伪造分数。</span></div>
-        {role === "student" && <StudentView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify}/>}
+        {role === "student" && <StudentView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify} navigate={setActiveNav}/>}
         {role === "teacher" && <TeacherView nav={activeNav} data={data} act={act} notify={notify}/>}
-        {role === "guardian" && <GuardianView nav={activeNav} data={data} act={act} notify={notify}/>}
+        {role === "guardian" && <GuardianView nav={activeNav} data={data} act={act} notify={notify} selectStudent={async (studentId) => refresh(studentId)}/>}
         {role === "admin" && <AdminView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify}/>}
       </div>
     </section>
