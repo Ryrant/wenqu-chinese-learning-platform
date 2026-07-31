@@ -23,6 +23,8 @@ test("workspace actions expose every learning-loop write with explicit roles", a
   assert.match(actions, /action === "update_recommendation_status"/);
   assert.match(actions, /validateRubric/);
   assert.match(actions, /assignment_objectives/);
+  assert.match(actions, /objectiveCount/);
+  assert.match(actions, /JSON\.parse\(existing\.rubricJson\)/);
 });
 
 test("learning-loop service scopes guardian teacher and student operations", async () => {
@@ -37,11 +39,15 @@ test("learning-loop service scopes guardian teacher and student operations", asy
   assert.match(service, /updateMasteryEvidence/);
   assert.match(service, /blendMastery/);
   assert.match(service, /learning_recommendations/);
+  assert.match(service, /isRecommendationDue/);
+  assert.match(service, /row\.sourceType !== "diagnostic"/);
 });
 
 test("teacher-confirmed review reuses cumulative mastery update service", async () => {
   const assessment = await read("app/lib/assessment-service.ts");
   assert.match(assessment, /updateMasteryEvidence/);
+  assert.match(assessment, /review_status!='reviewed'/);
+  assert.match(assessment, /submission_already_reviewed/);
   assert.doesNotMatch(assessment, /SELECT s\.tenant_id,s\.student_user_id,ao\.objective_id,\?,1/);
 });
 
@@ -57,4 +63,8 @@ test("workspace read model selects a bound child and returns latest mastery only
   assert.match(workspace, /assertGuardianStudentAccess/);
   assert.match(workspace, /ROW_NUMBER\(\) OVER/);
   assert.match(workspace, /rn=1/);
+  assert.match(workspace, /isRecommendationDue/);
+  assert.match(workspace, /weeklyStatsQuery/);
+  assert.match(workspace, /PARTITION BY cr\.student_user_id,cr\.scope/);
+  assert.match(workspace, /submittedByFocus/);
 });

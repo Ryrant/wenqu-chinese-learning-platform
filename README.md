@@ -110,9 +110,17 @@ https://你的项目名.你的子域.workers.dev/
 
 ### v1.2.0 升级提示
 
-`v1.2.0` 将 Next.js 升级到 `16.2.12`，并增加 `drizzle/0004_learning_loop.sql`。迁移只新增学习闭环相关表和列，不删除或重命名已有结构。运行时仍会幂等校验基础表；正式环境建议在部署应用前备份 D1，并按现有迁移流程执行增量迁移。
+`v1.2.0` 将 Next.js 升级到 `16.2.12`，并增加 `drizzle/0004_learning_loop.sql`。迁移只新增学习闭环相关表和列，不删除或重命名已有结构。`wrangler.toml` 已将迁移目录指定为 `drizzle/`；运行时仍会幂等校验基础表。
 
-升级后建议执行：
+已有 Cloudflare 环境升级时，先备份 D1，再查看并执行远端增量迁移：
+
+```bash
+npx wrangler d1 export wenqu-platform-db --remote --output=wenqu-platform-db-before-v1.2.sql
+npx wrangler d1 migrations list wenqu-platform-db --remote
+npx wrangler d1 migrations apply wenqu-platform-db --remote
+```
+
+随后执行发布验证：
 
 ```bash
 npm ci
@@ -278,7 +286,7 @@ npm run build:standard
 
 - `tests/rendered-html.test.mjs`：检查页面、API、部署配置和安全约束。
 - `tests/auth-token.test.mjs`：执行 JWT 创建、校验、过期、篡改和畸形输入行为测试。
-- `tests/learning-loop.test.mjs`：检查诊断计分、掌握度更新、推荐排序、评分量规和增量迁移。
+- `tests/learning-loop.test.mjs`：执行诊断完整题卷、次日复习门禁、重复评分保护，并检查掌握度、推荐排序、评分量规和增量迁移。
 - `tests/learning-loop-actions.test.mjs`：检查四端写操作、角色权限、租户范围和最新快照查询。
 - `tests/learning-loop-ui.test.mjs`：检查十二项页面入口、空状态、移动端布局和 v1.2 文档约束。
 

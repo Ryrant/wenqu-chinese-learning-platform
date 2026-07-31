@@ -22,6 +22,16 @@ export function calculateDiagnosticScores(evidence: DiagnosticEvidence[]) {
   ])) as Record<string, ObjectiveScore>;
 }
 
+export function matchesDiagnosticItemSet(expectedIds: string[], submittedIds: string[]) {
+  if (expectedIds.length !== submittedIds.length) return false;
+  const expected = new Set(expectedIds);
+  const submitted = new Set(submittedIds);
+  return expected.size === expectedIds.length
+    && submitted.size === submittedIds.length
+    && expected.size === submitted.size
+    && [...expected].every((id) => submitted.has(id));
+}
+
 export function blendMastery(previousMastery: number | null, previousEvidenceCount: number, score: number, evidenceCount = 1) {
   const nextScore = clamp01(score);
   const mastery = previousMastery === null
@@ -53,6 +63,12 @@ export function rankLearningPlan<T extends LearningPlanItem>(items: T[], now = n
       return leftDue - rightDue || left.id.localeCompare(right.id);
     })
     .slice(0, 3);
+}
+
+export function isRecommendationDue(dueAt: string | null | undefined, now = new Date()) {
+  if (!dueAt) return true;
+  const dueTime = new Date(dueAt).getTime();
+  return Number.isFinite(dueTime) && dueTime <= now.getTime();
 }
 
 export function validateRubric(value: unknown): RubricDimension[] {

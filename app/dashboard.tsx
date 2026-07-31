@@ -225,7 +225,7 @@ export function Dashboard() {
         {noticesOpen && <div className="notice-drawer"><div className="panel-heading"><h3>通知</h3><button onClick={() => setNoticesOpen(false)}>关闭</button></div>{data.notifications.length ? data.notifications.map((item) => <button key={String(item.id)} className={item.read_at ? "read" : ""} onClick={async () => { await act("mark_notification", { id: item.id }); }}><strong>{String(item.title)}</strong><small>{String(item.detail)}</small></button>) : <p className="empty-state">暂无通知</p>}</div>}
       </header>
       <div className="content"><div className="truth-banner"><strong>✓ 已连接 D1 + R2</strong><span>所有数字来自当前租户数据；未配置的模型能力会明确标注，不展示伪造分数。</span></div>
-        {role === "student" && <StudentView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify}/>}
+        {role === "student" && <StudentView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify} navigate={setActiveNav}/>}
         {role === "teacher" && <TeacherView nav={activeNav} data={data} act={act} notify={notify}/>}
         {role === "guardian" && <GuardianView nav={activeNav} data={data} act={act} notify={notify} selectStudent={async (studentId) => refresh(studentId)}/>}
         {role === "admin" && <AdminView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify}/>}

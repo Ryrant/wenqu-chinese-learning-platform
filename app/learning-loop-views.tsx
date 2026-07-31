@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { isRecommendationDue } from "./lib/learning-loop";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { numberValue, stringValue } from "./lib/platform-types";
 
@@ -25,10 +26,12 @@ function dueLabel(value: unknown) {
 }
 
 export function StudentDiagnostic({ data, act, notify }: LoopProps) {
-  const items = data.diagnosticItems;
+  const levels = [...new Set(data.diagnosticItems.map((item) => stringValue(item.level, "A2")))];
+  const [selectedLevel, setSelectedLevel] = useState(levels[0] ?? "A2");
+  const items = data.diagnosticItems.filter((item) => stringValue(item.level, "A2") === selectedLevel);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
-  const level = stringValue(items[0]?.level, "A2");
+  const level = selectedLevel;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -57,6 +60,15 @@ export function StudentDiagnostic({ data, act, notify }: LoopProps) {
       {data.diagnosticSummary && <span className="score-pill">最近 {Math.round(numberValue(data.diagnosticSummary.score) * 100)}%</span>}
     </div>
     <p>按学习目标计算正确率，提交后更新掌握度并自动生成错题复习。</p>
+    {levels.length > 1 && <label className="diagnostic-level">
+      诊断级别
+      <select value={selectedLevel} onChange={(event) => {
+        setSelectedLevel(event.target.value);
+        setAnswers({});
+      }}>
+        {levels.map((item) => <option key={item} value={item}>{item}</option>)}
+      </select>
+    </label>}
     {items.length ? <form onSubmit={submit} className="diagnostic-form">
       {items.map((item, index) => {
         const id = String(item.id);
@@ -74,8 +86,24 @@ export function StudentDiagnostic({ data, act, notify }: LoopProps) {
   </section>;
 }
 
-export function StudentTodayPlan({ data }: Pick<LoopProps, "data">) {
+export function StudentTodayPlan({ data, act, notify, navigate }: LoopProps & { navigate: (target: string) => void }) {
+  const [busyId, setBusyId] = useState("");
   const kindLabels: Record<string, string> = { teacher: "教师干预", review: "到期错题", family: "家庭任务", assignment: "学习作业" };
+  async function handle(item: Record<string, unknown>) {
+    const id = String(item.id);
+    const kind = stringValue(item.kind, "");
+    if (kind === "review") return navigate("成长档案");
+    if (kind === "assignment") return navigate("学习任务");
+    setBusyId(id);
+    try {
+      await act("update_recommendation_status", { id, status: "completed" });
+      notify("计划已完成", "这项任务已从今日计划中移除。");
+    } catch (reason) {
+      notify("更新失败", reason instanceof Error ? reason.message : "请重试", "error");
+    } finally {
+      setBusyId("");
+    }
+  }
   return <article className="panel loop-panel">
     <div className="panel-heading">
       <div><span className="eyebrow">固定规则 · 可解释排序</span><h3>今日学习计划</h3></div>
@@ -85,6 +113,9 @@ export function StudentTodayPlan({ data }: Pick<LoopProps, "data">) {
     {data.learningPlan.length ? data.learningPlan.map((item, index) => <div className="plan-row" key={String(item.id)}>
       <span className="plan-order">{index + 1}</span>
       <div><strong>{stringValue(item.title)}</strong><small>{kindLabels[stringValue(item.kind, "")] ?? "普通作业"} · {dueLabel(item.dueAt ?? item.due_at)}</small></div>
+      <button className="soft-button" type="button" disabled={busyId === String(item.id)} onClick={() => handle(item)}>
+        {stringValue(item.kind, "") === "review" ? "进入复习" : stringValue(item.kind, "") === "assignment" ? "进入作业" : busyId === String(item.id) ? "更新中…" : "标记完成"}
+      </button>
     </div>) : <p className="empty-state">今天没有待办，完成新作业后会生成下一步计划。</p>}
   </article>;
 }
@@ -92,7 +123,11 @@ export function StudentTodayPlan({ data }: Pick<LoopProps, "data">) {
 export function StudentReviewCenter({ data, act, notify }: LoopProps) {
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [busyId, setBusyId] = useState("");
-  const reviews = data.recommendations.filter((item) => item.source_type === "diagnostic" && item.status === "pending");
+  const reviews = data.recommendations.filter((item) =>
+    item.source_type === "diagnostic"
+    && item.status === "pending"
+    && isRecommendationDue(typeof item.due_at === "string" ? item.due_at : null)
+  );
 
   async function answer(id: string) {
     if (!Number.isInteger(answers[id])) return notify("请选择答案", "选择一个选项后再提交。", "error");

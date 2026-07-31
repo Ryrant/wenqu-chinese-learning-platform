@@ -11,13 +11,13 @@ export function ProgressRing({ value, label }: { value: number; label: string })
   </div>;
 }
 
-type Props = { nav: string; data: WorkspaceData; act: Act; refresh: () => Promise<void>; notify: Notify };
+type Props = { nav: string; data: WorkspaceData; act: Act; refresh: () => Promise<void>; notify: Notify; navigate: (target: string) => void };
 
 function PageTitle({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
   return <section className="welcome-row"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{detail}</p></div></section>;
 }
 
-export function StudentView({ nav, data, act, refresh, notify }: Props) {
+export function StudentView({ nav, data, act, refresh, notify, navigate }: Props) {
   const [question, setQuestion] = useState("中秋节为什么代表团圆？");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
@@ -181,7 +181,7 @@ export function StudentView({ nav, data, act, refresh, notify }: Props) {
   const current = published[0];
   return <>
     <PageTitle eyebrow="学习总览 · 数据实时读取" title={`早上好，${data.user.displayName}！`} detail="今天也一起发现中文里的小惊喜。"/>
-    <StudentTodayPlan data={data}/>
+    <StudentTodayPlan data={data} act={act} notify={notify} navigate={navigate}/>
     <section className="hero-learning">
       <div className="hero-copy">
         <span className="tag">正在学习 · {stringValue(current?.activity_type, "等待教师发布任务")}</span>

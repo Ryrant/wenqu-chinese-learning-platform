@@ -17,6 +17,11 @@ test("student workspace exposes diagnostic plan and review actions", async () =>
   assert.match(source, /submit_diagnostic/);
   assert.match(source, /answer_review_item/);
   assert.match(source, /最多显示 3 项/);
+  assert.match(source, /selectedLevel/);
+  assert.match(source, /isRecommendationDue/);
+  assert.match(source, /标记完成/);
+  assert.match(source, /进入复习/);
+  assert.match(source, /进入作业/);
 });
 
 test("teacher workspace exposes rubric heatmap and intervention actions", async () => {
@@ -31,6 +36,7 @@ test("teacher workspace exposes rubric heatmap and intervention actions", async 
   assert.match(source, /objectiveIds/);
   assert.match(source, /rubric/);
   assert.match(source, /create_intervention/);
+  assert.match(staff, /data\.masteryMatrix\.reduce/);
 });
 
 test("guardian workspace exposes child switching weekly report and family tasks", async () => {

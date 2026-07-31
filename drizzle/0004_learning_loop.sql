@@ -1,5 +1,6 @@
 ALTER TABLE `learning_objectives` ADD `status` text NOT NULL DEFAULT 'active';--> statement-breakpoint
 ALTER TABLE `assignments` ADD `rubric_json` text NOT NULL DEFAULT '[]';--> statement-breakpoint
+UPDATE `assignments` SET `rubric_json`='[{"name":"内容准确性","weight":40},{"name":"语言表达","weight":35},{"name":"文化理解","weight":25}]' WHERE `rubric_json`='[]';--> statement-breakpoint
 CREATE TABLE `diagnostic_items` (
   `id` text PRIMARY KEY NOT NULL,
   `tenant_id` text NOT NULL,

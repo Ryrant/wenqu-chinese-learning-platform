@@ -142,6 +142,23 @@ export async function POST(request: Request) {
 
     if (action === "publish_assignment") {
       const id = requireText(body.id, "assignment_id");
+      const existing = await db.prepare(`SELECT a.rubric_json AS rubricJson,COUNT(lo.id) AS objectiveCount
+        FROM assignments a
+        LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
+        LEFT JOIN learning_objectives lo ON lo.id=ao.objective_id AND lo.tenant_id=ao.tenant_id AND lo.status='active'
+        WHERE a.id=? AND a.tenant_id=? AND a.status IN ('draft','review')
+          AND (?=1 OR a.class_id IN (SELECT id FROM classes WHERE tenant_id=? AND teacher_user_id=?))
+        GROUP BY a.id`)
+        .bind(id, tenantId, isAdmin ? 1 : 0, tenantId, userId)
+        .first<{ rubricJson: string; objectiveCount: number }>();
+      if (!existing || Number(existing.objectiveCount) < 1) {
+        return Response.json({ error: "assignment_requires_objective" }, { status: 409 });
+      }
+      try {
+        validateRubric(JSON.parse(existing.rubricJson));
+      } catch {
+        return Response.json({ error: "assignment_requires_valid_rubric" }, { status: 409 });
+      }
       const result = await db.prepare("UPDATE assignments SET status='published',published_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status IN ('draft','review') AND (?=1 OR class_id IN (SELECT id FROM classes WHERE tenant_id=? AND teacher_user_id=?))").bind(id, tenantId, isAdmin ? 1 : 0, tenantId, userId).run();
       if (!result.meta.changes) return Response.json({ error: "assignment_not_publishable" }, { status: 409 });
       await audit(db, tenantId, userId, "assignment.published", "assignment", id);

@@ -38,18 +38,21 @@ export async function suggestTextReview(db: D1Database, context: PlatformContext
 export async function confirmSubmissionReview(db: D1Database, context: PlatformContext, input: { submissionId: string; score: number; comment: string }): Promise<ConfirmedReview> {
   await assertSubmissionReviewAccess(db, context, input.submissionId);
   const score = Math.max(0, Math.min(input.score, 100));
+  const updated = await db.prepare(`UPDATE submissions
+    SET score=?,confidence=1,feedback=?,review_status='reviewed',reviewed_at=CURRENT_TIMESTAMP
+    WHERE id=? AND tenant_id=? AND review_status!='reviewed'`)
+    .bind(score, input.comment.slice(0, 2000), input.submissionId, context.tenantId)
+    .run();
+  if (!updated.meta.changes) throw new Error("submission_already_reviewed");
   const evidence = await db.prepare(`SELECT s.student_user_id AS studentUserId,ao.objective_id AS objectiveId
     FROM submissions s
     JOIN assignment_objectives ao ON ao.tenant_id=s.tenant_id AND ao.assignment_id=s.assignment_id
     WHERE s.id=? AND s.tenant_id=?`)
     .bind(input.submissionId, context.tenantId)
     .all<{ studentUserId: string; objectiveId: string }>();
-  await db.batch([
-    db.prepare("INSERT INTO submission_reviews (id,tenant_id,submission_id,reviewer_user_id,final_score,final_comment,weakness_tags_json,status) VALUES (?,?,?,?,?,?,?,'confirmed')")
-      .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, input.comment.slice(0, 2000), "[]"),
-    db.prepare("UPDATE submissions SET score=?,confidence=1,feedback=?,review_status='reviewed',reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")
-      .bind(score, input.comment.slice(0, 2000), input.submissionId, context.tenantId),
-  ]);
+  await db.prepare("INSERT INTO submission_reviews (id,tenant_id,submission_id,reviewer_user_id,final_score,final_comment,weakness_tags_json,status) VALUES (?,?,?,?,?,?,?,'confirmed')")
+    .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, input.comment.slice(0, 2000), "[]")
+    .run();
   for (const item of evidence.results) {
     await updateMasteryEvidence(db, {
       tenantId: context.tenantId,

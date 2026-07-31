@@ -1,4 +1,4 @@
-import { blendMastery, calculateDiagnosticScores } from "./learning-loop";
+import { blendMastery, calculateDiagnosticScores, isRecommendationDue, matchesDiagnosticItemSet } from "./learning-loop";
 import type { PlatformContext } from "./platform-store";
 
 type DiagnosticAnswerInput = { itemId: string; selectedOption: number };
@@ -50,12 +50,14 @@ export async function submitDiagnostic(db: D1Database, context: PlatformContext,
   if (unique.size !== input.answers.length || [...unique.values()].some((answer) => !Number.isInteger(answer.selectedOption) || answer.selectedOption < 0 || answer.selectedOption > 3)) {
     throw new Error("invalid_diagnostic_answers");
   }
-  const placeholders = [...unique.keys()].map(() => "?").join(",");
   const rows = await db.prepare(`SELECT id,objective_id AS objectiveId,prompt,correct_option AS correctOption
-    FROM diagnostic_items WHERE tenant_id=? AND level=? AND status='active' AND id IN (${placeholders})`)
-    .bind(context.tenantId, input.level, ...unique.keys())
+    FROM diagnostic_items WHERE tenant_id=? AND level=? AND status='active'
+    ORDER BY sort_order,created_at,id`)
+    .bind(context.tenantId, input.level)
     .all<{ id: string; objectiveId: string; prompt: string; correctOption: number }>();
-  if (rows.results.length !== unique.size) throw new Error("invalid_diagnostic_answers");
+  if (!rows.results.length || !matchesDiagnosticItemSet(rows.results.map((item) => item.id), [...unique.keys()])) {
+    throw new Error("invalid_diagnostic_answers");
+  }
 
   const attemptId = crypto.randomUUID();
   const evidence = rows.results.map((item) => ({
@@ -97,13 +99,14 @@ export async function submitDiagnostic(db: D1Database, context: PlatformContext,
 
 export async function answerReviewItem(db: D1Database, context: PlatformContext, input: { recommendationId: string; selectedOption: number }) {
   if (!Number.isInteger(input.selectedOption) || input.selectedOption < 0 || input.selectedOption > 3) throw new Error("invalid_selected_option");
-  const row = await db.prepare(`SELECT lr.id,lr.objective_id AS objectiveId,di.correct_option AS correctOption
+  const row = await db.prepare(`SELECT lr.id,lr.objective_id AS objectiveId,lr.due_at AS dueAt,di.correct_option AS correctOption
     FROM learning_recommendations lr
     JOIN diagnostic_items di ON di.id=lr.source_id AND di.tenant_id=lr.tenant_id
     WHERE lr.id=? AND lr.tenant_id=? AND lr.student_user_id=? AND lr.source_type='diagnostic' AND lr.status='pending'`)
     .bind(input.recommendationId, context.tenantId, context.userId)
-    .first<{ id: string; objectiveId: string; correctOption: number }>();
+    .first<{ id: string; objectiveId: string; dueAt: string | null; correctOption: number }>();
   if (!row) throw new Error("review_item_not_found");
+  if (!isRecommendationDue(row.dueAt)) throw new Error("review_not_due");
   const correct = input.selectedOption === Number(row.correctOption);
   const nextDueAt = correct ? null : tomorrowIso();
   await db.prepare(`UPDATE learning_recommendations
@@ -176,8 +179,8 @@ export async function updateRecommendationStatus(db: D1Database, context: Platfo
     .first<{ id: string; studentUserId: string; sourceType: RecommendationSource; createdBy: string }>();
   if (!row) throw new Error("recommendation_not_found");
   if (!context.roles.includes("admin")) {
-    if (context.roles.includes("student") && row.studentUserId === context.userId) {
-      // A student may update only their own recommendation.
+    if (context.roles.includes("student") && row.studentUserId === context.userId && row.sourceType !== "diagnostic") {
+      // Diagnostic recommendations can only be completed by answering the review item.
     } else if (context.roles.includes("guardian") && row.sourceType === "family") {
       await assertGuardianStudentAccess(db, context, row.studentUserId);
     } else if (context.roles.includes("teacher") && row.sourceType === "teacher" && row.createdBy === context.userId) {

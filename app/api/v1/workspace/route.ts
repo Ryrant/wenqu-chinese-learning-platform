@@ -1,5 +1,5 @@
 import { classAccessClause, submissionAccessClause } from "../../../lib/access-control";
-import { rankLearningPlan, type LearningPlanItem } from "../../../lib/learning-loop";
+import { isRecommendationDue, rankLearningPlan, type LearningPlanItem } from "../../../lib/learning-loop";
 import { assertGuardianStudentAccess } from "../../../lib/learning-loop-service";
 import { loadPlatformSettings, publicPlatformSettings } from "../../../lib/platform-settings";
 import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
@@ -18,13 +18,32 @@ async function qualityMetrics(db: D1Database, tenantId: string) {
       WHERE a.tenant_id=? AND a.status='published'`).bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM submissions WHERE tenant_id=? AND review_status!='reviewed'").bind(tenantId).first<{ count: number }>(),
     db.prepare(`WITH latest AS (
-      SELECT mastery,ROW_NUMBER() OVER (PARTITION BY student_user_id,objective_id ORDER BY id DESC) AS rn
+      SELECT student_user_id,objective_id,mastery,
+        ROW_NUMBER() OVER (PARTITION BY student_user_id,objective_id ORDER BY id DESC) AS rn
       FROM mastery_snapshots WHERE tenant_id=?
-    ) SELECT COUNT(*) AS count FROM latest WHERE rn=1 AND mastery<0.6`).bind(tenantId).first<{ count: number }>(),
+    ) SELECT COUNT(*) AS count FROM latest
+      JOIN learning_objectives lo ON lo.tenant_id=? AND lo.id=latest.objective_id AND lo.status='active'
+      JOIN role_memberships rm ON rm.tenant_id=? AND rm.user_id=latest.student_user_id
+        AND rm.role='student' AND rm.status='active'
+      WHERE latest.rn=1 AND latest.mastery<0.6
+        AND EXISTS (SELECT 1 FROM enrollments e
+          WHERE e.tenant_id=? AND e.student_user_id=latest.student_user_id AND e.status='active')`)
+      .bind(tenantId, tenantId, tenantId, tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM source_documents WHERE tenant_id=? AND processing_status IN ('uploaded','processed')").bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM ai_sessions WHERE tenant_id=? AND created_at>=datetime('now','-7 days')").bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(DISTINCT user_id) AS count FROM role_memberships WHERE tenant_id=? AND role='student' AND status='active'").bind(tenantId).first<{ count: number }>(),
-    db.prepare("SELECT COUNT(DISTINCT student_user_id) AS count FROM consent_records WHERE tenant_id=? AND scope='learning_analytics' AND status='granted'").bind(tenantId).first<{ count: number }>(),
+    db.prepare(`WITH latest AS (
+      SELECT cr.student_user_id,cr.status,cr.expires_at,
+        ROW_NUMBER() OVER (PARTITION BY cr.student_user_id,cr.scope ORDER BY cr.created_at DESC,cr.id DESC) AS rn
+      FROM consent_records cr
+      WHERE cr.tenant_id=? AND cr.scope='learning_analytics'
+    ) SELECT COUNT(DISTINCT latest.student_user_id) AS count
+      FROM latest
+      JOIN role_memberships rm ON rm.tenant_id=? AND rm.user_id=latest.student_user_id
+        AND rm.role='student' AND rm.status='active'
+      WHERE latest.rn=1 AND latest.status='granted'
+        AND (latest.expires_at IS NULL OR latest.expires_at>CURRENT_TIMESTAMP)`)
+      .bind(tenantId, tenantId).first<{ count: number }>(),
   ]);
   const publishedAssignments = Number(assignments?.count ?? 0);
   const activeStudents = Number(students?.count ?? 0);
@@ -77,12 +96,14 @@ export async function GET(request: Request) {
       WHERE c.tenant_id=? AND ${classAccess.sql} GROUP BY c.id ORDER BY c.created_at DESC`)
       .bind(tenantId, ...classAccess.args);
     const assignmentsQuery = db.prepare(`SELECT a.*,c.name AS className,COUNT(DISTINCT s.id) AS submissionCount,
+      EXISTS(SELECT 1 FROM submissions fs
+        WHERE fs.tenant_id=a.tenant_id AND fs.assignment_id=a.id AND fs.student_user_id=?) AS submittedByFocus,
       group_concat(DISTINCT ao.objective_id) AS objectiveIds
       FROM assignments a JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
       LEFT JOIN submissions s ON s.assignment_id=a.id AND s.tenant_id=a.tenant_id
       LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
       WHERE a.tenant_id=? AND ${classAccess.sql} GROUP BY a.id ORDER BY a.created_at DESC`)
-      .bind(tenantId, ...classAccess.args);
+      .bind(focusStudentId, tenantId, ...classAccess.args);
     const submissionsQuery = db.prepare(`SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName
       FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
       JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
@@ -90,6 +111,14 @@ export async function GET(request: Request) {
       WHERE s.tenant_id=? AND ${submissionAccess.sql}${guardianSubmissionFilter}
       ORDER BY s.created_at DESC LIMIT 50`)
       .bind(tenantId, ...submissionAccess.args, ...guardianSubmissionArgs);
+    const weeklyStatsQuery = db.prepare(`SELECT
+      SUM(CASE WHEN created_at>=datetime('now','-7 days') THEN 1 ELSE 0 END) AS submittedCount,
+      SUM(CASE WHEN review_status='reviewed'
+        AND COALESCE(reviewed_at,created_at)>=datetime('now','-7 days') THEN 1 ELSE 0 END) AS reviewedCount,
+      AVG(CASE WHEN review_status='reviewed'
+        AND COALESCE(reviewed_at,created_at)>=datetime('now','-7 days') THEN score END) AS averageScore
+      FROM submissions WHERE tenant_id=? AND student_user_id=?`)
+      .bind(tenantId, focusStudentId);
     const submissionReviewsQuery = (admin || teacher)
       ? db.prepare(`SELECT sr.* FROM submission_reviews sr
           JOIN submissions s ON s.id=sr.submission_id AND s.tenant_id=sr.tenant_id
@@ -151,11 +180,12 @@ export async function GET(request: Request) {
       : null;
 
     const [
-      classes, assignments, submissions, submissionReviews, mastery, masteryMatrix, recommendations,
+      classes, assignments, submissions, weeklyStats, submissionReviews, mastery, masteryMatrix, recommendations,
       diagnosticItems, learningObjectives, enrollments, documents, plans, notifications, consents,
       audits, invitations, members, guardianLinks, diagnosticSummary,
     ] = await Promise.all([
       classesQuery.all(), assignmentsQuery.all(), submissionsQuery.all(),
+      weeklyStatsQuery.first<{ submittedCount: number | null; reviewedCount: number | null; averageScore: number | null }>(),
       submissionReviewsQuery ? submissionReviewsQuery.all() : Promise.resolve(empty),
       masteryQuery.all(), masteryMatrixQuery ? masteryMatrixQuery.all() : Promise.resolve(empty),
       recommendationsQuery.all(), diagnosticItemsQuery ? diagnosticItemsQuery.all() : Promise.resolve(empty),
@@ -176,19 +206,25 @@ export async function GET(request: Request) {
       db.prepare("SELECT id,level,score,completed_at AS completedAt FROM diagnostic_attempts WHERE tenant_id=? AND student_user_id=? ORDER BY completed_at DESC LIMIT 1").bind(tenantId, focusStudentId).first(),
     ]);
 
-    const reviewedThisWeek = submissions.results.filter((item) => item.review_status === "reviewed" && new Date(String(item.reviewed_at ?? item.created_at)).getTime() >= Date.now() - 7 * 86400000);
     const masteryAverage = mastery.results.length
       ? Math.round(mastery.results.reduce((sum, item) => sum + Number(item.mastery ?? 0), 0) / mastery.results.length * 100)
       : 0;
     const weeklyReport = {
-      submittedCount: submissions.results.filter((item) => new Date(String(item.created_at)).getTime() >= Date.now() - 7 * 86400000).length,
-      reviewedCount: reviewedThisWeek.length,
-      averageScore: reviewedThisWeek.length ? Math.round(reviewedThisWeek.reduce((sum, item) => sum + Number(item.score ?? 0), 0) / reviewedThisWeek.length) : null,
+      submittedCount: Number(weeklyStats?.submittedCount ?? 0),
+      reviewedCount: Number(weeklyStats?.reviewedCount ?? 0),
+      averageScore: weeklyStats?.averageScore === null || weeklyStats?.averageScore === undefined
+        ? null
+        : Math.round(Number(weeklyStats.averageScore)),
       masteryAverage,
       pendingRecommendations: recommendations.results.filter((item) => item.status === "pending").length,
     };
+    const now = new Date();
     const planCandidates: Array<LearningPlanItem & Row> = [
-      ...recommendations.results.filter((item) => item.status === "pending").map((item) => ({
+      ...recommendations.results.filter((item) =>
+        item.status === "pending"
+        && (item.source_type !== "diagnostic"
+          || isRecommendationDue(typeof item.due_at === "string" ? item.due_at : null, now))
+      ).map((item) => ({
         ...item,
         id: String(item.id),
         kind: item.source_type === "teacher" ? "teacher" as const
@@ -196,7 +232,7 @@ export async function GET(request: Request) {
             : "review" as const,
         dueAt: typeof item.due_at === "string" ? item.due_at : null,
       })),
-      ...assignments.results.filter((item) => item.status === "published").map((item) => ({
+      ...assignments.results.filter((item) => item.status === "published" && Number(item.submittedByFocus ?? 0) === 0).map((item) => ({
         ...item,
         id: String(item.id),
         kind: "assignment" as const,

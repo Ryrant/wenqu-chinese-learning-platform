@@ -190,6 +190,11 @@ async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
     [`${tenantId}-diag-culture`, `${tenantId}-obj-culture`, "中秋节的圆月和月饼通常象征什么？", ["远行", "团圆", "比赛", "上学"], 1, "圆月和月饼常用来象征家人团圆。"],
   ] as const;
   const due = new Date(Date.now() + 7 * 86400000).toISOString();
+  const defaultRubricJson = JSON.stringify([
+    { name: "内容准确性", weight: 40 },
+    { name: "语言表达", weight: 35 },
+    { name: "文化理解", weight: 25 },
+  ]);
   const festivalDoc = `${tenantId}-doc-festival`, textbookDoc = `${tenantId}-doc-textbook`;
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,?,?)").bind(tenantId, "华文趣味试用学校", "sg", "active"),
@@ -200,9 +205,10 @@ async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
     db.prepare("INSERT OR IGNORE INTO guardian_student_links (tenant_id,guardian_user_id,student_user_id,verified_at) VALUES (?,?,?,CURRENT_TIMESTAMP)").bind(tenantId, userId, userId),
     ...objectives.map(([id, code, title, skill]) => db.prepare("INSERT OR IGNORE INTO learning_objectives (id,tenant_id,code,title,skill,level) VALUES (?,?,?,?,?,?)").bind(id, tenantId, code, title, skill, "A2")),
     ...diagnosticItems.map(([id, objectiveId, prompt, options, correctOption, explanation], index) => db.prepare("INSERT OR IGNORE INTO diagnostic_items (id,tenant_id,objective_id,level,prompt,options_json,correct_option,explanation,sort_order,status,created_by) VALUES (?,?,?,'A2',?,?,?,?,?,'active',?)").bind(id, tenantId, objectiveId, prompt, JSON.stringify(options), correctOption, explanation, index, userId)),
-    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,created_by,published_at) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(`${tenantId}-asg-moon`, tenantId, classId, "月饼里的团圆", "故事闯关 · 口语", "published", due, userId),
-    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,created_by,published_at) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(`${tenantId}-asg-food`, tenantId, classId, "我的家乡味道", "看图说话 · 写作", "published", due, userId),
-    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,created_by) VALUES (?,?,?,?,?,?,?)").bind(`${tenantId}-asg-school`, tenantId, classId, "校园里的一天", "情境对话 · 听力", "review", userId),
+    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,rubric_json,created_by,published_at) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(`${tenantId}-asg-moon`, tenantId, classId, "月饼里的团圆", "故事闯关 · 口语", "published", due, defaultRubricJson, userId),
+    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,rubric_json,created_by,published_at) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(`${tenantId}-asg-food`, tenantId, classId, "我的家乡味道", "看图说话 · 写作", "published", due, defaultRubricJson, userId),
+    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,rubric_json,created_by) VALUES (?,?,?,?,?,?,?,?)").bind(`${tenantId}-asg-school`, tenantId, classId, "校园里的一天", "情境对话 · 听力", "review", defaultRubricJson, userId),
+    db.prepare("UPDATE assignments SET rubric_json=? WHERE tenant_id=? AND id IN (?,?,?) AND rubric_json='[]'").bind(defaultRubricJson, tenantId, `${tenantId}-asg-moon`, `${tenantId}-asg-food`, `${tenantId}-asg-school`),
     db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-moon`, `${tenantId}-obj-speak`),
     db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-food`, `${tenantId}-obj-write`),
     db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-school`, `${tenantId}-obj-listen`),
@@ -262,9 +268,13 @@ export function platformApiError(error: unknown) {
     ? 401
     : message === "forbidden"
       ? 403
+      : message.endsWith("_not_found")
+        ? 404
+        : message === "review_not_due" || message === "submission_already_reviewed"
+          ? 409
       : message === "authentication_config_missing"
-        ? 500
-        : 500;
+          ? 500
+          : 500;
   if (status >= 500) console.error("platform_api_error", { message });
   return Response.json({ error: message }, { status });
 }
