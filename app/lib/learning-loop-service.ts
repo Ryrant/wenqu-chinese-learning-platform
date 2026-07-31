@@ -44,15 +44,45 @@ export async function updateMasteryEvidence(db: D1Database, input: {
   return next;
 }
 
+export function prepareMasteryEvidenceInsert(db: D1Database, input: {
+  tenantId: string;
+  studentUserId: string;
+  objectiveId: string;
+  score: number;
+  evidenceCount?: number;
+}) {
+  const score = Math.max(0, Math.min(1, input.score));
+  const evidenceCount = Math.max(1, input.evidenceCount ?? 1);
+  return db.prepare(`INSERT INTO mastery_snapshots
+    (tenant_id,student_user_id,objective_id,mastery,evidence_count)
+    SELECT ?,?,?,
+      CASE WHEN latest.id IS NULL THEN ? ELSE ROUND(latest.mastery*0.7 + ?*0.3,4) END,
+      COALESCE(latest.evidence_count,0)+?
+    FROM (SELECT 1) seed
+    LEFT JOIN (
+      SELECT id,mastery,evidence_count FROM mastery_snapshots
+      WHERE tenant_id=? AND student_user_id=? AND objective_id=?
+      ORDER BY id DESC LIMIT 1
+    ) latest ON 1=1`)
+    .bind(
+      input.tenantId, input.studentUserId, input.objectiveId,
+      score, score, evidenceCount,
+      input.tenantId, input.studentUserId, input.objectiveId,
+    );
+}
+
 export async function submitDiagnostic(db: D1Database, context: PlatformContext, input: { level: string; answers: DiagnosticAnswerInput[] }) {
   if (!input.answers.length || input.answers.length > 30) throw new Error("invalid_diagnostic_answers");
   const unique = new Map(input.answers.map((answer) => [answer.itemId, answer]));
   if (unique.size !== input.answers.length || [...unique.values()].some((answer) => !Number.isInteger(answer.selectedOption) || answer.selectedOption < 0 || answer.selectedOption > 3)) {
     throw new Error("invalid_diagnostic_answers");
   }
-  const rows = await db.prepare(`SELECT id,objective_id AS objectiveId,prompt,correct_option AS correctOption
-    FROM diagnostic_items WHERE tenant_id=? AND level=? AND status='active'
-    ORDER BY sort_order,created_at,id`)
+  const rows = await db.prepare(`WITH ranked AS (
+      SELECT id,objective_id,prompt,correct_option,
+        ROW_NUMBER() OVER (ORDER BY sort_order,created_at,id) AS rn
+      FROM diagnostic_items WHERE tenant_id=? AND level=? AND status='active'
+    ) SELECT id,objective_id AS objectiveId,prompt,correct_option AS correctOption
+      FROM ranked WHERE rn<=30 ORDER BY rn`)
     .bind(context.tenantId, input.level)
     .all<{ id: string; objectiveId: string; prompt: string; correctOption: number }>();
   if (!rows.results.length || !matchesDiagnosticItemSet(rows.results.map((item) => item.id), [...unique.keys()])) {

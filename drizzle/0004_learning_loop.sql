@@ -56,3 +56,15 @@ CREATE TABLE `learning_recommendations` (
 );--> statement-breakpoint
 CREATE INDEX `learning_recommendations_student_idx` ON `learning_recommendations` (`tenant_id`,`student_user_id`,`status`,`due_at`);--> statement-breakpoint
 CREATE UNIQUE INDEX `learning_recommendation_source_idx` ON `learning_recommendations` (`tenant_id`,`student_user_id`,`source_type`,`source_id`);
+--> statement-breakpoint
+CREATE TABLE `submission_review_confirmations` (
+  `id` text PRIMARY KEY NOT NULL,
+  `tenant_id` text NOT NULL,
+  `submission_id` text NOT NULL,
+  `reviewer_user_id` text NOT NULL,
+  `score` real NOT NULL,
+  `comment` text DEFAULT '' NOT NULL,
+  `confirmed_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `submission_review_confirmation_unique_idx` ON `submission_review_confirmations` (`tenant_id`,`submission_id`);

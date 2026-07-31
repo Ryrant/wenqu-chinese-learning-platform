@@ -73,6 +73,18 @@ export const submissionReviews = sqliteTable("submission_reviews", {
   index("submission_reviews_submission_idx").on(table.tenantId, table.submissionId),
 ]);
 
+export const submissionReviewConfirmations = sqliteTable("submission_review_confirmations", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  submissionId: text("submission_id").notNull(),
+  reviewerUserId: text("reviewer_user_id").notNull(),
+  score: real("score").notNull(),
+  comment: text("comment").notNull().default(""),
+  confirmedAt: text("confirmed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("submission_review_confirmation_unique_idx").on(table.tenantId, table.submissionId),
+]);
+
 export const assignmentObjectives = sqliteTable("assignment_objectives", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   tenantId: text("tenant_id").notNull(),

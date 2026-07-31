@@ -16,7 +16,8 @@ test("assessment service separates ai suggestion from final teacher confirmation
   assert.match(service, /export async function confirmSubmissionReview/);
   assert.match(service, /ai_suggested/);
   assert.match(service, /confirmed/);
-  assert.match(service, /updateMasteryEvidence/);
+  assert.match(service, /prepareMasteryEvidenceInsert/);
+  assert.match(service, /submission_review_confirmations/);
   assert.match(actions, /suggest_text_review/);
   assert.match(actions, /no_reviewed_sources/);
   assert.match(actions, /status: 422/);

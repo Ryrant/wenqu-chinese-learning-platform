@@ -45,9 +45,12 @@ test("learning-loop service scopes guardian teacher and student operations", asy
 
 test("teacher-confirmed review reuses cumulative mastery update service", async () => {
   const assessment = await read("app/lib/assessment-service.ts");
-  assert.match(assessment, /updateMasteryEvidence/);
+  assert.match(assessment, /prepareMasteryEvidenceInsert/);
   assert.match(assessment, /review_status!='reviewed'/);
   assert.match(assessment, /submission_already_reviewed/);
+  assert.match(assessment, /submission_review_confirmations/);
+  assert.match(assessment, /db\.batch/);
+  assert.match(assessment, /submission\.reviewStatus === "reviewed"/);
   assert.doesNotMatch(assessment, /SELECT s\.tenant_id,s\.student_user_id,ao\.objective_id,\?,1/);
 });
 
@@ -67,4 +70,7 @@ test("workspace read model selects a bound child and returns latest mastery only
   assert.match(workspace, /weeklyStatsQuery/);
   assert.match(workspace, /PARTITION BY cr\.student_user_id,cr\.scope/);
   assert.match(workspace, /submittedByFocus/);
+  assert.match(workspace, /PARTITION BY di\.level/);
+  assert.match(workspace, /rn<=30/);
+  assert.doesNotMatch(workspace, /diagnostic_items[\s\S]{0,500}LIMIT 12/);
 });

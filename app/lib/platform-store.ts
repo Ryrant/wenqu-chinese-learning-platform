@@ -157,6 +157,8 @@ async function ensureExtendedSchema(db: D1Database) {
     db.prepare(`CREATE TABLE IF NOT EXISTS submission_reviews (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, submission_id TEXT NOT NULL, reviewer_user_id TEXT NOT NULL, final_score REAL, final_comment TEXT, ai_suggested_score REAL, ai_comment TEXT, weakness_tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS submission_reviews_tenant_idx ON submission_reviews (tenant_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS submission_reviews_submission_idx ON submission_reviews (tenant_id,submission_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS submission_review_confirmations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, submission_id TEXT NOT NULL, reviewer_user_id TEXT NOT NULL, score REAL NOT NULL, comment TEXT NOT NULL DEFAULT '', confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS submission_review_confirmation_unique_idx ON submission_review_confirmations (tenant_id,submission_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS assignment_objectives (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, assignment_id TEXT NOT NULL, objective_id TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS assignment_objectives_assignment_idx ON assignment_objectives (tenant_id,assignment_id)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS assignment_objective_unique_idx ON assignment_objectives (tenant_id,assignment_id,objective_id)"),

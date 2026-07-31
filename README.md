@@ -112,10 +112,11 @@ https://你的项目名.你的子域.workers.dev/
 
 `v1.2.0` 将 Next.js 升级到 `16.2.12`，并增加 `drizzle/0004_learning_loop.sql`。迁移只新增学习闭环相关表和列，不删除或重命名已有结构。`wrangler.toml` 已将迁移目录指定为 `drizzle/`；运行时仍会幂等校验基础表。
 
-已有 Cloudflare 环境升级时，先备份 D1，再查看并执行远端增量迁移：
+已有 Cloudflare 环境升级时，先备份 D1，再执行安全基线脚本。基线脚本仅在对应结构完整存在时登记迁移；旧环境会登记 `0000–0003` 后只执行 `0004`，若应用运行时已幂等补齐 v1.2 结构则也会安全登记 `0004`，空库不会被误标记。随后查看并执行远端增量迁移：
 
 ```bash
 npx wrangler d1 export wenqu-platform-db --remote --output=wenqu-platform-db-before-v1.2.sql
+npx wrangler d1 execute wenqu-platform-db --remote --file=scripts/baseline-d1-migrations.sql
 npx wrangler d1 migrations list wenqu-platform-db --remote
 npx wrangler d1 migrations apply wenqu-platform-db --remote
 ```

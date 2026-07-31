@@ -111,30 +111,70 @@ test("review service enforces next-day due time and blocks generic diagnostic co
   await assert.rejects(updateRecommendationStatus(diagnosticDb, context, { id: "review", status: "completed" }), /forbidden/);
 });
 
-test("teacher confirmation retry does not write a second mastery update", async () => {
+test("teacher confirmation is one atomic batch guarded by a durable unique fact", async () => {
   const { confirmSubmissionReview } = await importBundledTypeScript("app/lib/assessment-service.ts");
-  let queryCount = 0;
+  const prepared = [];
+  let firstCount = 0;
+  let allCount = 0;
+  let batched = [];
+  const db = {
+    prepare(sql) {
+      const statement = {
+        sql,
+        values: [],
+        bind(...values) {
+          this.values = values;
+          return this;
+        },
+        async first() {
+          firstCount += 1;
+          return { studentUserId: "student", reviewStatus: "pending" };
+        },
+        async all() {
+          allCount += 1;
+          return { results: [{ studentUserId: "student", objectiveId: "objective" }] };
+        },
+      };
+      prepared.push(statement);
+      return statement;
+    },
+    async batch(statements) {
+      batched = statements;
+      return statements.map(() => ({ meta: { changes: 1 } }));
+    },
+  };
+  await confirmSubmissionReview(db, { tenantId: "tenant", userId: "teacher", roles: ["admin"] }, {
+    submissionId: "submission",
+    score: 90,
+    comment: "很好",
+  });
+  assert.equal(firstCount, 1);
+  assert.equal(allCount, 1);
+  assert.equal(batched.length, 4);
+  assert.match(batched[0].sql, /submission_review_confirmations/);
+  assert.match(batched[1].sql, /submission_reviews/);
+  assert.match(batched[2].sql, /UPDATE submissions/);
+  assert.match(batched[3].sql, /INSERT INTO mastery_snapshots/);
+  assert.equal(prepared.filter((statement) => /INSERT INTO mastery_snapshots/.test(statement.sql)).length, 1);
+});
+
+test("AI review suggestion cannot reopen an already reviewed submission", async () => {
+  const { suggestTextReview } = await importBundledTypeScript("app/lib/assessment-service.ts");
   const db = {
     prepare(sql) {
       return {
         bind() { return this; },
-        async run() {
-          assert.match(sql, /review_status!='reviewed'/);
-          return { meta: { changes: 0 } };
+        async first() {
+          assert.match(sql, /review_status AS reviewStatus/);
+          return { id: "submission", textAnswer: "answer", reviewStatus: "reviewed", assignmentTitle: "task" };
         },
-        async all() { queryCount += 1; return { results: [] }; },
       };
     },
   };
   await assert.rejects(
-    confirmSubmissionReview(db, { tenantId: "tenant", userId: "teacher", roles: ["admin"] }, {
-      submissionId: "submission",
-      score: 90,
-      comment: "很好",
-    }),
+    suggestTextReview(db, { tenantId: "tenant", userId: "teacher", roles: ["admin"] }, "submission", {}),
     /submission_already_reviewed/,
   );
-  assert.equal(queryCount, 0);
 });
 
 test("mastery blends new evidence and preserves cumulative evidence count", async () => {
@@ -184,13 +224,14 @@ test("assignment rubric requires exactly three dimensions totaling 100", async (
 });
 
 test("learning loop schema and additive migration include durable tenant-scoped state", async () => {
-  const [schema, runtime, migration, wrangler] = await Promise.all([
+  const [schema, runtime, migration, wrangler, baseline] = await Promise.all([
     readFile(new URL("db/schema.ts", root), "utf8"),
     readFile(new URL("app/lib/platform-store.ts", root), "utf8"),
     readFile(new URL("drizzle/0004_learning_loop.sql", root), "utf8"),
     readFile(new URL("wrangler.toml", root), "utf8"),
+    readFile(new URL("scripts/baseline-d1-migrations.sql", root), "utf8"),
   ]);
-  for (const table of ["diagnostic_items", "diagnostic_attempts", "diagnostic_answers", "learning_recommendations"]) {
+  for (const table of ["diagnostic_items", "diagnostic_attempts", "diagnostic_answers", "learning_recommendations", "submission_review_confirmations"]) {
     assert.match(schema, new RegExp(`sqliteTable\\("${table}"`));
     assert.match(runtime, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
     assert.match(migration, new RegExp(`CREATE TABLE \`${table}\``));
@@ -200,4 +241,8 @@ test("learning loop schema and additive migration include durable tenant-scoped 
   assert.match(migration, /ALTER TABLE `learning_objectives` ADD `status`/);
   assert.doesNotMatch(migration, /DROP TABLE|DROP COLUMN/i);
   assert.match(wrangler, /migrations_dir = "drizzle"/);
+  for (const name of ["0000_dusty_mesmero.sql", "0001_condemned_lester.sql", "0002_pilot_school_readiness.sql", "0003_initial_setup_settings.sql", "0004_learning_loop.sql"]) {
+    assert.match(baseline, new RegExp(name.replace(".", "\\.")));
+  }
+  assert.match(baseline, /sqlite_master/);
 });

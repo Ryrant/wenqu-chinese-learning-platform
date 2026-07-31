@@ -162,10 +162,14 @@ export async function GET(request: Request) {
           JOIN learning_objectives lo ON lo.id=di.objective_id AND lo.tenant_id=di.tenant_id
           WHERE di.tenant_id=? ORDER BY di.level,di.sort_order,di.created_at`).bind(tenantId)
       : student
-        ? db.prepare(`SELECT di.id,di.objective_id AS objectiveId,lo.title AS objectiveTitle,di.level,
+        ? db.prepare(`WITH ranked AS (
+            SELECT di.id,di.tenant_id,di.objective_id,di.level,di.prompt,di.options_json,di.sort_order,di.created_at,
+              ROW_NUMBER() OVER (PARTITION BY di.level ORDER BY di.sort_order,di.created_at,di.id) AS rn
+            FROM diagnostic_items di WHERE di.tenant_id=? AND di.status='active'
+          ) SELECT di.id,di.objective_id AS objectiveId,lo.title AS objectiveTitle,di.level,
             di.prompt,di.options_json AS optionsJson,di.sort_order AS sortOrder
-            FROM diagnostic_items di JOIN learning_objectives lo ON lo.id=di.objective_id AND lo.tenant_id=di.tenant_id
-            WHERE di.tenant_id=? AND di.status='active' ORDER BY di.level,di.sort_order,di.created_at LIMIT 12`).bind(tenantId)
+            FROM ranked di JOIN learning_objectives lo ON lo.id=di.objective_id AND lo.tenant_id=di.tenant_id
+            WHERE di.rn<=30 ORDER BY di.level,di.rn`).bind(tenantId)
         : null;
     const objectivesQuery = (admin || teacher)
       ? db.prepare("SELECT * FROM learning_objectives WHERE tenant_id=? ORDER BY level,skill,code").bind(tenantId)
