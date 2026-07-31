@@ -1,11 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import {
+  AdminEnrollmentEditor,
+  AdminObjectiveLibrary,
+  AdminQualityDashboard,
+  GuardianFamilyTasks,
+  GuardianStudentSwitcher,
+  GuardianWeeklyReport,
+  TeacherAssignmentCreator,
+  TeacherIntervention,
+  TeacherMasteryHeatmap,
+} from "./learning-loop-views";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { numberValue, stringValue } from "./lib/platform-types";
 import { ProgressRing } from "./student-view";
 
 type BaseProps = { nav: string; data: WorkspaceData; act: Act; notify: Notify };
+type GuardianProps = BaseProps & { selectStudent: (studentId: string) => Promise<void> };
 type AdminProps = BaseProps & { refresh: () => Promise<void> };
 
 function PageTitle({ eyebrow, title, detail, action }: { eyebrow: string; title: string; detail: string; action?: React.ReactNode }) { return <section className="welcome-row"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{detail}</p></div>{action}</section>; }
@@ -36,6 +48,73 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
   async function generate(event: React.FormEvent) { event.preventDefault(); setBusy(true); try { const result = await act("generate_lesson", { topic, level, duration }); setGenerated(result); notify("教案草稿已保存", `已引用 ${(result.citations as unknown[])?.length ?? 0} 条已发布来源。`); } catch (reason) { notify("备课失败", reason instanceof Error ? reason.message : "请重试", "error"); } finally { setBusy(false); } }
   async function createClass(event: React.FormEvent) { event.preventDefault(); setBusy(true); try { await act("create_class", { name: className, level: classLevel }); setClassName(""); notify("班级已创建", "班级已写入当前租户。") } catch (reason) { notify("创建失败", reason instanceof Error ? reason.message : "请重试", "error"); } finally { setBusy(false); } }
   async function createAssignment(event: React.FormEvent) { event.preventDefault(); setBusy(true); try { await act("create_assignment", { title: assignmentTitle, classId: assignmentClass, activityType: "综合任务" }); setAssignmentTitle(""); notify("任务草稿已创建", "请在任务列表中审核并发布。") } catch (reason) { notify("创建失败", reason instanceof Error ? reason.message : "请重试", "error"); } finally { setBusy(false); } }
+
+  if (nav === "教学总览") return <section>
+    <PageTitle eyebrow="最新学习证据 · 班级范围" title="教学总览" detail="按学生与目标读取最新掌握度，避免历史快照重复计入。"/>
+    <MetricGrid items={[
+      ["班级", data.classes.length, "当前教师可访问", "green"],
+      ["已发布任务", published.length, "目标与量规可追溯", "blue"],
+      ["待批阅", pending.length, "等待教师确认", "orange"],
+      ["平均掌握度", `${mastery}%`, "仅最新快照", "purple"],
+    ]}/>
+    <TeacherMasteryHeatmap data={data}/>
+  </section>;
+
+  if (nav === "班级管理") return <section>
+    <PageTitle eyebrow="班级、目标与任务闭环" title="班级管理" detail="每个任务必须关联学习目标，并使用三维评分量规。"/>
+    <section className="teacher-grid">
+      <form className="panel form-card" onSubmit={createClass}>
+        <h3>新建班级</h3>
+        <label>班级名称<input value={className} onChange={(event) => setClassName(event.target.value)} placeholder="例如：五年级甲班" required/></label>
+        <label>级别<select value={classLevel} onChange={(event) => setClassLevel(event.target.value)}><option>A1</option><option>A2</option><option>B1</option></select></label>
+        <button className="primary-button" disabled={busy}>创建班级</button>
+      </form>
+      <TeacherAssignmentCreator data={data} act={act} notify={notify}/>
+    </section>
+    <article className="panel assignment-table"><h3>班级列表</h3><div className="table-wrap"><table><thead><tr><th>班级</th><th>级别</th><th>学年</th><th>学生数</th></tr></thead><tbody>{data.classes.map((item) => <tr key={String(item.id)}><td>{stringValue(item.name)}</td><td>{stringValue(item.level)}</td><td>{stringValue(item.academic_year)}</td><td>{numberValue(item.studentCount)}</td></tr>)}</tbody></table></div></article>
+  </section>;
+
+  if (nav === "作业批阅") return <section>
+    <PageTitle eyebrow="人工复核与分层支持" title="作业批阅" detail={`${pending.length} 份待审核；教师确认评分后才更新掌握度。`}/>
+    <section className="loop-grid">
+      <TeacherIntervention data={data} act={act} notify={notify}/>
+      <article className="panel"><span className="eyebrow">待处理队列</span><h3>教师确认</h3><p>AI 建议仅供参考，最终成绩和反馈由教师保存。</p><strong>{pending.length} 份待批阅</strong></article>
+    </section>
+    <article className="panel"><div className="table-wrap"><table>
+      <thead><tr><th>学生</th><th>任务</th><th>内容</th><th>状态</th><th>评分</th></tr></thead>
+      <tbody>{data.submissions.map((item) => {
+        const submissionId = String(item.id);
+        const review = latestReviewBySubmission.get(submissionId);
+        return <tr key={submissionId}>
+          <td>{stringValue(item.studentName)}</td><td>{stringValue(item.assignmentTitle)}</td>
+          <td>{item.asset_key ? "语音文件已保存" : stringValue(item.text_answer).slice(0, 80)}</td>
+          <td><span className={`status ${item.review_status === "reviewed" ? "published" : "draft"}`}>{item.review_status === "reviewed" ? `${numberValue(item.score)} 分` : "待审核"}</span></td>
+          <td>{item.review_status === "reviewed" ? "已完成" : <div className="score-form">
+            {item.text_answer && <button type="button" className="soft-button" onClick={async () => {
+              try {
+                const result = await act("suggest_text_review", { id: item.id });
+                setReviewScores({ ...reviewScores, [submissionId]: String(result.suggestedScore ?? 80) });
+                setReviewComments({ ...reviewComments, [submissionId]: stringValue(result.comment, "") });
+                notify("AI 建议已生成", "请核对建议后再确认评分。");
+              } catch (reason) { notify("生成建议失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+            }}>生成 AI 建议</button>}
+            {review?.status === "ai_suggested" && <div className="ai-review-box"><strong>AI 建议：{numberValue(review.ai_suggested_score)} 分</strong><small>{stringValue(review.ai_comment, "暂无文字建议")}</small></div>}
+            <form onSubmit={async (event) => {
+              event.preventDefault();
+              try {
+                await act("confirm_submission_review", { id: item.id, score: Number(reviewScores[submissionId] ?? review?.ai_suggested_score ?? 80), comment: reviewComments[submissionId] ?? "" });
+                notify("评分已保存", "作业状态和关联目标掌握度已更新。");
+              } catch (reason) { notify("评分失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+            }}>
+              <input type="number" min="0" max="100" value={reviewScores[submissionId] ?? String(review?.ai_suggested_score ?? 80)} onChange={(event) => setReviewScores({ ...reviewScores, [submissionId]: event.target.value })}/>
+              <textarea value={reviewComments[submissionId] ?? ""} onChange={(event) => setReviewComments({ ...reviewComments, [submissionId]: event.target.value })} placeholder="填写给学生的反馈" maxLength={2000}/>
+              <button>教师确认</button>
+            </form>
+          </div>}</td>
+        </tr>;
+      })}</tbody>
+    </table></div>{!data.submissions.length && <p className="empty-state">暂无作业提交。</p>}</article>
+  </section>;
 
   if (nav === "来源化备课") return <section><PageTitle eyebrow="已发布知识内容 → 教案草稿" title="来源化备课" detail="草稿使用已发布来源生成；所有草稿必须由教师审核。"/><section className="teacher-grid"><form className="panel form-card" onSubmit={generate}><h3>生成教学草稿</h3><label>主题<input value={topic} onChange={(event) => setTopic(event.target.value)} required/></label><div className="field-row"><label>水平<select value={level} onChange={(event) => setLevel(event.target.value)}><option>A1</option><option>A2</option><option>B1</option></select></label><label>课时<input type="number" min="20" max="90" value={duration} onChange={(event) => setDuration(Number(event.target.value))}/></label></div><button className="primary-button" disabled={busy}>{busy ? "正在检索并保存…" : "生成并保存草稿"}</button></form><article className="panel"><h3>最近草稿</h3>{data.lessonPlans.length ? data.lessonPlans.map((plan) => <div className="history-row" key={String(plan.id)}><div><strong>{stringValue(plan.title)}</strong><small>{numberValue(plan.duration_minutes)} 分钟 · {stringValue(plan.level)}</small></div><span className="status draft">待审核</span></div>) : <p className="empty-state">还没有教案草稿。</p>}</article></section>{generated && <article className="panel result-card"><span className="safe-chip">已保存 · 教师审核中 · {stringValue(generated.engine) || stringValue(generated.provider)}</span><h2>{stringValue(generated.title)}</h2><h4>教学目标</h4><ul>{(generated.objectives as string[] ?? []).map((item) => <li key={item}>{item}</li>)}</ul><h4>教学环节</h4>{(generated.activities as Array<{title:string;minutes:number;detail:string}> ?? []).map((item) => <div className="citation" key={item.title}><strong>{item.title} · {item.minutes} 分钟</strong><p>{item.detail}</p></div>)}<h4>引用来源</h4>{(generated.citations as Array<{id:string;title:string;excerpt:string}> ?? []).map((item) => <div className="citation" key={item.id}><strong>{item.title}</strong><p>{item.excerpt}</p></div>)}</article>}</section>;
 
