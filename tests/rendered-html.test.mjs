@@ -361,8 +361,9 @@ test("pilot workspace UI exposes member content ai review and password change fl
   assert.match(css, /\.member-table/);
   assert.match(css, /\.content-preview/);
   assert.match(types, /submissionReviews/);
-  assert.match(workspaceRoute, /admin \|\| roles\.includes\("teacher"\)/);
-  assert.match(workspaceRoute, /submissionReviewsQuery = \(admin \|\| roles\.includes\("teacher"\)\)/);
+  assert.match(workspaceRoute, /const teacher = roles\.includes\("teacher"\)/);
+  assert.match(workspaceRoute, /submissionReviewsQuery = \(admin \|\| teacher\)/);
+  assert.match(workspaceRoute, /ROW_NUMBER\(\) OVER \(PARTITION BY ms\.student_user_id,ms\.objective_id/);
 });
 
 test("admin UI exposes post-deploy platform settings stored in D1", async () => {

@@ -183,6 +183,12 @@ async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
     [`${tenantId}-obj-write`, "A2-W1", "书写家庭主题词语", "汉字书写", 0.63],
     [`${tenantId}-obj-culture`, "A2-C1", "理解团圆文化", "文化理解", 0.88],
   ] as const;
+  const diagnosticItems = [
+    [`${tenantId}-diag-listen`, `${tenantId}-obj-listen`, "中秋节时，小华说“我们一家人一起吃月饼”。他在和谁一起？", ["同学", "家人", "老师", "邻居"], 1, "“一家人”说明他和家人在一起。"],
+    [`${tenantId}-diag-speak`, `${tenantId}-obj-speak`, "哪一句能完整描述家庭活动？", ["吃月饼", "一家人", "我们一家人一起吃月饼。", "中秋节"], 2, "完整句需要包含人物和活动。"],
+    [`${tenantId}-diag-write`, `${tenantId}-obj-write`, "“团圆”的“团”应选择哪一项？", ["困", "团", "园", "圆"], 1, "“团圆”表示亲人相聚。"],
+    [`${tenantId}-diag-culture`, `${tenantId}-obj-culture`, "中秋节的圆月和月饼通常象征什么？", ["远行", "团圆", "比赛", "上学"], 1, "圆月和月饼常用来象征家人团圆。"],
+  ] as const;
   const due = new Date(Date.now() + 7 * 86400000).toISOString();
   const festivalDoc = `${tenantId}-doc-festival`, textbookDoc = `${tenantId}-doc-textbook`;
   await db.batch([
@@ -193,9 +199,13 @@ async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
     db.prepare("INSERT OR IGNORE INTO enrollments (tenant_id,class_id,student_user_id,status) VALUES (?,?,?,?)").bind(tenantId, classId, userId, "active"),
     db.prepare("INSERT OR IGNORE INTO guardian_student_links (tenant_id,guardian_user_id,student_user_id,verified_at) VALUES (?,?,?,CURRENT_TIMESTAMP)").bind(tenantId, userId, userId),
     ...objectives.map(([id, code, title, skill]) => db.prepare("INSERT OR IGNORE INTO learning_objectives (id,tenant_id,code,title,skill,level) VALUES (?,?,?,?,?,?)").bind(id, tenantId, code, title, skill, "A2")),
+    ...diagnosticItems.map(([id, objectiveId, prompt, options, correctOption, explanation], index) => db.prepare("INSERT OR IGNORE INTO diagnostic_items (id,tenant_id,objective_id,level,prompt,options_json,correct_option,explanation,sort_order,status,created_by) VALUES (?,?,?,'A2',?,?,?,?,?,'active',?)").bind(id, tenantId, objectiveId, prompt, JSON.stringify(options), correctOption, explanation, index, userId)),
     db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,created_by,published_at) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(`${tenantId}-asg-moon`, tenantId, classId, "月饼里的团圆", "故事闯关 · 口语", "published", due, userId),
     db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,created_by,published_at) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(`${tenantId}-asg-food`, tenantId, classId, "我的家乡味道", "看图说话 · 写作", "published", due, userId),
     db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,created_by) VALUES (?,?,?,?,?,?,?)").bind(`${tenantId}-asg-school`, tenantId, classId, "校园里的一天", "情境对话 · 听力", "review", userId),
+    db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-moon`, `${tenantId}-obj-speak`),
+    db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-food`, `${tenantId}-obj-write`),
+    db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-school`, `${tenantId}-obj-listen`),
     db.prepare("INSERT OR IGNORE INTO source_documents (id,tenant_id,title,media_type,rights_status,processing_status,version,created_by) VALUES (?,?,?,?,?,?,?,?)").bind(festivalDoc, tenantId, "中华节日文化故事集", "text/plain", "owned", "published", 1, userId),
     db.prepare("INSERT OR IGNORE INTO source_documents (id,tenant_id,title,media_type,rights_status,processing_status,version,created_by) VALUES (?,?,?,?,?,?,?,?)").bind(textbookDoc, tenantId, "四年级华文教材摘录", "text/plain", "licensed", "published", 1, userId),
     db.prepare("INSERT OR IGNORE INTO knowledge_chunks (id,tenant_id,source_document_id,content,metadata_json,published) VALUES (?,?,?,?,?,1)").bind(`${tenantId}-chunk-festival`, tenantId, festivalDoc, "中秋节常以圆月和月饼象征家人团聚，团圆是节日的重要文化主题。", JSON.stringify({ level: "A2", topic: "中秋节" })),

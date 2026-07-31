@@ -16,6 +16,10 @@ export type WorkspaceData = {
   user: { id: string; email: string; displayName: string; roles: Role[]; mustChangePassword?: boolean };
   classes: Row[]; assignments: Row[]; submissions: Row[]; submissionReviews: Row[]; mastery: Row[]; documents: Row[];
   lessonPlans: Row[]; notifications: Row[]; consents: Row[]; audits: Row[]; invitations: Row[]; members: MemberRow[]; guardianLinks: GuardianLinkRow[];
+  learningObjectives: Row[]; diagnosticItems: Row[]; diagnosticSummary: Row | null; recommendations: Row[]; learningPlan: Row[];
+  availableStudents: Array<{ id: string; displayName: string }>; selectedStudent: { id: string; displayName: string } | null;
+  weeklyReport: { submittedCount: number; reviewedCount: number; averageScore: number | null; masteryAverage: number; pendingRecommendations: number };
+  masteryMatrix: Row[]; qualityMetrics: Row | null; enrollments: Row[];
   services: Record<string, { status: string; label: string }>;
   platformSettings?: PublicPlatformSettings;
   generatedAt: string;

@@ -3,6 +3,18 @@ import { confirmSubmissionReview, suggestTextReview } from "../../../../lib/asse
 import { assertSubmissionReviewAccess } from "../../../../lib/access-control";
 import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
 import { publishContent } from "../../../../lib/content-processing";
+import { validateRubric } from "../../../../lib/learning-loop";
+import {
+  answerReviewItem,
+  assertGuardianStudentAccess,
+  createFamilyTask,
+  createIntervention,
+  setClassEnrollments,
+  submitDiagnostic,
+  updateRecommendationStatus,
+  upsertDiagnosticItem,
+  upsertLearningObjective,
+} from "../../../../lib/learning-loop-service";
 import { aiProviderSettings, loadPlatformSettings } from "../../../../lib/platform-settings";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 import { searchPublishedKnowledge } from "../../../../lib/retrieval";
@@ -25,8 +37,10 @@ export async function POST(request: Request) {
     const roleByAction: Record<string, PlatformRole> = {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
-      create_invitation: "admin", review_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", mark_notification: "student",
-      submit_text: "student",
+      create_family_task: "guardian",
+      create_intervention: "teacher",
+      create_invitation: "admin", review_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
+      submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
     };
     const context = await platformContext(request, roleByAction[action]);
     const { db, tenantId, userId } = context;
@@ -59,6 +73,42 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    if (action === "upsert_learning_objective") {
+      const result = await upsertLearningObjective(db, context, {
+        id: text(body.id, 120) || undefined,
+        code: requireText(body.code, "objective_code", 40),
+        title: requireText(body.title, "objective_title", 120),
+        skill: requireText(body.skill, "objective_skill", 80),
+        level: requireText(body.level, "objective_level", 20),
+        status: body.status === "inactive" ? "inactive" : "active",
+      });
+      await audit(db, tenantId, userId, "learning_objective.saved", "learning_objective", result.id, { status: result.status });
+      return Response.json(result, { status: body.id ? 200 : 201 });
+    }
+
+    if (action === "upsert_diagnostic_item") {
+      const options = Array.isArray(body.options) ? body.options.map((value) => text(value, 200)) : [];
+      const result = await upsertDiagnosticItem(db, context, {
+        id: text(body.id, 120) || undefined,
+        objectiveId: requireText(body.objectiveId, "objective_id", 120),
+        level: requireText(body.level, "diagnostic_level", 20),
+        prompt: requireText(body.prompt, "diagnostic_prompt", 500),
+        options,
+        correctOption: number(body.correctOption, -1),
+        explanation: text(body.explanation, 1000),
+        status: body.status === "inactive" ? "inactive" : "active",
+      });
+      await audit(db, tenantId, userId, "diagnostic_item.saved", "diagnostic_item", result.id, { status: result.status });
+      return Response.json(result, { status: body.id ? 200 : 201 });
+    }
+
+    if (action === "set_class_enrollments") {
+      const studentUserIds = Array.isArray(body.studentUserIds) ? body.studentUserIds.map((value) => text(value, 120)).filter(Boolean) : [];
+      const result = await setClassEnrollments(db, context, { classId: requireText(body.classId, "class_id", 120), studentUserIds });
+      await audit(db, tenantId, userId, "class.enrollments_updated", "class", result.classId, { studentUserIds: result.studentUserIds });
+      return Response.json(result);
+    }
+
     if (action === "create_class") {
       const id = crypto.randomUUID();
       const name = requireText(body.name, "class_name");
@@ -75,9 +125,18 @@ export async function POST(request: Request) {
       const activityType = requireText(body.activityType, "activity_type", 80);
       const owned = await db.prepare("SELECT id FROM classes WHERE id=? AND tenant_id=? AND (teacher_user_id=? OR ?=1)").bind(classId, tenantId, userId, isAdmin ? 1 : 0).first();
       if (!owned) return Response.json({ error: "class_not_found" }, { status: 404 });
+      const objectiveIds = [...new Set(Array.isArray(body.objectiveIds) ? body.objectiveIds.map((value) => text(value, 120)).filter(Boolean) : [])];
+      if (!objectiveIds.length || objectiveIds.length > 3) throw new Error("invalid_objective_ids");
+      const placeholders = objectiveIds.map(() => "?").join(",");
+      const objectives = await db.prepare(`SELECT id FROM learning_objectives WHERE tenant_id=? AND status='active' AND id IN (${placeholders})`).bind(tenantId, ...objectiveIds).all<{ id: string }>();
+      if (objectives.results.length !== objectiveIds.length) throw new Error("invalid_objective_ids");
+      const rubric = validateRubric(body.rubric);
       const dueAt = text(body.dueAt, 40) || null;
-      await db.prepare("INSERT INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,created_by) VALUES (?,?,?,?,?,'draft',?,?)").bind(id, tenantId, classId, title, activityType, dueAt, userId).run();
-      await audit(db, tenantId, userId, "assignment.created", "assignment", id, { title });
+      await db.batch([
+        db.prepare("INSERT INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,rubric_json,created_by) VALUES (?,?,?,?,?,'draft',?,?,?)").bind(id, tenantId, classId, title, activityType, dueAt, JSON.stringify(rubric), userId),
+        ...objectiveIds.map((objectiveId) => db.prepare("INSERT INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,?)").bind(tenantId, id, objectiveId, 1 / objectiveIds.length)),
+      ]);
+      await audit(db, tenantId, userId, "assignment.created", "assignment", id, { title, objectiveIds, rubric });
       return Response.json({ id, status: "draft" }, { status: 201 });
     }
 
@@ -124,6 +183,56 @@ export async function POST(request: Request) {
       return Response.json({ id, reviewStatus: "human_review" }, { status: 201 });
     }
 
+    if (action === "submit_diagnostic") {
+      const answers = Array.isArray(body.answers) ? body.answers.map((value) => {
+        const item = value && typeof value === "object" ? value as Record<string, unknown> : {};
+        return { itemId: text(item.itemId, 120), selectedOption: number(item.selectedOption, -1) };
+      }) : [];
+      const result = await submitDiagnostic(db, context, { level: text(body.level, 20) || "A2", answers });
+      await audit(db, tenantId, userId, "diagnostic.completed", "diagnostic_attempt", result.attemptId, { score: result.score, incorrectCount: result.incorrectCount });
+      return Response.json(result, { status: 201 });
+    }
+
+    if (action === "answer_review_item") {
+      const result = await answerReviewItem(db, context, {
+        recommendationId: requireText(body.id, "recommendation_id", 120),
+        selectedOption: number(body.selectedOption, -1),
+      });
+      await audit(db, tenantId, userId, "review_item.answered", "learning_recommendation", result.id, { correct: result.correct });
+      return Response.json(result);
+    }
+
+    if (action === "create_intervention") {
+      const result = await createIntervention(db, context, {
+        studentUserId: requireText(body.studentUserId, "student_user_id", 120),
+        objectiveId: requireText(body.objectiveId, "objective_id", 120),
+        title: requireText(body.title, "intervention_title", 120),
+        detail: text(body.detail, 1000),
+        dueAt: text(body.dueAt, 40) || null,
+      });
+      await audit(db, tenantId, userId, "intervention.created", "learning_recommendation", result.id);
+      return Response.json(result, { status: 201 });
+    }
+
+    if (action === "create_family_task") {
+      const result = await createFamilyTask(db, context, {
+        studentUserId: requireText(body.studentUserId, "student_user_id", 120),
+        title: requireText(body.title, "family_task_title", 120),
+        detail: text(body.detail, 1000),
+        dueAt: text(body.dueAt, 40) || null,
+      });
+      await audit(db, tenantId, userId, "family_task.created", "learning_recommendation", result.id);
+      return Response.json(result, { status: 201 });
+    }
+
+    if (action === "update_recommendation_status") {
+      const status = body.status === "completed" ? "completed" : body.status === "pending" ? "pending" : null;
+      if (!status) throw new Error("invalid_recommendation_status");
+      const result = await updateRecommendationStatus(db, context, { id: requireText(body.id, "recommendation_id", 120), status });
+      await audit(db, tenantId, userId, "recommendation.status_updated", "learning_recommendation", result.id, { status });
+      return Response.json(result);
+    }
+
     if (action === "suggest_text_review") {
       const id = requireText(body.id, "submission_id");
       let result;
@@ -158,10 +267,12 @@ export async function POST(request: Request) {
     if (action === "update_consent") {
       const scope = requireText(body.scope, "scope", 80);
       const status = body.status === "withdrawn" ? "withdrawn" : "granted";
-      const id = `${tenantId}-consent-${scope.replace(/[^a-z0-9_-]/gi, "-")}`;
-      await db.prepare(`INSERT INTO consent_records (id,tenant_id,student_user_id,guardian_user_id,scope,status) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,created_at=CURRENT_TIMESTAMP`).bind(id, tenantId, userId, userId, scope, status).run();
-      await audit(db, tenantId, userId, "consent.updated", "consent", id, { scope, status });
-      return Response.json({ id, scope, status });
+      const studentUserId = requireText(body.studentUserId, "student_user_id", 120);
+      await assertGuardianStudentAccess(db, context, studentUserId);
+      const id = `${tenantId}-consent-${studentUserId}-${scope.replace(/[^a-z0-9_-]/gi, "-")}`;
+      await db.prepare(`INSERT INTO consent_records (id,tenant_id,student_user_id,guardian_user_id,scope,status) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,created_at=CURRENT_TIMESTAMP`).bind(id, tenantId, studentUserId, userId, scope, status).run();
+      await audit(db, tenantId, userId, "consent.updated", "consent", id, { studentUserId, scope, status });
+      return Response.json({ id, studentUserId, scope, status });
     }
 
     if (action === "create_invitation") {

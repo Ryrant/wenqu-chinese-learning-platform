@@ -1,5 +1,6 @@
 import { assertSubmissionReviewAccess } from "./access-control";
 import { generateGroundedText } from "./ai/grounding";
+import { updateMasteryEvidence } from "./learning-loop-service";
 import type { PlatformContext } from "./platform-store";
 import { searchPublishedKnowledge } from "./retrieval";
 
@@ -37,17 +38,25 @@ export async function suggestTextReview(db: D1Database, context: PlatformContext
 export async function confirmSubmissionReview(db: D1Database, context: PlatformContext, input: { submissionId: string; score: number; comment: string }): Promise<ConfirmedReview> {
   await assertSubmissionReviewAccess(db, context, input.submissionId);
   const score = Math.max(0, Math.min(input.score, 100));
+  const evidence = await db.prepare(`SELECT s.student_user_id AS studentUserId,ao.objective_id AS objectiveId
+    FROM submissions s
+    JOIN assignment_objectives ao ON ao.tenant_id=s.tenant_id AND ao.assignment_id=s.assignment_id
+    WHERE s.id=? AND s.tenant_id=?`)
+    .bind(input.submissionId, context.tenantId)
+    .all<{ studentUserId: string; objectiveId: string }>();
   await db.batch([
     db.prepare("INSERT INTO submission_reviews (id,tenant_id,submission_id,reviewer_user_id,final_score,final_comment,weakness_tags_json,status) VALUES (?,?,?,?,?,?,?,'confirmed')")
       .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, input.comment.slice(0, 2000), "[]"),
     db.prepare("UPDATE submissions SET score=?,confidence=1,feedback=?,review_status='reviewed',reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")
       .bind(score, input.comment.slice(0, 2000), input.submissionId, context.tenantId),
-    db.prepare(`INSERT INTO mastery_snapshots (tenant_id,student_user_id,objective_id,mastery,evidence_count)
-      SELECT s.tenant_id,s.student_user_id,ao.objective_id,?,1
-      FROM submissions s
-      JOIN assignment_objectives ao ON ao.tenant_id=s.tenant_id AND ao.assignment_id=s.assignment_id
-      WHERE s.id=? AND s.tenant_id=?`)
-      .bind(score / 100, input.submissionId, context.tenantId),
   ]);
+  for (const item of evidence.results) {
+    await updateMasteryEvidence(db, {
+      tenantId: context.tenantId,
+      studentUserId: item.studentUserId,
+      objectiveId: item.objectiveId,
+      score: score / 100,
+    });
+  }
   return { submissionId: input.submissionId, score, comment: input.comment };
 }
