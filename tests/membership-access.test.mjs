@@ -15,9 +15,10 @@ const transpiled = ts.transpileModule(executableSource, {
 });
 assert.deepEqual((transpiled.diagnostics ?? []).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error), []);
 const membershipService = await import(`data:text/javascript;base64,${Buffer.from(transpiled.outputText).toString("base64")}`);
-const [actionsSource, workspaceSource] = await Promise.all([
+const [actionsSource, workspaceSource, platformStoreSource] = await Promise.all([
   readFile(new URL("app/api/v1/workspace/actions/route.ts", root), "utf8"),
   readFile(new URL("app/api/v1/workspace/route.ts", root), "utf8"),
+  readFile(new URL("app/lib/platform-store.ts", root), "utf8"),
 ]);
 
 function createDb({ users = [], memberships = [], links = [] } = {}) {
@@ -135,6 +136,29 @@ test("member status changes stay within the current tenant membership", async ()
   await membershipService.setMemberStatus(db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", status: "disabled" });
   assert.equal(state.users.get("member-1").status, "active");
   assert.deepEqual(state.memberships, [{ tenantId: "tenant-a", userId: "member-1", role: "teacher", status: "disabled" }, { tenantId: "tenant-b", userId: "member-1", role: "student", status: "active" }]);
+});
+
+test("current administrator cannot disable their own current-tenant membership", async () => {
+  const { db, state } = createDb({
+    users: [{ id: "admin-a", email: "admin@example.com", displayName: "Admin", status: "active" }],
+    memberships: [{ tenantId: "tenant-a", userId: "admin-a", role: "admin", status: "active" }],
+  });
+
+  await assert.rejects(
+    () => membershipService.setMemberStatus(db, {
+      tenantId: "tenant-a",
+      actorUserId: "admin-a",
+      userId: "admin-a",
+      status: "disabled",
+    }),
+    /cannot_disable_self/,
+  );
+  assert.equal(state.memberships[0].status, "active");
+});
+
+test("self-disable conflict is exposed as an HTTP 409 domain error", () => {
+  assert.match(platformStoreSource, /message === "cannot_disable_self"/);
+  assert.match(platformStoreSource, /cannot_disable_self[\s\S]{0,180}\? 409/);
 });
 
 test("member status change rejects a user without a current tenant membership", async () => {

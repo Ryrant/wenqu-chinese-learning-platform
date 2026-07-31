@@ -272,7 +272,7 @@ export function platformApiError(error: unknown) {
       ? 403
       : message.endsWith("_not_found")
         ? 404
-        : message === "review_not_due" || message === "submission_already_reviewed"
+        : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
       : message === "authentication_config_missing"
           ? 500
