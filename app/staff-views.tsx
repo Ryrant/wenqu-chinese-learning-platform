@@ -172,7 +172,15 @@ export function LegacyGuardianView({ nav, data, act, notify }: BaseProps) {
   return <><PageTitle eyebrow="孩子概览 · 当前工作区" title="她正在更自信地开口" detail={`${data.submissions.length} 次提交，${data.submissions.filter((item)=>item.review_status==="reviewed").length} 次已由教师审核。`}/><section className="guardian-hero"><div><span className="eyebrow">本周重点</span><h2>先看证据，再给建议</h2><p>平台不再展示虚构的时长或提升百分比；这里依据作业审核和掌握度快照生成建议。</p></div><ProgressRing value={average} label="平均掌握度"/></section><section className="dashboard-grid">{data.mastery.map((item)=><article className="panel" key={String(item.skill)}><span className="eyebrow">{stringValue(item.skill)}</span><h3>{Math.round(numberValue(item.mastery)*100)} 分</h3><p>{stringValue(item.title)} · {numberValue(item.evidenceCount)} 条证据</p></article>)}</section></>;
 }
 
-export function AdminView({ nav, data, act, refresh, notify }: AdminProps) {
+export function AdminView(props: AdminProps) {
+  const { nav, data, act, notify } = props;
+  if (nav === "内容中心") return <><LegacyAdminView {...props}/><AdminObjectiveLibrary data={data} act={act} notify={notify}/></>;
+  if (nav === "成员管理") return <><LegacyAdminView {...props}/><section className="loop-section"><AdminEnrollmentEditor data={data} act={act} notify={notify}/></section></>;
+  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/></>;
+  return <LegacyAdminView {...props}/>;
+}
+
+export function LegacyAdminView({ nav, data, act, refresh, notify }: AdminProps) {
   const [uploading,setUploading]=useState(false); const [file,setFile]=useState<File|null>(null); const [rights,setRights]=useState("pending");
   const [query,setQuery]=useState("中秋节 团圆"); const [results,setResults]=useState<Array<Record<string,unknown>>>([]);
   const [inviteEmail,setInviteEmail]=useState(""); const [inviteRole,setInviteRole]=useState("teacher"); const [inviteResult,setInviteResult]=useState<Record<string,unknown>|null>(null);
