@@ -41,6 +41,8 @@ next-env.d.ts
 /.wrangler/
 /.wrangler-dry-run/
 /outputs/
+/output/
+/.playwright-cli/
 /work/
 /.worktrees/
 *.tsbuildinfo
