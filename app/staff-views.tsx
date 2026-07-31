@@ -125,7 +125,44 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
   return <><PageTitle eyebrow="教学总览 · 实时数据" title="教学总览" detail={`${data.classes.length} 个班级，${published.length} 项任务正在进行。`}/><MetricGrid items={[["已发布任务",published.length,"来自 assignments 表","green"],["待批阅作业",pending.length,"低置信度全部转人工","orange"],["平均掌握度",mastery,"来自掌握度快照","blue"],["已保存教案",data.lessonPlans.length,"均处于教师审核状态","purple"]]}/><section className="teacher-grid"><article className="panel"><div className="panel-heading"><div><span className="eyebrow">任务状态</span><h3>近期任务</h3></div></div>{data.assignments.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{stringValue(item.title)}</strong><small>{stringValue(item.className)} · {numberValue(item.submissionCount)} 份提交</small></div>{item.status === "published" ? <span className="status published">进行中</span> : <button className="soft-button" onClick={async () => { try { await act("publish_assignment", { id: item.id }); notify("任务已发布", "学生端现在可以提交。") } catch (reason) { notify("发布失败", reason instanceof Error ? reason.message : "请重试", "error"); } }}>审核并发布</button>}</div>)}</article><article className="panel"><div className="panel-heading"><div><span className="eyebrow">班级证据</span><h3>平均掌握度</h3></div></div><div className="progress-content"><ProgressRing value={mastery} label="掌握度"/><div><strong>{completion}%</strong><p>每项指标都由当前工作区记录计算，不再使用固定演示数字。</p></div></div></article></section></>;
 }
 
-export function GuardianView({ nav, data, act, notify }: BaseProps) {
+export function GuardianView({ nav, data, act, notify, selectStudent }: GuardianProps) {
+  const average = data.mastery.length ? Math.round(data.mastery.reduce((sum, item) => sum + numberValue(item.mastery) * 100, 0) / data.mastery.length) : 0;
+  const childSwitch = <GuardianStudentSwitcher data={data} selectStudent={selectStudent}/>;
+
+  if (nav === "成长报告") return <section>
+    <PageTitle eyebrow="可追溯学情" title="成长报告" detail="周报只使用最近 7 天真实作业、教师确认成绩、最新掌握度和待复习项。" action={childSwitch}/>
+    <GuardianWeeklyReport data={data}/>
+    <article className="panel"><h3>已审核作品</h3>{data.submissions.filter((item) => item.review_status === "reviewed").map((item) => <div className="history-row" key={String(item.id)}><div><strong>{stringValue(item.assignmentTitle)}</strong><small>{stringValue(item.created_at)}</small></div><span className="status published">{numberValue(item.score)} 分</span></div>)}</article>
+  </section>;
+
+  if (nav === "家庭任务") return <section>
+    <PageTitle eyebrow="家庭陪伴任务" title="家庭任务" detail="任务会进入孩子的今日计划，并可由家长更新完成状态。" action={childSwitch}/>
+    <GuardianFamilyTasks data={data} act={act} notify={notify}/>
+  </section>;
+
+  if (nav === "授权管理") return <section>
+    <PageTitle eyebrow="未成年人数据控制" title="授权管理" detail="撤回与重新同意都会写入审计日志。" action={childSwitch}/>
+    <article className="panel"><div className="consent-row"><div><strong>学习分析授权</strong><p>用于生成掌握度快照和家长报告；不授权给模型供应商训练。</p></div>{(() => {
+      const item = data.consents.find((row) => row.scope === "learning_analytics" && (!data.selectedStudent || row.student_user_id === data.selectedStudent.id));
+      const granted = item?.status === "granted";
+      return <button className={granted ? "soft-button" : "primary-button"} disabled={!data.selectedStudent} onClick={async () => {
+        try {
+          await act("update_consent", { studentUserId: data.selectedStudent?.id, scope: "learning_analytics", status: granted ? "withdrawn" : "granted" });
+          notify("授权状态已更新", granted ? "已撤回学习分析授权。" : "已记录监护人同意。");
+        } catch (reason) { notify("更新失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+      }}>{granted ? "撤回授权" : "重新同意"}</button>;
+    })()}</div></article>
+  </section>;
+
+  return <>
+    <PageTitle eyebrow="孩子概览 · 当前工作区" title={`${data.selectedStudent?.displayName ?? "孩子"}的学习概览`} detail={`${data.submissions.length} 次提交，${data.submissions.filter((item) => item.review_status === "reviewed").length} 次已由教师审核。`} action={childSwitch}/>
+    <section className="guardian-hero"><div><span className="eyebrow">本周重点</span><h2>先看证据，再给建议</h2><p>平台不展示虚构时长或提升百分比；建议来自真实作业审核、最新掌握度与待复习项。</p></div><ProgressRing value={average} label="平均掌握度"/></section>
+    <GuardianWeeklyReport data={data}/>
+    <section className="dashboard-grid">{data.mastery.map((item) => <article className="panel" key={String(item.objectiveId ?? item.skill)}><span className="eyebrow">{stringValue(item.skill)}</span><h3>{Math.round(numberValue(item.mastery) * 100)} 分</h3><p>{stringValue(item.title)} · {numberValue(item.evidenceCount)} 条证据</p></article>)}</section>
+  </>;
+}
+
+export function LegacyGuardianView({ nav, data, act, notify }: BaseProps) {
   const [title, setTitle] = useState("一起找找家里的团圆味道");
   const [scheduledFor, setScheduledFor] = useState(() => new Date(new Date(data.generatedAt).getTime() + 86400000).toISOString().slice(0,16));
   const average = data.mastery.length ? Math.round(data.mastery.reduce((sum,item)=>sum+numberValue(item.mastery)*100,0)/data.mastery.length) : 0;
