@@ -45,11 +45,11 @@ export const enrollments = sqliteTable("enrollments", {
 }, (table) => [index("enrollments_tenant_idx").on(table.tenantId), uniqueIndex("enrollment_unique_idx").on(table.tenantId, table.classId, table.studentUserId)]);
 
 export const learningObjectives = sqliteTable("learning_objectives", {
-  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), code: text("code").notNull(), title: text("title").notNull(), skill: text("skill").notNull(), level: text("level").notNull(), createdAt: createdAt(),
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), code: text("code").notNull(), title: text("title").notNull(), skill: text("skill").notNull(), level: text("level").notNull(), status: text("status", { enum: ["active", "inactive"] }).notNull().default("active"), createdAt: createdAt(),
 }, (table) => [index("objectives_tenant_idx").on(table.tenantId)]);
 
 export const assignments = sqliteTable("assignments", {
-  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(), title: text("title").notNull(), activityType: text("activity_type").notNull(), status: text("status", { enum: ["draft", "review", "published", "closed"] }).notNull().default("draft"), dueAt: text("due_at"), createdBy: text("created_by").notNull(), publishedAt: text("published_at"), createdAt: createdAt(),
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(), title: text("title").notNull(), activityType: text("activity_type").notNull(), status: text("status", { enum: ["draft", "review", "published", "closed"] }).notNull().default("draft"), dueAt: text("due_at"), rubricJson: text("rubric_json").notNull().default("[]"), createdBy: text("created_by").notNull(), publishedAt: text("published_at"), createdAt: createdAt(),
 }, (table) => [index("assignments_tenant_idx").on(table.tenantId), index("assignments_class_idx").on(table.classId)]);
 
 export const submissions = sqliteTable("submissions", {
@@ -83,6 +83,67 @@ export const assignmentObjectives = sqliteTable("assignment_objectives", {
 }, (table) => [
   index("assignment_objectives_assignment_idx").on(table.tenantId, table.assignmentId),
   uniqueIndex("assignment_objective_unique_idx").on(table.tenantId, table.assignmentId, table.objectiveId),
+]);
+
+export const diagnosticItems = sqliteTable("diagnostic_items", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  objectiveId: text("objective_id").notNull(),
+  level: text("level").notNull(),
+  prompt: text("prompt").notNull(),
+  optionsJson: text("options_json").notNull(),
+  correctOption: integer("correct_option").notNull(),
+  explanation: text("explanation").notNull().default(""),
+  sortOrder: integer("sort_order").notNull().default(0),
+  status: text("status", { enum: ["active", "inactive"] }).notNull().default("active"),
+  createdBy: text("created_by").notNull(),
+  createdAt: createdAt(),
+}, (table) => [
+  index("diagnostic_items_tenant_idx").on(table.tenantId, table.level, table.status),
+  index("diagnostic_items_objective_idx").on(table.tenantId, table.objectiveId),
+]);
+
+export const diagnosticAttempts = sqliteTable("diagnostic_attempts", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  studentUserId: text("student_user_id").notNull(),
+  level: text("level").notNull(),
+  score: real("score").notNull(),
+  status: text("status", { enum: ["completed"] }).notNull().default("completed"),
+  completedAt: text("completed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  createdAt: createdAt(),
+}, (table) => [index("diagnostic_attempts_student_idx").on(table.tenantId, table.studentUserId, table.completedAt)]);
+
+export const diagnosticAnswers = sqliteTable("diagnostic_answers", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  attemptId: text("attempt_id").notNull(),
+  itemId: text("item_id").notNull(),
+  selectedOption: integer("selected_option").notNull(),
+  isCorrect: integer("is_correct", { mode: "boolean" }).notNull(),
+  createdAt: createdAt(),
+}, (table) => [
+  index("diagnostic_answers_attempt_idx").on(table.tenantId, table.attemptId),
+  uniqueIndex("diagnostic_answer_unique_idx").on(table.tenantId, table.attemptId, table.itemId),
+]);
+
+export const learningRecommendations = sqliteTable("learning_recommendations", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  studentUserId: text("student_user_id").notNull(),
+  objectiveId: text("objective_id"),
+  sourceType: text("source_type", { enum: ["diagnostic", "teacher", "family", "system"] }).notNull(),
+  sourceId: text("source_id"),
+  title: text("title").notNull(),
+  detail: text("detail").notNull().default(""),
+  dueAt: text("due_at"),
+  status: text("status", { enum: ["pending", "completed"] }).notNull().default("pending"),
+  createdBy: text("created_by").notNull(),
+  completedAt: text("completed_at"),
+  createdAt: createdAt(),
+}, (table) => [
+  index("learning_recommendations_student_idx").on(table.tenantId, table.studentUserId, table.status, table.dueAt),
+  uniqueIndex("learning_recommendation_source_idx").on(table.tenantId, table.studentUserId, table.sourceType, table.sourceId),
 ]);
 
 export const masterySnapshots = sqliteTable("mastery_snapshots", {
