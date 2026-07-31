@@ -21,7 +21,7 @@
   "dependencies": {
     "drizzle-orm": "0.45.2",
     "fflate": "^0.8.3",
-    "next": "16.2.6",
+    "next": "16.2.12",
     "pdfjs-dist": "^6.2.108",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -44,5 +44,9 @@
     "vite": "8.0.13",
     "wrangler": "4.92.0"
   },
-  "type": "module"
+  "type": "module",
+  "overrides": {
+    "postcss": "8.5.25",
+    "sharp": "0.35.3"
+  }
 }
