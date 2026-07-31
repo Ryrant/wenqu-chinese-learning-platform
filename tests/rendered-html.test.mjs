@@ -381,6 +381,8 @@ test("member management uses an aligned table modal reset and current-account gu
   assert.match(memberManagement, /重置成员密码/);
   assert.match(memberManagement, /member-actions/);
   assert.match(memberManagement, /guardian-relation-card/);
+  assert.match(memberManagement, /uniqueGuardianLinks/);
+  assert.match(memberManagement, /new Map\(data\.guardianLinks\.map/);
   assert.doesNotMatch(memberManagement, /{link\.guardianUserId}\s*→\s*{link\.studentUserId}/);
   assert.match(staff, /import { MemberManagementView } from "\.\/member-management-view"/);
   assert.match(staff, /<MemberManagementView data={data} act={act} notify={notify}\/>/);

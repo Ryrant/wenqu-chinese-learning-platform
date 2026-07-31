@@ -179,6 +179,7 @@ test("workspace routes expose member and guardian management operations", () => 
   for (const action of ["create_member", "reset_member_password", "set_member_status", "set_guardian_links"]) assert.match(actionsSource, new RegExp(action));
   assert.match(workspaceSource, /members:/);
   assert.match(workspaceSource, /guardianLinks:/);
+  assert.match(workspaceSource, /CASE WHEN u\.status='active' AND SUM\(CASE WHEN rm\.status='active' THEN 1 ELSE 0 END\) > 0 THEN 'active' ELSE 'disabled' END AS status/);
 });
 
 test("access control helpers centralize teacher student and guardian filters", async () => {

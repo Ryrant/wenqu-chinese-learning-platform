@@ -205,7 +205,11 @@ export async function GET(request: Request) {
       db.prepare("SELECT * FROM consent_records WHERE tenant_id=? AND (student_user_id=? OR guardian_user_id=?) ORDER BY created_at DESC").bind(tenantId, focusStudentId, userId).all(),
       admin ? db.prepare("SELECT * FROM audit_logs WHERE tenant_id=? ORDER BY created_at DESC LIMIT 30").bind(tenantId).all() : Promise.resolve(empty),
       admin ? db.prepare("SELECT id,email,role,status,expires_at AS expiresAt,created_at AS createdAt FROM invitations WHERE tenant_id=? ORDER BY created_at DESC LIMIT 20").bind(tenantId).all() : Promise.resolve(empty),
-      admin ? db.prepare("SELECT u.id,u.email,u.display_name AS displayName,u.status,u.must_change_password AS mustChangePassword,group_concat(rm.role) AS roles FROM users u JOIN role_memberships rm ON rm.user_id=u.id WHERE rm.tenant_id=? GROUP BY u.id ORDER BY u.created_at DESC").bind(tenantId).all() : Promise.resolve(empty),
+      admin ? db.prepare(`SELECT u.id,u.email,u.display_name AS displayName,
+        CASE WHEN u.status='active' AND SUM(CASE WHEN rm.status='active' THEN 1 ELSE 0 END) > 0 THEN 'active' ELSE 'disabled' END AS status,
+        u.must_change_password AS mustChangePassword,group_concat(rm.role) AS roles
+        FROM users u JOIN role_memberships rm ON rm.user_id=u.id
+        WHERE rm.tenant_id=? GROUP BY u.id ORDER BY u.created_at DESC`).bind(tenantId).all() : Promise.resolve(empty),
       admin ? db.prepare("SELECT guardian_user_id AS guardianUserId,student_user_id AS studentUserId,status,verified_at AS verifiedAt FROM guardian_student_links WHERE tenant_id=? AND status='active' ORDER BY created_at DESC").bind(tenantId).all() : Promise.resolve(empty),
       db.prepare("SELECT id,level,score,completed_at AS completedAt FROM diagnostic_attempts WHERE tenant_id=? AND student_user_id=? ORDER BY completed_at DESC LIMIT 1").bind(tenantId, focusStudentId).first(),
     ]);

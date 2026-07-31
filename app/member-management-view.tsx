@@ -34,6 +34,10 @@ export function MemberManagementView({ data, act, notify }: Props) {
   const [busyAction, setBusyAction] = useState("");
 
   const memberById = useMemo(() => new Map(data.members.map((member) => [String(member.id), member])), [data.members]);
+  const uniqueGuardianLinks = useMemo(() => [...new Map(data.guardianLinks.map((link) => [
+    `${link.guardianUserId}-${link.studentUserId}`,
+    link,
+  ])).values()], [data.guardianLinks]);
   const guardians = data.members.filter((member) => stringValue(member.roles, "").split(",").includes("guardian"));
   const students = data.members.filter((member) => stringValue(member.roles, "").split(",").includes("student"));
 
@@ -148,8 +152,8 @@ export function MemberManagementView({ data, act, notify }: Props) {
     </article>
 
     <article className="panel guardian-relations-panel">
-      <div className="member-table-heading"><div><span className="eyebrow">可核验家庭关系</span><h3>当前监护关系</h3><p>展示成员名称和邮箱，便于核对绑定对象。</p></div><span className="relation-count">{data.guardianLinks.length} 组</span></div>
-      <div className="guardian-relations">{data.guardianLinks.length ? data.guardianLinks.map((link) => {
+      <div className="member-table-heading"><div><span className="eyebrow">可核验家庭关系</span><h3>当前监护关系</h3><p>展示成员名称和邮箱，便于核对绑定对象。</p></div><span className="relation-count">{uniqueGuardianLinks.length} 组</span></div>
+      <div className="guardian-relations">{uniqueGuardianLinks.length ? uniqueGuardianLinks.map((link) => {
         const guardian = memberById.get(String(link.guardianUserId));
         const student = memberById.get(String(link.studentUserId));
         return <div className="guardian-relation-card" key={`${link.guardianUserId}-${link.studentUserId}`}>
