@@ -85,7 +85,7 @@ async function ensureCoreSchema(db: D1Database) {
     db.prepare("CREATE INDEX IF NOT EXISTS submissions_assignment_idx ON submissions (assignment_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS mastery_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, objective_id TEXT NOT NULL, mastery REAL NOT NULL, evidence_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS mastery_student_idx ON mastery_snapshots (tenant_id,student_user_id)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS source_documents (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, object_key TEXT, media_type TEXT NOT NULL, rights_status TEXT NOT NULL DEFAULT 'pending', processing_status TEXT NOT NULL DEFAULT 'uploaded', version INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS source_documents (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, object_key TEXT, media_type TEXT NOT NULL, rights_status TEXT NOT NULL DEFAULT 'pending', processing_status TEXT NOT NULL DEFAULT 'uploaded', version INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS source_documents_tenant_idx ON source_documents (tenant_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS knowledge_chunks (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_document_id TEXT NOT NULL, content TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', published INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS chunks_tenant_source_idx ON knowledge_chunks (tenant_id,source_document_id)"),
@@ -111,6 +111,8 @@ async function ensureCoreSchema(db: D1Database) {
     "ALTER TABLE role_memberships ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
     "ALTER TABLE guardian_student_links ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
     "ALTER TABLE source_documents ADD COLUMN processing_error TEXT",
+    "ALTER TABLE source_documents ADD COLUMN updated_at TEXT",
+    "ALTER TABLE source_documents ADD COLUMN archived_at TEXT",
     "ALTER TABLE submissions ADD COLUMN feedback TEXT",
     "ALTER TABLE submissions ADD COLUMN reviewed_at TEXT",
     "ALTER TABLE learning_objectives ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
@@ -146,7 +148,7 @@ export async function ensureSiteJwtSecret(db: D1Database) {
 }
 async function ensureExtendedSchema(db: D1Database) {
   await db.batch([
-    db.prepare(`CREATE TABLE IF NOT EXISTS lesson_plans (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, topic TEXT NOT NULL, level TEXT NOT NULL, duration_minutes INTEGER NOT NULL, objectives_json TEXT NOT NULL DEFAULT '[]', activities_json TEXT NOT NULL DEFAULT '[]', citations_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft', created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS lesson_plans (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, topic TEXT NOT NULL, level TEXT NOT NULL, duration_minutes INTEGER NOT NULL, objectives_json TEXT NOT NULL DEFAULT '[]', activities_json TEXT NOT NULL DEFAULT '[]', citations_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft', created_by TEXT NOT NULL, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS lesson_plans_tenant_idx ON lesson_plans (tenant_id, created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'info', read_at TEXT, scheduled_for TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (tenant_id, user_id, created_at)"),
@@ -170,9 +172,20 @@ async function ensureExtendedSchema(db: D1Database) {
     db.prepare(`CREATE TABLE IF NOT EXISTS diagnostic_answers (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, attempt_id TEXT NOT NULL, item_id TEXT NOT NULL, selected_option INTEGER NOT NULL, is_correct INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS diagnostic_answers_attempt_idx ON diagnostic_answers (tenant_id,attempt_id)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS diagnostic_answer_unique_idx ON diagnostic_answers (tenant_id,attempt_id,item_id)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS learning_recommendations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, objective_id TEXT, source_type TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', due_at TEXT, status TEXT NOT NULL DEFAULT 'pending', created_by TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS learning_recommendations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, objective_id TEXT, source_type TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', due_at TEXT, status TEXT NOT NULL DEFAULT 'pending', created_by TEXT NOT NULL, completed_at TEXT, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS learning_recommendations_student_idx ON learning_recommendations (tenant_id,student_user_id,status,due_at)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS learning_recommendation_source_idx ON learning_recommendations (tenant_id,student_user_id,source_type,source_id)"),
+  ]);
+  for (const statement of [
+    "ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT",
+    "ALTER TABLE lesson_plans ADD COLUMN archived_at TEXT",
+    "ALTER TABLE learning_recommendations ADD COLUMN updated_at TEXT",
+    "ALTER TABLE learning_recommendations ADD COLUMN archived_at TEXT",
+  ]) await trySchema(db, statement);
+  await db.batch([
+    db.prepare("UPDATE lesson_plans SET updated_at=created_at WHERE updated_at IS NULL"),
+    db.prepare("UPDATE learning_recommendations SET updated_at=created_at WHERE updated_at IS NULL"),
+    db.prepare("UPDATE source_documents SET updated_at=created_at WHERE updated_at IS NULL"),
   ]);
 }
 
@@ -272,7 +285,7 @@ export function platformApiError(error: unknown) {
       ? 403
       : message.endsWith("_not_found")
         ? 404
-        : message === "review_not_due" || message === "submission_already_reviewed"
+        : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
       : message === "authentication_config_missing"
           ? 500

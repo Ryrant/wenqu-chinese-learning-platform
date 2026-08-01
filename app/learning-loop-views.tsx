@@ -25,6 +25,15 @@ function dueLabel(value: unknown) {
   return Number.isNaN(date.getTime()) ? raw : date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function fullDateLabel(value: unknown) {
+  const raw = stringValue(value, "");
+  if (!raw) return "暂无更新时间";
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? raw : date.toLocaleString("zh-CN", {
+    year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
 export function StudentDiagnostic({ data, act, notify }: LoopProps) {
   const levels = [...new Set(data.diagnosticItems.map((item) => stringValue(item.level, "A2")))];
   const [selectedLevel, setSelectedLevel] = useState(levels[0] ?? "A2");
@@ -256,7 +265,7 @@ export function TeacherIntervention({ data, act, notify }: LoopProps) {
 export function GuardianStudentSwitcher({ data, selectStudent }: { data: WorkspaceData; selectStudent: (studentId: string) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   return <article className="child-switcher" aria-label="多孩子切换">
-    <span>多孩子切换</span>
+    <span>当前孩子</span>
     <select value={data.selectedStudent?.id ?? ""} disabled={busy || !data.availableStudents.length} onChange={async (event) => {
       setBusy(true);
       try { await selectStudent(event.target.value); } finally { setBusy(false); }
@@ -270,7 +279,7 @@ export function GuardianStudentSwitcher({ data, selectStudent }: { data: Workspa
 export function GuardianWeeklyReport({ data }: Pick<LoopProps, "data">) {
   const report = data.weeklyReport;
   return <section>
-    <div className="panel-heading"><div><span className="eyebrow">最近 7 天真实数据</span><h3>本周成长报告</h3></div><span>{data.selectedStudent?.displayName ?? "未选择孩子"}</span></div>
+    <div className="panel-heading"><div><span className="eyebrow">最近 7 天真实数据</span><h3>{data.selectedStudent?.displayName ?? "孩子"}的本周成长报告</h3></div></div>
     <section className="metric-grid">
       <article className="metric-card green"><span>提交作业</span><strong>{report.submittedCount}</strong><small>最近 7 天</small></article>
       <article className="metric-card blue"><span>教师确认</span><strong>{report.reviewedCount}</strong><small>仅计人工确认</small></article>
@@ -284,14 +293,23 @@ export function GuardianFamilyTasks({ data, act, notify }: LoopProps) {
   const [title, setTitle] = useState("亲子共读 15 分钟");
   const [detail, setDetail] = useState("一起阅读一篇华文短文，并请孩子复述主要内容。");
   const [dueAt, setDueAt] = useState("");
+  const [editingId, setEditingId] = useState("");
   const tasks = data.recommendations.filter((item) => item.source_type === "family");
+
+  function resetForm() {
+    setTitle("");
+    setDetail("");
+    setDueAt("");
+    setEditingId("");
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!data.selectedStudent) return notify("无法创建任务", "请先绑定并选择孩子。", "error");
     try {
-      await act("create_family_task", { studentUserId: data.selectedStudent.id, title, detail, dueAt: dueAt || null });
-      notify("亲子任务已创建", "任务已进入孩子的今日计划并生成平台通知。");
+      await act(editingId ? "update_family_task" : "create_family_task", { id: editingId || undefined, studentUserId: data.selectedStudent.id, title, detail, dueAt: dueAt || null });
+      resetForm();
+      notify(editingId ? "亲子任务已更新" : "亲子任务已创建", editingId ? "修改已保存并记录审计。" : "任务已进入孩子的今日计划并生成平台通知。");
     } catch (reason) {
       notify("任务创建失败", reason instanceof Error ? reason.message : "请重试", "error");
     }
@@ -299,24 +317,29 @@ export function GuardianFamilyTasks({ data, act, notify }: LoopProps) {
 
   return <section className="loop-grid">
     <form className="panel form-card" onSubmit={submit}>
-      <div><span className="eyebrow">家长陪伴 · 不代替教师评分</span><h3>亲子家庭任务</h3></div>
+      <div><span className="eyebrow">家长陪伴 · 不代替教师评分</span><h3>{editingId ? "编辑家庭任务" : "亲子家庭任务"}</h3><p className="form-context">任务对象：<strong>{data.selectedStudent?.displayName ?? "尚未选择孩子"}</strong></p></div>
       <label>任务名称<input value={title} onChange={(event) => setTitle(event.target.value)} required/></label>
       <label>任务说明<textarea value={detail} onChange={(event) => setDetail(event.target.value)} required maxLength={1000}/></label>
       <label>截止时间<input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)}/></label>
-      <button className="primary-button" disabled={!data.selectedStudent}>发送给孩子</button>
+      <div className="form-actions">{editingId && <button type="button" className="soft-button" onClick={resetForm}>取消编辑</button>}<button className="primary-button" disabled={!data.selectedStudent}>{editingId ? "保存修改" : "发送给孩子"}</button></div>
     </form>
     <article className="panel">
       <h3>家庭任务记录</h3>
-      {tasks.length ? tasks.map((item) => <div className="history-row" key={String(item.id)}>
-        <div><strong>{stringValue(item.title)}</strong><small>{dueLabel(item.due_at)} · {item.status === "completed" ? "已完成" : "待完成"}</small></div>
-        <button className="soft-button" type="button" onClick={async () => {
+      {tasks.length ? tasks.map((item) => <div className="history-row task-management-row" key={String(item.id)}>
+        <div><strong>{stringValue(item.title)}</strong><p>{stringValue(item.detail, "暂无任务说明")}</p><small>{dueLabel(item.due_at)} · {item.status === "completed" ? "已完成" : "待完成"} · 更新于 {fullDateLabel(item.updated_at ?? item.created_at)}</small></div>
+        <div className="row-actions"><button className="soft-button" type="button" onClick={() => {
+          setEditingId(String(item.id)); setTitle(stringValue(item.title, "")); setDetail(stringValue(item.detail, "")); setDueAt(typeof item.due_at === "string" ? item.due_at.slice(0, 16) : "");
+        }}>编辑</button><button className="soft-button" type="button" onClick={async () => {
           try {
             await act("update_recommendation_status", { id: item.id, status: item.status === "completed" ? "pending" : "completed" });
             notify("任务状态已更新", item.status === "completed" ? "已重新设为待完成。" : "已标记完成。");
           } catch (reason) {
             notify("更新失败", reason instanceof Error ? reason.message : "请重试", "error");
           }
-        }}>{item.status === "completed" ? "重新打开" : "标记完成"}</button>
+        }}>{item.status === "completed" ? "重新打开" : "标记完成"}</button><button className="danger-link" type="button" onClick={async () => {
+          try { await act("archive_family_task", { id: item.id }); notify("任务已归档", "该任务不再出现在孩子计划中，历史记录仍保留。"); }
+          catch (reason) { notify("归档失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+        }}>归档任务</button></div>
       </div>) : <p className="empty-state">还没有亲子任务。</p>}
     </article>
   </section>;
@@ -412,16 +435,13 @@ export function AdminEnrollmentEditor({ data, act, notify }: LoopProps) {
 
 export function AdminQualityDashboard({ data }: Pick<LoopProps, "data">) {
   const metrics = data.qualityMetrics;
-  const items = [
-    ["目标覆盖率", `${numberValue(metrics?.objectiveCoverage)}%`, "已发布任务关联目标"],
-    ["待批阅数", numberValue(metrics?.pendingReviews), "只统计真实提交"],
-    ["低掌握度目标", numberValue(metrics?.lowMasteryObjectives), "最新快照低于 60%"],
-    ["内容待审核", numberValue(metrics?.pendingContent), "未发布内容"],
-    ["授权覆盖", `${numberValue(metrics?.consentCoverage)}%`, "学习分析有效授权"],
-    ["AI 使用情况", numberValue(metrics?.aiSessions7d), "最近 7 天真实会话"],
-  ];
+  const [selectedKey, setSelectedKey] = useState("");
+  const entries = metrics ? Object.entries(metrics) : [];
+  const selected = metrics?.[selectedKey];
   return <section className="loop-section">
     <div className="section-heading"><span className="eyebrow">不生成虚构指标</span><h2>教学质量看板</h2><p>所有指标均由当前租户真实业务记录计算。</p></div>
-    {metrics ? <section className="quality-grid">{items.map(([label, value, note]) => <article className="metric-card" key={String(label)}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</section> : <p className="empty-state">质量指标暂不可用。</p>}
+    {metrics ? <><section className="quality-grid">{entries.map(([key, metric], index) => <button type="button" className={`metric-card quality-card tone-${index + 1} ${selectedKey === key ? "active" : ""}`} key={key} onClick={() => setSelectedKey(selectedKey === key ? "" : key)}><span>{metric.label}</span><strong>{metric.value}{metric.unit === "percent" ? "%" : ""}</strong><small>{metric.numerator}/{metric.denominator} · {metric.note}</small><em>{metric.trendAvailable ? "查看趋势" : "暂无趋势数据"}</em></button>)}</section>
+      {selected && <article className="panel quality-detail"><div className="panel-heading"><div><span className="eyebrow">指标对象明细</span><h3>{selected.label}</h3></div><button type="button" className="soft-button" onClick={() => setSelectedKey("")}>关闭</button></div>{selected.details.length ? selected.details.map((item) => <div className="history-row" key={item.id}><strong>{item.label}</strong><small>{item.meta ?? "真实业务记录"}</small></div>) : <p className="empty-state">当前没有需要处理的对象。</p>}</article>}
+    </> : <p className="empty-state">质量指标暂不可用。</p>}
   </section>;
 }
