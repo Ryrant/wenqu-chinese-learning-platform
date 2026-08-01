@@ -21,7 +21,6 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const [question, setQuestion] = useState("中秋节为什么代表团圆？");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
-  const [generationMeta, setGenerationMeta] = useState<{ provider?: string; model?: string; status?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(String(data.assignments.find((item) => item.status === "published")?.id ?? ""));
   const [textAnswer, setTextAnswer] = useState("");
@@ -48,7 +47,6 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     setBusy(true);
     setAnswer("");
     setSources([]);
-    setGenerationMeta(null);
     try {
       const response = await fetch("/api/v1/ai/generate", {
         method: "POST",
@@ -67,7 +65,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
         const eventName = block.split("\n").find((line) => line.startsWith("event:"))?.slice(6).trim();
         const payload = block.split("\n").find((line) => line.startsWith("data:"))?.slice(5).trim();
         if (!payload) continue;
-        if (eventName === "meta") setGenerationMeta(JSON.parse(payload) as { provider?: string; model?: string; status?: string });
+        if (eventName === "meta") continue;
         if (eventName === "token") built += (JSON.parse(payload) as { text: string }).text;
         if (eventName === "citations") found = JSON.parse(payload) as Array<Record<string, unknown>>;
       }
@@ -141,10 +139,12 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       <button className="primary-button" disabled={busy}>{busy ? "正在检索…" : "检索并生成回答"}</button>
     </form>
     {answer && <article className="panel result-card">
-      <span className="safe-chip">{generationMeta?.provider && generationMeta?.model ? `${generationMeta.provider} · ${generationMeta.model} · ${generationMeta.status ?? "review_required"}` : "来源化生成 · 需教师确认"}</span>
-      <h3>回答</h3><p className="generated-copy">{answer}</p>
-      <h4>引用来源（{sources.length}）</h4>
-      {sources.map((source) => <div className="citation" key={String(source.id)}><strong>{String(source.title)}</strong><p>{String(source.excerpt)}</p></div>)}
+      <span className="safe-chip">来源化回答 · 已关联审核资料</span>
+      <h2 className="question-title">根据已审核来源：{question}</h2>
+      <section className="answer-block"><h3>回答</h3><p className="generated-copy">{answer}</p></section>
+      <section className="reference-block"><h3>可参考内容</h3><p>以下内容来自当前机构已审核并发布的资料。</p><h4>引用来源（{sources.length}）</h4>
+        {sources.map((source) => <div className="citation" key={String(source.id)}><strong>{String(source.title)}</strong><p>{String(source.excerpt)}</p></div>)}
+      </section>
     </article>}
   </section>;
 

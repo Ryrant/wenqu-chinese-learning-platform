@@ -11,12 +11,13 @@ type Row = Record<string, unknown>;
 const empty = { results: [] as Row[] };
 
 async function qualityMetrics(db: D1Database, tenantId: string) {
-  const [assignments, covered, reviews, weak, content, ai, students, consents] = await Promise.all([
+  const [assignments, covered, reviews, submissions, weak, masteryTotal, content, documents, ai, students, consents, uncoveredDetails, reviewDetails, weakDetails, contentDetails, aiDetails] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS count FROM assignments WHERE tenant_id=? AND status='published'").bind(tenantId).first<{ count: number }>(),
     db.prepare(`SELECT COUNT(DISTINCT a.id) AS count FROM assignments a
       JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
       WHERE a.tenant_id=? AND a.status='published'`).bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM submissions WHERE tenant_id=? AND review_status!='reviewed'").bind(tenantId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM submissions WHERE tenant_id=?").bind(tenantId).first<{ count: number }>(),
     db.prepare(`WITH latest AS (
       SELECT student_user_id,objective_id,mastery,
         ROW_NUMBER() OVER (PARTITION BY student_user_id,objective_id ORDER BY id DESC) AS rn
@@ -29,7 +30,12 @@ async function qualityMetrics(db: D1Database, tenantId: string) {
         AND EXISTS (SELECT 1 FROM enrollments e
           WHERE e.tenant_id=? AND e.student_user_id=latest.student_user_id AND e.status='active')`)
       .bind(tenantId, tenantId, tenantId, tenantId).first<{ count: number }>(),
-    db.prepare("SELECT COUNT(*) AS count FROM source_documents WHERE tenant_id=? AND processing_status IN ('uploaded','processed')").bind(tenantId).first<{ count: number }>(),
+    db.prepare(`WITH latest AS (
+      SELECT id,ROW_NUMBER() OVER (PARTITION BY student_user_id,objective_id ORDER BY id DESC) AS rn
+      FROM mastery_snapshots WHERE tenant_id=?
+    ) SELECT COUNT(*) AS count FROM latest WHERE rn=1`).bind(tenantId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM source_documents WHERE tenant_id=? AND archived_at IS NULL AND processing_status IN ('uploaded','processed')").bind(tenantId).first<{ count: number }>(),
+    db.prepare("SELECT COUNT(*) AS count FROM source_documents WHERE tenant_id=? AND archived_at IS NULL").bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM ai_sessions WHERE tenant_id=? AND created_at>=datetime('now','-7 days')").bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(DISTINCT user_id) AS count FROM role_memberships WHERE tenant_id=? AND role='student' AND status='active'").bind(tenantId).first<{ count: number }>(),
     db.prepare(`WITH latest AS (
@@ -44,17 +50,49 @@ async function qualityMetrics(db: D1Database, tenantId: string) {
       WHERE latest.rn=1 AND latest.status='granted'
         AND (latest.expires_at IS NULL OR latest.expires_at>CURRENT_TIMESTAMP)`)
       .bind(tenantId, tenantId).first<{ count: number }>(),
+    db.prepare(`SELECT a.id,a.title AS label,'未关联学习目标' AS meta FROM assignments a
+      WHERE a.tenant_id=? AND a.status='published' AND NOT EXISTS (
+        SELECT 1 FROM assignment_objectives ao WHERE ao.tenant_id=a.tenant_id AND ao.assignment_id=a.id
+      ) ORDER BY a.created_at DESC LIMIT 5`).bind(tenantId).all(),
+    db.prepare(`SELECT s.id,a.title||' · '||COALESCE(u.display_name,'学生') AS label,'等待教师确认' AS meta
+      FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
+      LEFT JOIN users u ON u.id=s.student_user_id WHERE s.tenant_id=? AND s.review_status!='reviewed'
+      ORDER BY s.created_at DESC LIMIT 5`).bind(tenantId).all(),
+    db.prepare(`WITH latest AS (
+      SELECT ms.*,ROW_NUMBER() OVER (PARTITION BY ms.student_user_id,ms.objective_id ORDER BY ms.id DESC) AS rn
+      FROM mastery_snapshots ms WHERE ms.tenant_id=?
+    ) SELECT CAST(latest.id AS TEXT) AS id,COALESCE(u.display_name,'学生')||' · '||lo.title AS label,
+      ROUND(latest.mastery*100)||'%' AS meta FROM latest JOIN users u ON u.id=latest.student_user_id
+      JOIN learning_objectives lo ON lo.id=latest.objective_id AND lo.tenant_id=?
+      WHERE latest.rn=1 AND latest.mastery<0.6 ORDER BY latest.mastery LIMIT 5`).bind(tenantId, tenantId).all(),
+    db.prepare(`SELECT id,title AS label,'待权属或发布审核' AS meta FROM source_documents
+      WHERE tenant_id=? AND archived_at IS NULL AND processing_status IN ('uploaded','processed')
+      ORDER BY created_at DESC LIMIT 5`).bind(tenantId).all(),
+    db.prepare(`SELECT COALESCE(u.id,a.user_id)||':'||a.purpose AS id,COALESCE(u.display_name,'用户')||' · '||a.purpose AS label,
+      COUNT(*)||' 次' AS meta FROM ai_sessions a LEFT JOIN users u ON u.id=a.user_id
+      WHERE a.tenant_id=? AND a.created_at>=datetime('now','-7 days') GROUP BY a.user_id,a.purpose ORDER BY COUNT(*) DESC LIMIT 5`).bind(tenantId).all(),
   ]);
   const publishedAssignments = Number(assignments?.count ?? 0);
   const activeStudents = Number(students?.count ?? 0);
+  const coveredCount = Number(covered?.count ?? 0);
+  const consentCount = Number(consents?.count ?? 0);
+  const metric = (label: string, numerator: number, denominator: number, unit: "percent" | "count", note: string, details: Row[] = []) => ({
+    label,
+    value: unit === "percent" ? (denominator ? Math.round(numerator / denominator * 100) : 0) : numerator,
+    numerator,
+    denominator,
+    unit,
+    note,
+    details: details.map((item) => ({ id: String(item.id), label: String(item.label), meta: item.meta ? String(item.meta) : undefined })),
+    trendAvailable: false,
+  });
   return {
-    publishedAssignments,
-    objectiveCoverage: publishedAssignments ? Math.round(Number(covered?.count ?? 0) / publishedAssignments * 100) : 0,
-    pendingReviews: Number(reviews?.count ?? 0),
-    lowMasteryObjectives: Number(weak?.count ?? 0),
-    pendingContent: Number(content?.count ?? 0),
-    aiSessions7d: Number(ai?.count ?? 0),
-    consentCoverage: activeStudents ? Math.round(Number(consents?.count ?? 0) / activeStudents * 100) : 0,
+    objectiveCoverage: metric("目标覆盖率", coveredCount, publishedAssignments, "percent", "已发布任务关联目标", uncoveredDetails.results),
+    pendingReviews: metric("待批阅作业", Number(reviews?.count ?? 0), Number(submissions?.count ?? 0), "count", "只统计真实提交", reviewDetails.results),
+    lowMasteryObjectives: metric("低掌握度目标", Number(weak?.count ?? 0), Number(masteryTotal?.count ?? 0), "count", "最新快照低于 60%", weakDetails.results),
+    pendingContent: metric("内容待审核", Number(content?.count ?? 0), Number(documents?.count ?? 0), "count", "未发布且未归档内容", contentDetails.results),
+    consentCoverage: metric("授权覆盖", consentCount, activeStudents, "percent", "学习分析有效授权", []),
+    aiSessions7d: metric("AI 使用情况", Number(ai?.count ?? 0), 7, "count", "最近 7 天真实会话", aiDetails.results),
   };
 }
 
@@ -72,7 +110,7 @@ export async function GET(request: Request) {
     const submissionAccess = submissionAccessClause(context, "s", "c");
 
     const availableStudentsResult = guardian
-      ? await db.prepare(`SELECT u.id,u.display_name AS displayName
+      ? await db.prepare(`SELECT DISTINCT u.id,u.display_name AS displayName
           FROM guardian_student_links gl JOIN users u ON u.id=gl.student_user_id AND u.status='active'
           WHERE gl.tenant_id=? AND gl.guardian_user_id=? AND gl.status='active' ORDER BY u.display_name`)
         .bind(tenantId, userId).all<{ id: string; displayName: string }>()
@@ -104,12 +142,15 @@ export async function GET(request: Request) {
       LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
       WHERE a.tenant_id=? AND ${classAccess.sql} GROUP BY a.id ORDER BY a.created_at DESC`)
       .bind(focusStudentId, tenantId, ...classAccess.args);
-    const submissionsQuery = db.prepare(`SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName
+    const submissionsQuery = db.prepare(`SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName,
+      group_concat(DISTINCT lo.title) AS objectiveTitles
       FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
       JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
       LEFT JOIN users u ON u.id=s.student_user_id
+      LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
+      LEFT JOIN learning_objectives lo ON lo.id=ao.objective_id AND lo.tenant_id=ao.tenant_id
       WHERE s.tenant_id=? AND ${submissionAccess.sql}${guardianSubmissionFilter}
-      ORDER BY s.created_at DESC LIMIT 50`)
+      GROUP BY s.id ORDER BY s.created_at DESC LIMIT 50`)
       .bind(tenantId, ...submissionAccess.args, ...guardianSubmissionArgs);
     const weeklyStatsQuery = db.prepare(`SELECT
       SUM(CASE WHEN created_at>=datetime('now','-7 days') THEN 1 ELSE 0 END) AS submittedCount,
@@ -154,7 +195,7 @@ export async function GET(request: Request) {
       FROM learning_recommendations lr
       LEFT JOIN learning_objectives lo ON lo.id=lr.objective_id AND lo.tenant_id=lr.tenant_id
       LEFT JOIN diagnostic_items di ON di.id=lr.source_id AND di.tenant_id=lr.tenant_id
-      WHERE lr.tenant_id=? AND lr.student_user_id=? ORDER BY
+      WHERE lr.tenant_id=? AND lr.student_user_id=? AND lr.archived_at IS NULL ORDER BY
       CASE lr.status WHEN 'pending' THEN 0 ELSE 1 END,COALESCE(lr.due_at,'9999-12-31'),lr.created_at DESC`)
       .bind(tenantId, focusStudentId);
     const diagnosticItemsQuery = admin
@@ -195,15 +236,20 @@ export async function GET(request: Request) {
       recommendationsQuery.all(), diagnosticItemsQuery ? diagnosticItemsQuery.all() : Promise.resolve(empty),
       objectivesQuery.all(), enrollmentsQuery ? enrollmentsQuery.all() : Promise.resolve(empty),
       admin || teacher ? db.prepare(`SELECT d.*,d.processing_error AS processingError,COUNT(k.id) AS chunkCount,
-        SUM(CASE WHEN k.published=1 THEN 1 ELSE 0 END) AS publishedChunkCount
+        SUM(CASE WHEN k.published=1 THEN 1 ELSE 0 END) AS publishedChunkCount,
+        (SELECT json_group_array(preview.content) FROM (
+          SELECT content FROM knowledge_chunks pk WHERE pk.tenant_id=d.tenant_id AND pk.source_document_id=d.id ORDER BY pk.created_at LIMIT 3
+        ) preview) AS previewChunksJson
         FROM source_documents d LEFT JOIN knowledge_chunks k ON k.source_document_id=d.id AND k.tenant_id=d.tenant_id
-        WHERE d.tenant_id=? GROUP BY d.id ORDER BY d.created_at DESC`).bind(tenantId).all() : Promise.resolve(empty),
-      admin ? db.prepare("SELECT * FROM lesson_plans WHERE tenant_id=? ORDER BY created_at DESC LIMIT 20").bind(tenantId).all()
-        : teacher ? db.prepare("SELECT * FROM lesson_plans WHERE tenant_id=? AND created_by=? ORDER BY created_at DESC LIMIT 20").bind(tenantId, userId).all()
+        WHERE d.tenant_id=? AND d.archived_at IS NULL GROUP BY d.id ORDER BY COALESCE(d.updated_at,d.created_at) DESC`).bind(tenantId).all() : Promise.resolve(empty),
+      admin ? db.prepare("SELECT * FROM lesson_plans WHERE tenant_id=? AND archived_at IS NULL ORDER BY COALESCE(updated_at,created_at) DESC LIMIT 20").bind(tenantId).all()
+        : teacher ? db.prepare("SELECT * FROM lesson_plans WHERE tenant_id=? AND created_by=? AND archived_at IS NULL ORDER BY COALESCE(updated_at,created_at) DESC LIMIT 20").bind(tenantId, userId).all()
           : Promise.resolve(empty),
       db.prepare("SELECT * FROM notifications WHERE tenant_id=? AND user_id=? ORDER BY created_at DESC LIMIT 20").bind(tenantId, userId).all(),
       db.prepare("SELECT * FROM consent_records WHERE tenant_id=? AND (student_user_id=? OR guardian_user_id=?) ORDER BY created_at DESC").bind(tenantId, focusStudentId, userId).all(),
-      admin ? db.prepare("SELECT * FROM audit_logs WHERE tenant_id=? ORDER BY created_at DESC LIMIT 30").bind(tenantId).all() : Promise.resolve(empty),
+      admin ? db.prepare(`SELECT a.*,u.display_name AS actorDisplayName
+        FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id
+        WHERE a.tenant_id=? ORDER BY a.created_at DESC,a.id DESC LIMIT 30`).bind(tenantId).all() : Promise.resolve(empty),
       admin ? db.prepare("SELECT id,email,role,status,expires_at AS expiresAt,created_at AS createdAt FROM invitations WHERE tenant_id=? ORDER BY created_at DESC LIMIT 20").bind(tenantId).all() : Promise.resolve(empty),
       admin ? db.prepare(`SELECT u.id,u.email,u.display_name AS displayName,
         CASE WHEN u.status='active' AND SUM(CASE WHEN rm.status='active' THEN 1 ELSE 0 END) > 0 THEN 'active' ELSE 'disabled' END AS status,
@@ -267,7 +313,11 @@ export async function GET(request: Request) {
       weeklyReport,
       qualityMetrics: admin ? await qualityMetrics(db, tenantId) : null,
       enrollments: enrollments.results,
-      documents: documents.results,
+      documents: documents.results.map((item) => {
+        let previewChunks: string[] = [];
+        try { previewChunks = JSON.parse(String(item.previewChunksJson ?? "[]")); } catch { previewChunks = []; }
+        return { ...item, previewChunks, previews: previewChunks };
+      }),
       lessonPlans: plans.results,
       notifications: notifications.results,
       consents: consents.results,

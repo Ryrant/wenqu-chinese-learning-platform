@@ -110,8 +110,8 @@ export function MemberManagementView({ data, act, notify }: Props) {
     <section className="admin-grid member-management-actions">
       <form className="panel form-card" onSubmit={createMember}>
         <div className="panel-heading"><div><span className="eyebrow">账号与角色</span><h3>创建成员</h3></div></div>
-        <label>邮箱<input type="email" value={memberEmail} onChange={(event) => setMemberEmail(event.target.value)} placeholder="member@example.com" required/></label>
-        <label>显示名称<input value={memberDisplayName} onChange={(event) => setMemberDisplayName(event.target.value)} placeholder="例如：林老师" required/></label>
+        <label>邮箱<input type="email" autoComplete="email" value={memberEmail} onChange={(event) => setMemberEmail(event.target.value)} placeholder="member@example.com" required/></label>
+        <label>显示名称<input autoComplete="name" value={memberDisplayName} onChange={(event) => setMemberDisplayName(event.target.value)} placeholder="例如：林老师" required/></label>
         <label>角色<select value={memberRole} onChange={(event) => setMemberRole(event.target.value)}><option value="teacher">教师</option><option value="guardian">家长</option><option value="student">学生</option><option value="admin">管理员</option></select></label>
         <label>临时密码<input type="password" minLength={10} autoComplete="new-password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} placeholder="至少 10 个字符" required/></label>
         <button className="primary-button" disabled={busyAction === "create-member"}>{busyAction === "create-member" ? "创建中…" : "创建成员"}</button>
@@ -157,9 +157,9 @@ export function MemberManagementView({ data, act, notify }: Props) {
         const guardian = memberById.get(String(link.guardianUserId));
         const student = memberById.get(String(link.studentUserId));
         return <div className="guardian-relation-card" key={`${link.guardianUserId}-${link.studentUserId}`}>
-          <div className="relation-person"><span className="member-avatar small">{guardian ? memberInitial(guardian) : "家"}</span><span><strong>{guardian ? stringValue(guardian.displayName) : "未知监护人"}</strong><small>{guardian ? stringValue(guardian.email) : "账号不存在"}</small></span></div>
+          <div className="relation-person"><span className="member-avatar small">{guardian ? memberInitial(guardian) : "家"}</span><span><em className="relation-role">监护人</em><strong>{guardian ? stringValue(guardian.displayName) : "未知监护人"}</strong><small>{guardian ? stringValue(guardian.email) : "账号不存在"}</small></span></div>
           <span className="relation-arrow" aria-hidden="true">→</span>
-          <div className="relation-person"><span className="member-avatar small">{student ? memberInitial(student) : "生"}</span><span><strong>{student ? stringValue(student.displayName) : "未知学生"}</strong><small>{student ? stringValue(student.email) : "账号不存在"}</small></span></div>
+          <div className="relation-person"><span className="member-avatar small">{student ? memberInitial(student) : "生"}</span><span><em className="relation-role">学生</em><strong>{student ? stringValue(student.displayName) : "未知学生"}</strong><small>{student ? stringValue(student.email) : "账号不存在"}</small></span></div>
         </div>;
       }) : <p className="empty-state">尚未建立监护人绑定。</p>}</div>
     </article>
