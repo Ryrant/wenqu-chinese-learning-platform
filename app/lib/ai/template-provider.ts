@@ -1,4 +1,5 @@
 import type { AiGenerationInput, AiGenerationResult, AiProvider } from "./provider";
+import { buildTemplateAnswer } from "./template-answer.mjs";
 
 export function createTemplateProvider(): AiProvider {
   return {
@@ -6,9 +7,8 @@ export function createTemplateProvider(): AiProvider {
     model: "source-grounded-template",
     async generateText(input: AiGenerationInput): Promise<AiGenerationResult> {
       const citations = input.contextChunks.map((chunk) => ({ id: chunk.id, title: chunk.title, excerpt: chunk.excerpt }));
-      const sources = input.contextChunks.map((chunk, index) => `[${index + 1}] ${chunk.excerpt}`).join("\n");
       return {
-        text: `根据已审核来源，${input.prompt}\n\n可参考：\n${sources}`,
+        text: buildTemplateAnswer(input.prompt, input.contextChunks.map((chunk) => chunk.excerpt)),
         provider: "local",
         model: "source-grounded-template",
         status: "template",

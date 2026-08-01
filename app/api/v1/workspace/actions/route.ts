@@ -1,16 +1,19 @@
+import { env } from "cloudflare:workers";
 import { generateGroundedText } from "../../../../lib/ai/grounding";
 import { confirmSubmissionReview, suggestTextReview } from "../../../../lib/assessment-service";
 import { assertSubmissionReviewAccess } from "../../../../lib/access-control";
 import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../../../../lib/membership-service";
-import { publishContent } from "../../../../lib/content-processing";
+import { chunkText, extractText, publishContent } from "../../../../lib/content-processing";
 import { validateRubric } from "../../../../lib/learning-loop";
 import {
   answerReviewItem,
+  archiveFamilyTask,
   assertGuardianStudentAccess,
   createFamilyTask,
   createIntervention,
   setClassEnrollments,
   submitDiagnostic,
+  updateFamilyTask,
   updateRecommendationStatus,
   upsertDiagnosticItem,
   upsertLearningObjective,
@@ -35,11 +38,11 @@ export async function POST(request: Request) {
     const body = await request.json() as ActionBody;
     const action = requireText(body.action, "action", 60);
     const roleByAction: Record<string, PlatformRole> = {
-      create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
+      create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", update_lesson_plan: "teacher", archive_lesson_plan: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
-      create_family_task: "guardian",
+      create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian",
       create_intervention: "teacher",
-      create_invitation: "admin", review_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
+      create_invitation: "admin", review_content: "admin", reprocess_content: "admin", archive_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
       submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
     };
     const context = await platformContext(request, roleByAction[action]);
@@ -189,6 +192,35 @@ export async function POST(request: Request) {
       return Response.json({ id, title, topic, level, durationMinutes: duration, objectives, activities, citations, status: "draft", provider: result.provider, model: result.model }, { status: 201 });
     }
 
+    if (action === "update_lesson_plan") {
+      const id = requireText(body.id, "lesson_plan_id", 120);
+      const existing = await db.prepare("SELECT id FROM lesson_plans WHERE id=? AND tenant_id=? AND created_by=? AND status='draft' AND archived_at IS NULL")
+        .bind(id, tenantId, userId).first();
+      if (!existing) return Response.json({ error: "lesson_plan_not_editable" }, { status: 404 });
+      const title = requireText(body.title, "lesson_plan_title", 200);
+      const topic = requireText(body.topic, "lesson_plan_topic", 200);
+      const level = requireText(body.level, "lesson_plan_level", 20);
+      const duration = Math.max(20, Math.min(number(body.duration, 40), 90));
+      const objectives = Array.isArray(body.objectives) ? body.objectives.map((item) => text(item, 240)).filter(Boolean).slice(0, 8) : [];
+      const activities = Array.isArray(body.activities) ? body.activities.slice(0, 12) : [];
+      if (!objectives.length || !activities.length) throw new Error("invalid_lesson_plan_content");
+      await db.prepare(`UPDATE lesson_plans SET title=?,topic=?,level=?,duration_minutes=?,objectives_json=?,activities_json=?,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND tenant_id=? AND created_by=? AND status='draft' AND archived_at IS NULL`)
+        .bind(title, topic, level, duration, JSON.stringify(objectives), JSON.stringify(activities), id, tenantId, userId).run();
+      await audit(db, tenantId, userId, "lesson_plan.updated", "lesson_plan", id);
+      return Response.json({ id, status: "draft" });
+    }
+
+    if (action === "archive_lesson_plan") {
+      const id = requireText(body.id, "lesson_plan_id", 120);
+      const result = await db.prepare(`UPDATE lesson_plans SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND tenant_id=? AND created_by=? AND status='draft' AND archived_at IS NULL`)
+        .bind(id, tenantId, userId).run();
+      if (!result.meta.changes) return Response.json({ error: "lesson_plan_not_editable" }, { status: 404 });
+      await audit(db, tenantId, userId, "lesson_plan.archived", "lesson_plan", id);
+      return Response.json({ id, status: "archived" });
+    }
+
     if (action === "submit_text") {
       const assignmentId = requireText(body.assignmentId, "assignment_id");
       const answer = requireText(body.answer, "answer", 10000);
@@ -240,6 +272,23 @@ export async function POST(request: Request) {
       });
       await audit(db, tenantId, userId, "family_task.created", "learning_recommendation", result.id);
       return Response.json(result, { status: 201 });
+    }
+
+    if (action === "update_family_task") {
+      const result = await updateFamilyTask(db, context, {
+        id: requireText(body.id, "family_task_id", 120),
+        title: requireText(body.title, "family_task_title", 120),
+        detail: text(body.detail, 1000),
+        dueAt: text(body.dueAt, 40) || null,
+      });
+      await audit(db, tenantId, userId, "family_task.updated", "learning_recommendation", result.id);
+      return Response.json(result);
+    }
+
+    if (action === "archive_family_task") {
+      const result = await archiveFamilyTask(db, context, requireText(body.id, "family_task_id", 120));
+      await audit(db, tenantId, userId, "family_task.archived", "learning_recommendation", result.id);
+      return Response.json(result);
     }
 
     if (action === "update_recommendation_status") {
@@ -320,6 +369,45 @@ export async function POST(request: Request) {
       }
       await audit(db, tenantId, userId, "source.reviewed", "source_document", id, { status: next });
       return Response.json({ id, status: next });
+    }
+
+    if (action === "reprocess_content") {
+      const id = requireText(body.id, "document_id", 120);
+      const document = await db.prepare(`SELECT id,title,object_key AS objectKey,media_type AS mediaType
+        FROM source_documents WHERE id=? AND tenant_id=? AND archived_at IS NULL`)
+        .bind(id, tenantId).first<{ id: string; title: string; objectKey: string | null; mediaType: string }>();
+      if (!document?.objectKey) return Response.json({ error: "source_file_unavailable" }, { status: 409 });
+      const bucket = (env as unknown as { CONTENT: R2Bucket }).CONTENT;
+      const object = await bucket.get(document.objectKey);
+      if (!object) return Response.json({ error: "source_file_unavailable" }, { status: 404 });
+      try {
+        const file = new File([await object.arrayBuffer()], document.title, { type: document.mediaType });
+        const extracted = await extractText(file);
+        const chunks = chunkText({ tenantId, sourceDocumentId: id, text: extracted.text });
+        await db.batch([
+          db.prepare("DELETE FROM knowledge_chunks WHERE tenant_id=? AND source_document_id=?").bind(tenantId, id),
+          ...chunks.map((chunk) => db.prepare("INSERT INTO knowledge_chunks (id,tenant_id,source_document_id,content,metadata_json,published) VALUES (?,?,?,?,?,0)").bind(chunk.id, chunk.tenantId, chunk.sourceDocumentId, chunk.content, chunk.metadataJson)),
+          db.prepare("UPDATE source_documents SET processing_status='processed',processing_error=NULL,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?").bind(id, tenantId),
+        ]);
+        await audit(db, tenantId, userId, "source.reprocessed", "source_document", id, { chunkCount: chunks.length });
+        return Response.json({ id, status: "processed", chunkCount: chunks.length });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "content_processing_failed";
+        await db.prepare("UPDATE source_documents SET processing_status='failed',processing_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?").bind(message, id, tenantId).run();
+        return Response.json({ error: message }, { status: 422 });
+      }
+    }
+
+    if (action === "archive_content") {
+      const id = requireText(body.id, "document_id", 120);
+      const document = await db.prepare("SELECT id FROM source_documents WHERE id=? AND tenant_id=? AND archived_at IS NULL").bind(id, tenantId).first();
+      if (!document) return Response.json({ error: "document_not_found" }, { status: 404 });
+      await db.batch([
+        db.prepare("UPDATE source_documents SET processing_status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?").bind(id, tenantId),
+        db.prepare("UPDATE knowledge_chunks SET published=0 WHERE tenant_id=? AND source_document_id=?").bind(tenantId, id),
+      ]);
+      await audit(db, tenantId, userId, "source.archived", "source_document", id);
+      return Response.json({ id, status: "archived" });
     }
 
     if (action === "mark_notification") {

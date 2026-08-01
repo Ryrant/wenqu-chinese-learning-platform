@@ -152,6 +152,8 @@ export const learningRecommendations = sqliteTable("learning_recommendations", {
   status: text("status", { enum: ["pending", "completed"] }).notNull().default("pending"),
   createdBy: text("created_by").notNull(),
   completedAt: text("completed_at"),
+  updatedAt: text("updated_at"),
+  archivedAt: text("archived_at"),
   createdAt: createdAt(),
 }, (table) => [
   index("learning_recommendations_student_idx").on(table.tenantId, table.studentUserId, table.status, table.dueAt),
@@ -163,7 +165,7 @@ export const masterySnapshots = sqliteTable("mastery_snapshots", {
 }, (table) => [index("mastery_student_idx").on(table.tenantId, table.studentUserId)]);
 
 export const sourceDocuments = sqliteTable("source_documents", {
-  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), objectKey: text("object_key"), mediaType: text("media_type").notNull(), rightsStatus: text("rights_status").notNull().default("pending"), processingStatus: text("processing_status").notNull().default("uploaded"), processingError: text("processing_error"), version: integer("version").notNull().default(1), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), objectKey: text("object_key"), mediaType: text("media_type").notNull(), rightsStatus: text("rights_status").notNull().default("pending"), processingStatus: text("processing_status").notNull().default("uploaded"), processingError: text("processing_error"), version: integer("version").notNull().default(1), createdBy: text("created_by").notNull(), updatedAt: text("updated_at"), archivedAt: text("archived_at"), createdAt: createdAt(),
 }, (table) => [index("source_documents_tenant_idx").on(table.tenantId)]);
 
 export const knowledgeChunks = sqliteTable("knowledge_chunks", {
@@ -202,7 +204,7 @@ export const appSettings = sqliteTable("app_settings", {
 });
 
 export const lessonPlans = sqliteTable("lesson_plans", {
-  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), topic: text("topic").notNull(), level: text("level").notNull(), durationMinutes: integer("duration_minutes").notNull(), objectivesJson: text("objectives_json").notNull().default("[]"), activitiesJson: text("activities_json").notNull().default("[]"), citationsJson: text("citations_json").notNull().default("[]"), status: text("status").notNull().default("draft"), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), title: text("title").notNull(), topic: text("topic").notNull(), level: text("level").notNull(), durationMinutes: integer("duration_minutes").notNull(), objectivesJson: text("objectives_json").notNull().default("[]"), activitiesJson: text("activities_json").notNull().default("[]"), citationsJson: text("citations_json").notNull().default("[]"), status: text("status").notNull().default("draft"), createdBy: text("created_by").notNull(), updatedAt: text("updated_at"), archivedAt: text("archived_at"), createdAt: createdAt(),
 }, (table) => [index("lesson_plans_tenant_idx").on(table.tenantId, table.createdAt)]);
 
 export const notifications = sqliteTable("notifications", {
