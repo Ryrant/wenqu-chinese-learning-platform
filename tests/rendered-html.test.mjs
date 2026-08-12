@@ -340,9 +340,10 @@ test("runtime service status reads platform settings from D1", async () => {
 });
 
 test("pilot workspace UI exposes member content ai review and password change flows", async () => {
-  const [dashboard, staff, student, css, types, workspaceRoute] = await Promise.all([
+  const [dashboard, staff, memberManagement, student, css, types, workspaceRoute] = await Promise.all([
     read("app/dashboard.tsx"),
     read("app/staff-views.tsx"),
+    read("app/member-management-view.tsx"),
     read("app/student-view.tsx"),
     read("app/globals.css"),
     read("app/lib/platform-types.ts"),
@@ -352,7 +353,7 @@ test("pilot workspace UI exposes member content ai review and password change fl
   assert.match(dashboard, /mustChangePassword/);
   assert.ok(dashboard.indexOf("password-change-card") < dashboard.indexOf("标准 Cloudflare 登录"));
   assert.match(staff, /成员管理/);
-  assert.match(staff, /监护人绑定/);
+  assert.match(memberManagement, /监护人绑定/);
   assert.match(staff, /预览片段/);
   assert.match(staff, /处理失败/);
   assert.match(staff, /processing_status==="processed"/);
@@ -364,6 +365,30 @@ test("pilot workspace UI exposes member content ai review and password change fl
   assert.match(workspaceRoute, /const teacher = roles\.includes\("teacher"\)/);
   assert.match(workspaceRoute, /submissionReviewsQuery = \(admin \|\| teacher\)/);
   assert.match(workspaceRoute, /ROW_NUMBER\(\) OVER \(PARTITION BY ms\.student_user_id,ms\.objective_id/);
+});
+
+test("member management uses an aligned table modal reset and current-account guard", async () => {
+  const [memberManagement, staff, css] = await Promise.all([
+    read("app/member-management-view.tsx").catch(() => ""),
+    read("app/staff-views.tsx"),
+    read("app/globals.css"),
+  ]);
+
+  assert.match(memberManagement, /export function MemberManagementView/);
+  assert.match(memberManagement, /data\.user\.id === id/);
+  assert.match(memberManagement, /当前账号/);
+  assert.match(memberManagement, /不可停用/);
+  assert.match(memberManagement, /重置成员密码/);
+  assert.match(memberManagement, /member-actions/);
+  assert.match(memberManagement, /guardian-relation-card/);
+  assert.match(memberManagement, /uniqueGuardianLinks/);
+  assert.match(memberManagement, /new Map\(data\.guardianLinks\.map/);
+  assert.doesNotMatch(memberManagement, /{link\.guardianUserId}\s*→\s*{link\.studentUserId}/);
+  assert.match(staff, /import { MemberManagementView } from "\.\/member-management-view"/);
+  assert.match(staff, /<MemberManagementView data={data} act={act} notify={notify}\/>/);
+  for (const token of [".member-table-scroll", ".member-identity", ".member-actions", ".role-badge", ".member-state", "white-space:nowrap"]) {
+    assert.match(css, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
 });
 
 test("admin UI exposes post-deploy platform settings stored in D1", async () => {

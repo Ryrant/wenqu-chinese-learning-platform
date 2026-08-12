@@ -26,7 +26,7 @@ export async function searchPublishedKnowledge(db: D1Database, input: { tenantId
     SELECT k.id,k.content,d.title
     FROM knowledge_chunks k
     JOIN source_documents d ON d.id=k.source_document_id AND d.tenant_id=k.tenant_id
-    WHERE k.tenant_id=? AND k.published=1 AND d.processing_status='published'
+    WHERE k.tenant_id=? AND k.published=1 AND d.processing_status='published' AND d.archived_at IS NULL
       AND (${terms.map(() => "k.content LIKE ?").join(" OR ")})
     ORDER BY k.created_at DESC
     LIMIT ?

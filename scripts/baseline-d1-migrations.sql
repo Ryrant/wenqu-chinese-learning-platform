@@ -54,3 +54,12 @@ WHERE (
 )=5
 AND EXISTS (SELECT 1 FROM pragma_table_info('learning_objectives') WHERE name='status')
 AND EXISTS (SELECT 1 FROM pragma_table_info('assignments') WHERE name='rubric_json');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0005_ui_workflow.sql'
+WHERE EXISTS (SELECT 1 FROM pragma_table_info('lesson_plans') WHERE name='updated_at')
+AND EXISTS (SELECT 1 FROM pragma_table_info('lesson_plans') WHERE name='archived_at')
+AND EXISTS (SELECT 1 FROM pragma_table_info('learning_recommendations') WHERE name='updated_at')
+AND EXISTS (SELECT 1 FROM pragma_table_info('learning_recommendations') WHERE name='archived_at')
+AND EXISTS (SELECT 1 FROM pragma_table_info('source_documents') WHERE name='updated_at')
+AND EXISTS (SELECT 1 FROM pragma_table_info('source_documents') WHERE name='archived_at');

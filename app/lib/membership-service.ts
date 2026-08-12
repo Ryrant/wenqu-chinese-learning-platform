@@ -53,6 +53,9 @@ export async function resetMemberPassword(db: D1Database, input: { tenantId: str
 }
 
 export async function setMemberStatus(db: D1Database, input: { tenantId: string; actorUserId: string; userId: string; status: "active" | "disabled" }) {
+  if (input.status === "disabled" && input.userId === input.actorUserId) {
+    throw new Error("cannot_disable_self");
+  }
   const result = await db.prepare("UPDATE role_memberships SET status=? WHERE tenant_id=? AND user_id=?")
     .bind(input.status, input.tenantId, input.userId)
     .run();

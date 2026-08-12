@@ -202,9 +202,46 @@ export async function createFamilyTask(db: D1Database, context: PlatformContext,
   return { id, status: "pending" };
 }
 
+async function ownedFamilyTask(db: D1Database, context: PlatformContext, id: string) {
+  const row = await db.prepare(`SELECT id,student_user_id AS studentUserId,created_by AS createdBy
+    FROM learning_recommendations
+    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL`)
+    .bind(id, context.tenantId)
+    .first<{ id: string; studentUserId: string; createdBy: string }>();
+  if (!row) throw new Error("family_task_not_found");
+  if (!context.roles.includes("admin") && row.createdBy !== context.userId) throw new Error("forbidden");
+  await assertGuardianStudentAccess(db, context, row.studentUserId);
+  return row;
+}
+
+export async function updateFamilyTask(db: D1Database, context: PlatformContext, input: {
+  id: string;
+  title: string;
+  detail: string;
+  dueAt?: string | null;
+}) {
+  await ownedFamilyTask(db, context, input.id);
+  await db.prepare(`UPDATE learning_recommendations
+    SET title=?,detail=?,due_at=?,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL`)
+    .bind(input.title, input.detail, input.dueAt ?? null, input.id, context.tenantId)
+    .run();
+  return { id: input.id, status: "updated" };
+}
+
+export async function archiveFamilyTask(db: D1Database, context: PlatformContext, id: string) {
+  await ownedFamilyTask(db, context, id);
+  await db.prepare(`UPDATE learning_recommendations
+    SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL`)
+    .bind(id, context.tenantId)
+    .run();
+  return { id, status: "archived" };
+}
+
 export async function updateRecommendationStatus(db: D1Database, context: PlatformContext, input: { id: string; status: "pending" | "completed" }) {
   const row = await db.prepare(`SELECT id,student_user_id AS studentUserId,source_type AS sourceType,created_by AS createdBy
-    FROM learning_recommendations WHERE id=? AND tenant_id=?`)
+    FROM learning_recommendations WHERE id=? AND tenant_id=? AND archived_at IS NULL`)
     .bind(input.id, context.tenantId)
     .first<{ id: string; studentUserId: string; sourceType: RecommendationSource; createdBy: string }>();
   if (!row) throw new Error("recommendation_not_found");
@@ -219,7 +256,7 @@ export async function updateRecommendationStatus(db: D1Database, context: Platfo
       throw new Error("forbidden");
     }
   }
-  await db.prepare(`UPDATE learning_recommendations SET status=?,
+  await db.prepare(`UPDATE learning_recommendations SET status=?,updated_at=CURRENT_TIMESTAMP,
     completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE NULL END
     WHERE id=? AND tenant_id=?`)
     .bind(input.status, input.status, input.id, context.tenantId).run();

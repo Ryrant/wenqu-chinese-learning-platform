@@ -11,6 +11,18 @@ export type PublicPlatformSettings = {
   speechKey: SecretStatus;
   moderationKey: SecretStatus;
 };
+export type QualityMetricDetail = { id: string; label: string; meta?: string };
+export type QualityMetric = {
+  label: string;
+  value: number;
+  numerator: number;
+  denominator: number;
+  unit: "percent" | "count";
+  note: string;
+  details: QualityMetricDetail[];
+  trendAvailable: boolean;
+};
+export type QualityMetrics = Record<string, QualityMetric>;
 export type WorkspaceData = {
   workspace: { tenantId: string; name: string; region: string; sampleData: boolean };
   user: { id: string; email: string; displayName: string; roles: Role[]; mustChangePassword?: boolean };
@@ -19,7 +31,7 @@ export type WorkspaceData = {
   learningObjectives: Row[]; diagnosticItems: Row[]; diagnosticSummary: Row | null; recommendations: Row[]; learningPlan: Row[];
   availableStudents: Array<{ id: string; displayName: string }>; selectedStudent: { id: string; displayName: string } | null;
   weeklyReport: { submittedCount: number; reviewedCount: number; averageScore: number | null; masteryAverage: number; pendingRecommendations: number };
-  masteryMatrix: Row[]; qualityMetrics: Row | null; enrollments: Row[];
+  masteryMatrix: Row[]; qualityMetrics: QualityMetrics | null; enrollments: Row[];
   services: Record<string, { status: string; label: string }>;
   platformSettings?: PublicPlatformSettings;
   generatedAt: string;
