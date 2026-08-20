@@ -1,4 +1,5 @@
 import { hashPassword, verifyPassword } from "./auth-password";
+import type { PlatformDatabase } from "./platform-runtime";
 
 export type StandardLoginAccount = {
   id: string;
@@ -10,13 +11,13 @@ export type StandardLoginAccount = {
 };
 
 export type StandardLoginInput = {
-  db: D1Database;
+  db: PlatformDatabase;
   email: string;
   password: string;
 };
 
 export type InitialAdminInput = {
-  db: D1Database;
+  db: PlatformDatabase;
   email: string;
   password: string;
   displayName?: string;
@@ -28,7 +29,7 @@ function idPart(value: string) {
   return (hash >>> 0).toString(36);
 }
 
-async function findAccount(db: D1Database, email: string) {
+async function findAccount(db: PlatformDatabase, email: string) {
   return db.prepare(`
     SELECT u.id,u.email,u.display_name AS displayName,u.password_hash AS passwordHash,
            u.must_change_password AS mustChangePassword,u.status AS status
@@ -38,7 +39,7 @@ async function findAccount(db: D1Database, email: string) {
   `).bind(email).first<StandardLoginAccount>();
 }
 
-async function hasAnyUser(db: D1Database) {
+async function hasAnyUser(db: PlatformDatabase) {
   const row = await db.prepare("SELECT COUNT(*) AS count FROM users").first<{ count: number }>();
   return Number(row?.count ?? 0) > 0;
 }

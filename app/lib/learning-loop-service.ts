@@ -1,4 +1,5 @@
 import { blendMastery, calculateDiagnosticScores, isRecommendationDue, matchesDiagnosticItemSet } from "./learning-loop";
+import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 
 type DiagnosticAnswerInput = { itemId: string; selectedOption: number };
@@ -6,7 +7,7 @@ type RecommendationSource = "diagnostic" | "teacher" | "family" | "system";
 
 const tomorrowIso = () => new Date(Date.now() + 86400000).toISOString();
 
-export async function assertGuardianStudentAccess(db: D1Database, context: PlatformContext, studentUserId: string) {
+export async function assertGuardianStudentAccess(db: PlatformDatabase, context: PlatformContext, studentUserId: string) {
   if (context.roles.includes("admin")) return;
   const link = await db.prepare(`SELECT id FROM guardian_student_links
     WHERE tenant_id=? AND guardian_user_id=? AND student_user_id=? AND status='active'`)
@@ -15,7 +16,7 @@ export async function assertGuardianStudentAccess(db: D1Database, context: Platf
   if (!link) throw new Error("forbidden");
 }
 
-export async function assertTeacherStudentAccess(db: D1Database, context: PlatformContext, studentUserId: string) {
+export async function assertTeacherStudentAccess(db: PlatformDatabase, context: PlatformContext, studentUserId: string) {
   if (context.roles.includes("admin")) return;
   const enrollment = await db.prepare(`SELECT e.id FROM enrollments e
     JOIN classes c ON c.id=e.class_id AND c.tenant_id=e.tenant_id
@@ -25,7 +26,7 @@ export async function assertTeacherStudentAccess(db: D1Database, context: Platfo
   if (!enrollment) throw new Error("forbidden");
 }
 
-export async function updateMasteryEvidence(db: D1Database, input: {
+export async function updateMasteryEvidence(db: PlatformDatabase, input: {
   tenantId: string;
   studentUserId: string;
   objectiveId: string;
@@ -44,7 +45,7 @@ export async function updateMasteryEvidence(db: D1Database, input: {
   return next;
 }
 
-export function prepareMasteryEvidenceInsert(db: D1Database, input: {
+export function prepareMasteryEvidenceInsert(db: PlatformDatabase, input: {
   tenantId: string;
   studentUserId: string;
   objectiveId: string;
@@ -71,7 +72,7 @@ export function prepareMasteryEvidenceInsert(db: D1Database, input: {
     );
 }
 
-export async function submitDiagnostic(db: D1Database, context: PlatformContext, input: { level: string; answers: DiagnosticAnswerInput[] }) {
+export async function submitDiagnostic(db: PlatformDatabase, context: PlatformContext, input: { level: string; answers: DiagnosticAnswerInput[] }) {
   if (!input.answers.length || input.answers.length > 30) throw new Error("invalid_diagnostic_answers");
   const unique = new Map(input.answers.map((answer) => [answer.itemId, answer]));
   if (unique.size !== input.answers.length || [...unique.values()].some((answer) => !Number.isInteger(answer.selectedOption) || answer.selectedOption < 0 || answer.selectedOption > 3)) {
@@ -127,7 +128,7 @@ export async function submitDiagnostic(db: D1Database, context: PlatformContext,
   return { attemptId, score, objectiveScores, incorrectCount: evidence.filter((item) => !item.isCorrect).length };
 }
 
-export async function answerReviewItem(db: D1Database, context: PlatformContext, input: { recommendationId: string; selectedOption: number }) {
+export async function answerReviewItem(db: PlatformDatabase, context: PlatformContext, input: { recommendationId: string; selectedOption: number }) {
   if (!Number.isInteger(input.selectedOption) || input.selectedOption < 0 || input.selectedOption > 3) throw new Error("invalid_selected_option");
   const row = await db.prepare(`SELECT lr.id,lr.objective_id AS objectiveId,lr.due_at AS dueAt,di.correct_option AS correctOption
     FROM learning_recommendations lr
@@ -153,7 +154,7 @@ export async function answerReviewItem(db: D1Database, context: PlatformContext,
   return { id: row.id, correct, status: correct ? "completed" : "pending", dueAt: nextDueAt };
 }
 
-async function createRecommendation(db: D1Database, input: {
+async function createRecommendation(db: PlatformDatabase, input: {
   tenantId: string;
   studentUserId: string;
   objectiveId?: string | null;
@@ -172,7 +173,7 @@ async function createRecommendation(db: D1Database, input: {
   return id;
 }
 
-export async function createIntervention(db: D1Database, context: PlatformContext, input: {
+export async function createIntervention(db: PlatformDatabase, context: PlatformContext, input: {
   studentUserId: string;
   objectiveId: string;
   title: string;
@@ -187,7 +188,7 @@ export async function createIntervention(db: D1Database, context: PlatformContex
   return { id, status: "pending" };
 }
 
-export async function createFamilyTask(db: D1Database, context: PlatformContext, input: {
+export async function createFamilyTask(db: PlatformDatabase, context: PlatformContext, input: {
   studentUserId: string;
   title: string;
   detail: string;
@@ -202,7 +203,7 @@ export async function createFamilyTask(db: D1Database, context: PlatformContext,
   return { id, status: "pending" };
 }
 
-async function ownedFamilyTask(db: D1Database, context: PlatformContext, id: string) {
+async function ownedFamilyTask(db: PlatformDatabase, context: PlatformContext, id: string) {
   const row = await db.prepare(`SELECT id,student_user_id AS studentUserId,created_by AS createdBy
     FROM learning_recommendations
     WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL`)
@@ -214,7 +215,7 @@ async function ownedFamilyTask(db: D1Database, context: PlatformContext, id: str
   return row;
 }
 
-export async function updateFamilyTask(db: D1Database, context: PlatformContext, input: {
+export async function updateFamilyTask(db: PlatformDatabase, context: PlatformContext, input: {
   id: string;
   title: string;
   detail: string;
@@ -229,7 +230,7 @@ export async function updateFamilyTask(db: D1Database, context: PlatformContext,
   return { id: input.id, status: "updated" };
 }
 
-export async function archiveFamilyTask(db: D1Database, context: PlatformContext, id: string) {
+export async function archiveFamilyTask(db: PlatformDatabase, context: PlatformContext, id: string) {
   await ownedFamilyTask(db, context, id);
   await db.prepare(`UPDATE learning_recommendations
     SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
@@ -239,7 +240,7 @@ export async function archiveFamilyTask(db: D1Database, context: PlatformContext
   return { id, status: "archived" };
 }
 
-export async function updateRecommendationStatus(db: D1Database, context: PlatformContext, input: { id: string; status: "pending" | "completed" }) {
+export async function updateRecommendationStatus(db: PlatformDatabase, context: PlatformContext, input: { id: string; status: "pending" | "completed" }) {
   const row = await db.prepare(`SELECT id,student_user_id AS studentUserId,source_type AS sourceType,created_by AS createdBy
     FROM learning_recommendations WHERE id=? AND tenant_id=? AND archived_at IS NULL`)
     .bind(input.id, context.tenantId)
@@ -263,7 +264,7 @@ export async function updateRecommendationStatus(db: D1Database, context: Platfo
   return { id: input.id, status: input.status };
 }
 
-export async function setClassEnrollments(db: D1Database, context: PlatformContext, input: { classId: string; studentUserIds: string[] }) {
+export async function setClassEnrollments(db: PlatformDatabase, context: PlatformContext, input: { classId: string; studentUserIds: string[] }) {
   const uniqueStudents = [...new Set(input.studentUserIds)].filter(Boolean);
   const classRow = await db.prepare("SELECT id FROM classes WHERE id=? AND tenant_id=?").bind(input.classId, context.tenantId).first();
   if (!classRow) throw new Error("class_not_found");
@@ -284,7 +285,7 @@ export async function setClassEnrollments(db: D1Database, context: PlatformConte
   return { classId: input.classId, studentUserIds: uniqueStudents };
 }
 
-export async function upsertLearningObjective(db: D1Database, context: PlatformContext, input: {
+export async function upsertLearningObjective(db: PlatformDatabase, context: PlatformContext, input: {
   id?: string;
   code: string;
   title: string;
@@ -306,7 +307,7 @@ export async function upsertLearningObjective(db: D1Database, context: PlatformC
   return { id, ...input };
 }
 
-export async function upsertDiagnosticItem(db: D1Database, context: PlatformContext, input: {
+export async function upsertDiagnosticItem(db: PlatformDatabase, context: PlatformContext, input: {
   id?: string;
   objectiveId: string;
   level: string;

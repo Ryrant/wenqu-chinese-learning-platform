@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { platformApiError, platformContext } from "../../../lib/platform-store";
 
 export async function POST(request: Request) {
@@ -13,7 +12,6 @@ export async function POST(request: Request) {
       context.db.prepare("INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,asset_key,confidence,review_status) VALUES (?,?,?,?,?,?,0,'human_review')").bind(id, context.tenantId, body.assignmentId, context.userId, body.textAnswer?.trim().slice(0, 10000) || null, body.assetKey || null),
       context.db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), context.tenantId, context.userId, "submission.created", "submission", id, JSON.stringify({ medium: body.assetKey ? "asset" : "text" })),
     ]);
-    void env;
     return Response.json({ id, reviewStatus: "human_review", message: "已提交教师复核；平台不会伪造自动分数。" }, { status: 201 });
   } catch (error) { return platformApiError(error); }
 }

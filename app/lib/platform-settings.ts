@@ -1,3 +1,5 @@
+import type { PlatformDatabase } from "./platform-runtime";
+
 export type PlatformSettings = {
   jwtTtlSeconds: number;
   aiKey: string;
@@ -60,7 +62,7 @@ function normalizeTtl(value: unknown) {
   return Math.floor(parsed);
 }
 
-async function upsertSettings(db: D1Database, entries: Array<[string, string]>) {
+async function upsertSettings(db: PlatformDatabase, entries: Array<[string, string]>) {
   if (!entries.length) return;
   await db.batch(entries.map(([key, value]) => db.prepare(`
     INSERT INTO app_settings (key,value,updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
@@ -68,7 +70,7 @@ async function upsertSettings(db: D1Database, entries: Array<[string, string]>) 
   `).bind(key, value)));
 }
 
-export async function loadPlatformSettings(db: D1Database): Promise<PlatformSettings> {
+export async function loadPlatformSettings(db: PlatformDatabase): Promise<PlatformSettings> {
   const rows = await db.prepare("SELECT key,value FROM app_settings").all<{ key: string; value: string }>();
   const values = new Map(rows.results.map((item) => [item.key, item.value]));
   const configuredTtl = Number.parseInt(values.get(KEY_MAP.jwtTtlSeconds) ?? "", 10);
@@ -93,7 +95,7 @@ export function publicPlatformSettings(settings: PlatformSettings): PublicPlatfo
   };
 }
 
-export async function savePlatformSettings(db: D1Database, input: PlatformSettingsInput): Promise<PublicPlatformSettings> {
+export async function savePlatformSettings(db: PlatformDatabase, input: PlatformSettingsInput): Promise<PublicPlatformSettings> {
   const updates: Array<[string, string]> = [];
   const ttl = normalizeTtl(input.jwtTtlSeconds);
   if (ttl !== undefined) updates.push([KEY_MAP.jwtTtlSeconds, String(ttl)]);

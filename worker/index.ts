@@ -1,4 +1,6 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
+import { createCloudflareRuntime } from "../app/lib/platform-runtime-cloudflare";
+import { setPlatformRuntime } from "../app/lib/platform-runtime";
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 
@@ -27,10 +29,11 @@ interface ExecutionContext {
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env | undefined, ctx: ExecutionContext): Promise<Response> {
+    if (env) setPlatformRuntime(createCloudflareRuntime(env));
     const url = new URL(request.url);
 
-    if (url.pathname === "/_vinext/image") {
+    if (url.pathname === "/_vinext/image" && env?.ASSETS && env?.IMAGES) {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),

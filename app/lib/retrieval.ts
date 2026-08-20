@@ -1,3 +1,5 @@
+import type { PlatformDatabase } from "./platform-runtime";
+
 export type RetrievedChunk = {
   id: string;
   title: string;
@@ -19,7 +21,7 @@ export function queryTerms(query: string) {
   return [...new Set([...explicitTerms, ...cjkRuns.map((run) => run.slice(0, 8)), ...cjkWindows])].slice(0, 16);
 }
 
-export async function searchPublishedKnowledge(db: D1Database, input: { tenantId: string; query: string; limit?: number }): Promise<RetrievedChunk[]> {
+export async function searchPublishedKnowledge(db: PlatformDatabase, input: { tenantId: string; query: string; limit?: number }): Promise<RetrievedChunk[]> {
   const terms = queryTerms(input.query);
   if (!terms.length) return [];
   const rows = await db.prepare(`

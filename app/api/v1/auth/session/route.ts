@@ -1,12 +1,12 @@
-import { env } from "cloudflare:workers";
 import { ensurePlatformSchema, getAuthMode, isInitialSetupRequired, platformContext } from "../../../../lib/platform-store";
+import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
 import { sessionPasswordChangeState } from "../../../../lib/password-change-state";
 
 export async function GET(request: Request) {
   const authMode = getAuthMode();
   try {
     if (authMode === "standard") {
-      const db = (env as unknown as { DB?: D1Database }).DB;
+      const db = (await ensurePlatformRuntime()).database;
       if (db) {
         await ensurePlatformSchema(db);
         if (await isInitialSetupRequired(db)) {

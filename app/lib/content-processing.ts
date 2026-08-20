@@ -1,4 +1,5 @@
 import { strFromU8, unzipSync } from "fflate";
+import type { PlatformDatabase } from "./platform-runtime";
 
 export type ExtractedText = { text: string; kind: "txt" | "docx" | "pdf" };
 export type KnowledgeChunkInput = { id: string; tenantId: string; sourceDocumentId: string; content: string; metadataJson: string };
@@ -60,7 +61,7 @@ export function chunkText(input: { tenantId: string; sourceDocumentId: string; t
   return chunks.filter((content) => content.length <= 1000).map((content, chunkIndex) => ({ id: crypto.randomUUID(), tenantId: input.tenantId, sourceDocumentId: input.sourceDocumentId, content, metadataJson: JSON.stringify({ chunkIndex, length: content.length }) }));
 }
 
-export async function publishContent(db: D1Database, input: { tenantId: string; sourceDocumentId: string }): Promise<void> {
+export async function publishContent(db: PlatformDatabase, input: { tenantId: string; sourceDocumentId: string }): Promise<void> {
   await db.batch([
     db.prepare("UPDATE source_documents SET processing_status='published',rights_status='approved' WHERE id=? AND tenant_id=? AND processing_status='processed'").bind(input.sourceDocumentId, input.tenantId),
     db.prepare("UPDATE knowledge_chunks SET published=1 WHERE tenant_id=? AND source_document_id=?").bind(input.tenantId, input.sourceDocumentId),

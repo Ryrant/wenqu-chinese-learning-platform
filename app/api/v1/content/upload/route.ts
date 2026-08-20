@@ -1,5 +1,5 @@
-import { env } from "cloudflare:workers";
 import { chunkText, extractText } from "../../../../lib/content-processing";
+import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
 import { platformApiError, platformContext } from "../../../../lib/platform-store";
 
 const processingErrors = new Set(["empty_text", "unsupported_scanned_pdf", "docx_document_missing", "unsupported_file_type"]);
@@ -16,8 +16,9 @@ export async function POST(request: Request) {
     const id = crypto.randomUUID();
     const safeName = file.name.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 120);
     const objectKey = `${context.tenantId}/sources/${id}/${safeName}`;
-    const bucket = (env as unknown as { CONTENT: R2Bucket }).CONTENT;
-    await bucket.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { tenantId: context.tenantId, uploadedBy: context.userId } });
+    const storage = (await ensurePlatformRuntime()).storage;
+    if (!storage) return Response.json({ error: "storage_unavailable" }, { status: 503 });
+    await storage.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { tenantId: context.tenantId, uploadedBy: context.userId } });
     try {
       const extracted = await extractText(file);
       const chunks = chunkText({ tenantId: context.tenantId, sourceDocumentId: id, text: extracted.text });

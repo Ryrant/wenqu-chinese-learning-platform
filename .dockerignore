@@ -1,0 +1,14 @@
+.git
+.github
+.next
+.vinext
+.wrangler
+.wrangler-dry-run
+dist
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.example
+data
+docs/superpowers

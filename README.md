@@ -1,7 +1,7 @@
 <div align="center">
   <!-- <img src="./public/og.png" alt="文趣 · 华文趣味教学助手 Logo" width="120" /> -->
   <h1>文趣 · 华文趣味教学助手</h1>
-  <p>基于 Cloudflare Workers、D1 与 R2 构建的海外华文学校多租户教学平台</p>
+  <p>支持 Cloudflare Workers + D1/R2 与 Docker + SQLite/本地文件存储的海外华文学校多租户教学平台</p>
 </div>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 ## ✨ 为什么做这个项目
 
-文趣面向海外华文学校和华裔青少年，提供学生、教师、家长和机构管理员四端工作台。项目围绕“诊断—学习—反馈—学情分析”闭环设计，业务数据保存到用户自己的 Cloudflare D1，教材、音频等文件保存到用户自己的 Cloudflare R2。
+文趣面向海外华文学校和华裔青少年，提供学生、教师、家长和机构管理员四端工作台。项目围绕“诊断—学习—反馈—学情分析”闭环设计。Cloudflare 部署使用用户自己的 D1/R2；Docker 自部署使用容器数据卷中的 SQLite 和本地上传目录。
 
 ## 🚀 核心能力
 
@@ -22,9 +22,9 @@
 - 教师端：关联目标与三维评分量规的任务、班级学情热力图、学生分层干预，以及原有来源化备课和人工批阅。
 - 家长端：多孩子切换、最近 7 天真实成长报告、亲子家庭任务，以及原有学习分析授权管理。
 - 机构端：课程目标与诊断题库、幂等班级编班、教学质量看板，以及原有内容权属审核、成员管理和审计日志。
-- 数据持久化：D1 保存租户、成员、作业、提交、反馈和审计记录；R2 保存教材和音频文件。
+- 数据持久化：Cloudflare 部署使用 D1 保存结构化数据、R2 保存教材和音频；Docker 自部署使用 SQLite 和本地文件目录。
 - 安全降级：未配置模型或语音服务时，明确使用来源化模板或教师复核，不展示虚假 AI 状态。
-- 自托管部署：支持本地开发和标准 Cloudflare Workers 部署。
+- 自托管部署：支持本地开发、标准 Cloudflare Workers 部署和 Docker 自部署。
 
 ### v1.2.0 UI 与工作流优化
 
@@ -41,6 +41,7 @@
 
 - [Cloudflare 账号](https://dash.cloudflare.com/)
 - [GitHub 账号](https://github.com/)
+- Docker 与 Docker Compose（仅 Docker 自部署需要）
 
 ### 方式一：Cloudflare Workers 连接 GitHub 仓库（推荐）
 
@@ -100,6 +101,27 @@ npm run cf:deploy
 ```
 
 本地 Wrangler 部署同样使用 `wrangler.toml` 中的 `DB` / `CONTENT` 绑定。首次部署时 Wrangler 会为缺少资源 ID 或 bucket 名的绑定自动创建 D1/R2；不要提交密码、登录签名密钥或 Cloudflare Token。
+
+### 方式四：Docker 自部署
+
+Docker 自部署适合希望在自有服务器、NAS 或学校内网运行的场景。该方式不依赖 Cloudflare D1/R2，默认使用容器数据卷中的 SQLite 与本地文件目录：
+
+- 结构化数据：`/data/wenqu.db`
+- 上传教材、图片和音频：`/data/uploads`
+
+启动：
+
+```bash
+docker compose up -d --build
+```
+
+访问：
+
+```text
+http://localhost:3000/
+```
+
+首次访问会进入管理员初始化流程。Docker 版与 Cloudflare 版使用同一套数据模型和角色模型；第一阶段不提供 D1 与 SQLite 的自动迁移工具，也不面向多容器横向扩展。
 
 ### 访问后台
 
@@ -178,6 +200,15 @@ npx wrangler deploy --dry-run --outdir .wrangler-dry-run
 3. 创建亲子家庭任务，并编辑、完成、重新打开或归档本人创建的任务。
 4. 按孩子维护学习分析授权。
 
+### 用户、角色与管理边界
+
+- 管理员：管理成员、课程目标、诊断题、班级编排、内容审核、平台设置和审计日志。
+- 教师：管理自己的班级、作业、批阅、干预和教案。
+- 学生：完成诊断、查看学习计划、提交作业和复习错题。
+- 家长：查看已绑定孩子的成长报告，维护家庭任务和学习分析授权。
+
+账号身份保存在 `users`，租户内角色保存在 `role_memberships`，家长与学生关系保存在 `guardian_student_links`。当前版本不把 `reviewer` 暴露为独立可选角色。
+
 ## 🔁 自适应学习闭环
 
 1. **诊断**：学生完成机构配置的四选一题目，系统按“目标正确题数 ÷ 已答题数”计算目标分数，不依赖外部模型。
@@ -200,12 +231,14 @@ npx wrangler deploy --dry-run --outdir .wrangler-dry-run
 
 ### 数据与绑定
 
-生产运行需要以下 Cloudflare 绑定：
+Cloudflare Workers + D1 + R2 部署需要以下绑定：
 
 - `DB`：D1 数据库 binding，一键部署或首次 Wrangler 部署会自动创建默认数据库
 - `CONTENT`：R2 Bucket binding，一键部署或首次 Wrangler 部署会自动创建默认 Bucket
 
 基础表与 v1.2 增量字段会在运行时进行幂等校验，正式数据库变更仍应通过 `drizzle/` 中的迁移文件管理。`lesson_plans`、`learning_recommendations` 和 `source_documents` 使用 `updated_at` 与 `archived_at` 保留更新时间和归档状态；归档内容会立即停止发布其知识片段。
+
+Docker 自部署不需要 Cloudflare 绑定，默认使用 `DATABASE_URL=file:/data/wenqu.db` 和 `UPLOAD_DIR=/data/uploads`。首次启动会创建 SQLite 数据库文件和上传目录，并沿用同一套运行时幂等建表逻辑。
 
 `v1.2.0` 的诊断数据包括题目、选择结果、正误、目标得分和完成时间；推荐数据记录来源、截止时间和状态。家长读取或操作孩子数据前，服务端会验证有效监护绑定；教师只能干预自己班级的学生；全部查询和写操作均限制在当前租户。
 
@@ -213,7 +246,7 @@ npx wrangler deploy --dry-run --outdir .wrangler-dry-run
 
 - 不要提交 `.env.local`、真实 API Key、学生信息、Cloudflare Token、管理员密码或 JWT 密钥。
 - `/api/v1/auth/login` 内置的是 Worker isolate 内的尽力限流。公开访问前，建议在 Cloudflare WAF 中对登录接口配置 Rate Limiting，或使用 Cloudflare Access 保护应用。
-- 学生数据、作业、音频和教材文件会存入你自己的 D1/R2，请按当地未成年人数据保护要求管理访问权限。
+- 学生数据、作业、音频和教材文件会存入你自己的 D1/R2 或 Docker 数据卷，请按当地未成年人数据保护要求管理访问权限。
 - 采集诊断数据和学习分析前，应取得适用地区要求的未成年人授权，并保持监护绑定准确；撤回授权会写入审计日志。
 - 上传教材、图片和音频前，应确认内容权属为机构自有或已获授权；只有通过权属与发布审核的知识片段会进入检索。
 
@@ -223,8 +256,9 @@ npx wrangler deploy --dry-run --outdir .wrangler-dry-run
 - React 19：前端交互
 - Next.js 16 + Vinext + Vite：应用路由与 Cloudflare 构建
 - Cloudflare Workers：边缘运行环境
-- Cloudflare D1：SQLite 数据库
-- Cloudflare R2：教材与音频对象存储
+- Cloudflare D1 / SQLite：结构化数据存储
+- Cloudflare R2 / 本地文件目录：教材与音频对象存储
+- Docker Compose：单机自部署运行方式
 - Drizzle ORM / Drizzle Kit：数据模型与迁移
 - ESLint、Node.js Test Runner：代码检查与回归测试
 
@@ -237,6 +271,8 @@ wenqu-chinese-learning-platform/
 ├── db/                        # Drizzle 数据模型
 ├── drizzle/                   # 数据库迁移
 ├── worker/                    # Cloudflare Worker 入口
+├── Dockerfile                 # Docker 镜像构建
+├── docker-compose.yml         # Docker 自部署编排
 ├── public/                    # 静态资源
 ├── scripts/                   # 标准 Cloudflare 构建辅助脚本
 ├── tests/                     # 自动化回归测试
@@ -275,6 +311,7 @@ npm run lint
 npm test
 npm run build
 npm run build:standard
+npm run start:docker
 ```
 
 常用命令说明：
@@ -286,6 +323,7 @@ npm run build:standard
 | `npm test` | 默认构建并运行 `tests/` 下的回归测试 |
 | `npm run build` | 生成标准 Cloudflare Workers 构建 |
 | `npm run build:standard` | 标准 Cloudflare Workers 构建兼容入口 |
+| `npm run start:docker` | 以 Node runtime 启动 Docker 自部署服务 |
 | `npm run cf:preview` | 使用标准 Cloudflare 配置启动 Wrangler 预览 |
 | `npm run cf:deploy` | 使用标准 Cloudflare 配置部署到当前账号 |
 | `npm run db:generate` | 根据 `db/schema.ts` 生成 Drizzle 迁移 |

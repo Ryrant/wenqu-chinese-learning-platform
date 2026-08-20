@@ -1,6 +1,7 @@
 import { classAccessClause, submissionAccessClause } from "../../../lib/access-control";
 import { isRecommendationDue, rankLearningPlan, type LearningPlanItem } from "../../../lib/learning-loop";
 import { assertGuardianStudentAccess } from "../../../lib/learning-loop-service";
+import type { PlatformDatabase } from "../../../lib/platform-runtime";
 import { loadPlatformSettings, publicPlatformSettings } from "../../../lib/platform-settings";
 import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
 import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 type Row = Record<string, unknown>;
 const empty = { results: [] as Row[] };
 
-async function qualityMetrics(db: D1Database, tenantId: string) {
+async function qualityMetrics(db: PlatformDatabase, tenantId: string) {
   const [assignments, covered, reviews, submissions, weak, masteryTotal, content, documents, ai, students, consents, uncoveredDetails, reviewDetails, weakDetails, contentDetails, aiDetails] = await Promise.all([
     db.prepare("SELECT COUNT(*) AS count FROM assignments WHERE tenant_id=? AND status='published'").bind(tenantId).first<{ count: number }>(),
     db.prepare(`SELECT COUNT(DISTINCT a.id) AS count FROM assignments a

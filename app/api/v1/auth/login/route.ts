@@ -1,7 +1,7 @@
-import { env } from "cloudflare:workers";
 import { createSessionToken, sessionCookieName } from "../../../../lib/auth-token";
 import { loadPlatformSettings } from "../../../../lib/platform-settings";
 import { ensurePlatformSchema, ensureSiteJwtSecret, getAuthMode } from "../../../../lib/platform-store";
+import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
 import { authenticateStandardAccount } from "../../../../lib/standard-login";
 
 const LOGIN_ATTEMPT_LIMIT = 5;
@@ -55,9 +55,9 @@ function cookieValue(token: string, maxAge: number) {
 
 export async function POST(request: Request) {
   if (getAuthMode() !== "standard") return json("auth_mode_not_standard", 404);
-  const bindings = env as unknown as { DB?: D1Database };
-  if (!bindings.DB) return json("database_unavailable", 500);
-  await ensurePlatformSchema(bindings.DB);
+  const db = (await ensurePlatformRuntime()).database;
+  if (!db) return json("database_unavailable", 500);
+  await ensurePlatformSchema(db);
   const key = clientKey(request);
   const nowMilliseconds = Date.now();
   const retryAfterSeconds = retryAfter(key, nowMilliseconds);
@@ -66,7 +66,7 @@ export async function POST(request: Request) {
   const email = typeof payload?.email === "string" ? payload.email.trim().toLowerCase() : "";
   const password = typeof payload?.password === "string" ? payload.password : "";
   const account = await authenticateStandardAccount({
-    db: bindings.DB,
+    db,
     email,
     password,
   });
@@ -75,13 +75,13 @@ export async function POST(request: Request) {
     return json("invalid_credentials", 401);
   }
   loginAttempts.delete(key);
-  await bindings.DB.prepare("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?").bind(account.id).run();
+  await db.prepare("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?").bind(account.id).run();
   const now = Math.floor(Date.now() / 1000);
-  const settings = await loadPlatformSettings(bindings.DB);
+  const settings = await loadPlatformSettings(db);
   const maxAge = settings.jwtTtlSeconds;
   const displayName = account.displayName;
   const mustChangePassword = account.mustChangePassword === 1;
-  const jwtSecret = await ensureSiteJwtSecret(bindings.DB);
+  const jwtSecret = await ensureSiteJwtSecret(db);
   const token = await createSessionToken({ email: account.email, displayName, iat: now, exp: now + maxAge }, jwtSecret);
   return Response.json({ user: { email: account.email, displayName, mustChangePassword } }, {
     status: 200,

@@ -1,13 +1,14 @@
 import { assertSubmissionReviewAccess } from "./access-control";
 import { generateGroundedText } from "./ai/grounding";
 import { prepareMasteryEvidenceInsert } from "./learning-loop-service";
+import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 import { searchPublishedKnowledge } from "./retrieval";
 
 export type ReviewSuggestion = { submissionId: string; suggestedScore: number; comment: string; weaknessTags: string[] };
 export type ConfirmedReview = { submissionId: string; score: number; comment: string };
 
-export async function suggestTextReview(db: D1Database, context: PlatformContext, submissionId: string, config: { openAiKey?: string; model?: string }): Promise<ReviewSuggestion> {
+export async function suggestTextReview(db: PlatformDatabase, context: PlatformContext, submissionId: string, config: { openAiKey?: string; model?: string }): Promise<ReviewSuggestion> {
   await assertSubmissionReviewAccess(db, context, submissionId);
   const submission = await db.prepare(`
     SELECT s.id,s.text_answer AS textAnswer,s.review_status AS reviewStatus,a.title AS assignmentTitle
@@ -41,7 +42,7 @@ export async function suggestTextReview(db: D1Database, context: PlatformContext
   return { submissionId, suggestedScore, comment: result.text, weaknessTags };
 }
 
-export async function confirmSubmissionReview(db: D1Database, context: PlatformContext, input: { submissionId: string; score: number; comment: string }): Promise<ConfirmedReview> {
+export async function confirmSubmissionReview(db: PlatformDatabase, context: PlatformContext, input: { submissionId: string; score: number; comment: string }): Promise<ConfirmedReview> {
   await assertSubmissionReviewAccess(db, context, input.submissionId);
   const score = Math.max(0, Math.min(input.score, 100));
   const comment = input.comment.slice(0, 2000);

@@ -1,4 +1,5 @@
 import { hashPassword } from "./auth-password";
+import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformRole } from "./platform-store";
 
 export type MemberInput = {
@@ -10,7 +11,7 @@ export type MemberInput = {
   temporaryPassword: string;
 };
 
-export async function createMember(db: D1Database, input: MemberInput) {
+export async function createMember(db: PlatformDatabase, input: MemberInput) {
   const email = input.email.trim().toLowerCase();
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error("invalid_member_email");
   if (input.temporaryPassword.length < 10) throw new Error("weak_password");
@@ -35,7 +36,7 @@ export async function createMember(db: D1Database, input: MemberInput) {
   return { id: userId, email, role: input.role, mustChangePassword: true };
 }
 
-export async function resetMemberPassword(db: D1Database, input: { tenantId: string; actorUserId: string; userId: string; temporaryPassword: string }) {
+export async function resetMemberPassword(db: PlatformDatabase, input: { tenantId: string; actorUserId: string; userId: string; temporaryPassword: string }) {
   if (input.temporaryPassword.length < 10) throw new Error("weak_password");
   const account = await db.prepare("SELECT u.status FROM users u JOIN role_memberships rm ON rm.user_id=u.id WHERE u.id=? AND rm.tenant_id=? AND rm.status='active' LIMIT 1")
     .bind(input.userId, input.tenantId)
@@ -52,7 +53,7 @@ export async function resetMemberPassword(db: D1Database, input: { tenantId: str
     .run();
 }
 
-export async function setMemberStatus(db: D1Database, input: { tenantId: string; actorUserId: string; userId: string; status: "active" | "disabled" }) {
+export async function setMemberStatus(db: PlatformDatabase, input: { tenantId: string; actorUserId: string; userId: string; status: "active" | "disabled" }) {
   if (input.status === "disabled" && input.userId === input.actorUserId) {
     throw new Error("cannot_disable_self");
   }
@@ -65,7 +66,7 @@ export async function setMemberStatus(db: D1Database, input: { tenantId: string;
     .run();
 }
 
-export async function setGuardianLinks(db: D1Database, input: { tenantId: string; actorUserId: string; guardianUserId: string; studentUserIds: string[] }) {
+export async function setGuardianLinks(db: PlatformDatabase, input: { tenantId: string; actorUserId: string; guardianUserId: string; studentUserIds: string[] }) {
   const uniqueStudents = [...new Set(input.studentUserIds)].filter(Boolean);
   await db.batch([
     db.prepare("DELETE FROM guardian_student_links WHERE tenant_id=? AND guardian_user_id=?")

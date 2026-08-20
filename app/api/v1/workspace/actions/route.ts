@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers";
 import { generateGroundedText } from "../../../../lib/ai/grounding";
 import { confirmSubmissionReview, suggestTextReview } from "../../../../lib/assessment-service";
 import { assertSubmissionReviewAccess } from "../../../../lib/access-control";
@@ -18,6 +17,7 @@ import {
   upsertDiagnosticItem,
   upsertLearningObjective,
 } from "../../../../lib/learning-loop-service";
+import { ensurePlatformRuntime, type PlatformDatabase } from "../../../../lib/platform-runtime";
 import { aiProviderSettings, loadPlatformSettings } from "../../../../lib/platform-settings";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 import { searchPublishedKnowledge } from "../../../../lib/retrieval";
@@ -29,7 +29,7 @@ function text(value: unknown, max = 200) { return typeof value === "string" ? va
 function requireText(value: unknown, name: string, max = 200) { const result = text(value, max); if (!result) throw new Error(`invalid_${name}`); return result; }
 function number(value: unknown, fallback: number) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
 
-async function audit(db: D1Database, tenantId: string, userId: string, action: string, targetType: string, targetId: string, detail: unknown = {}) {
+async function audit(db: PlatformDatabase, tenantId: string, userId: string, action: string, targetType: string, targetId: string, detail: unknown = {}) {
   await db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), tenantId, userId, action, targetType, targetId, JSON.stringify(detail)).run();
 }
 
@@ -377,8 +377,9 @@ export async function POST(request: Request) {
         FROM source_documents WHERE id=? AND tenant_id=? AND archived_at IS NULL`)
         .bind(id, tenantId).first<{ id: string; title: string; objectKey: string | null; mediaType: string }>();
       if (!document?.objectKey) return Response.json({ error: "source_file_unavailable" }, { status: 409 });
-      const bucket = (env as unknown as { CONTENT: R2Bucket }).CONTENT;
-      const object = await bucket.get(document.objectKey);
+      const storage = (await ensurePlatformRuntime()).storage;
+      if (!storage) return Response.json({ error: "storage_unavailable" }, { status: 503 });
+      const object = await storage.get(document.objectKey);
       if (!object) return Response.json({ error: "source_file_unavailable" }, { status: 404 });
       try {
         const file = new File([await object.arrayBuffer()], document.title, { type: document.mediaType });

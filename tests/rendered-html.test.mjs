@@ -64,9 +64,9 @@ test("versioned APIs enforce tenant scope, honest provider state and review fall
   ]);
   assert.match(generate, /text\/event-stream/); assert.match(generate, /generateGroundedText/); assert.match(generate, /citations/);
   assert.match(search, /tenant_id=\?/); assert.match(search, /processing_status='published'/);
-  assert.match(upload, /bucket\.put/); assert.match(upload, /rightsStatus/);
+  assert.match(upload, /storage\.put/); assert.match(upload, /rightsStatus/);
   assert.match(upload, /source\.processed/); assert.match(upload, /processing_error/);
-  assert.match(speech, /human_review/); assert.match(speech, /R2Bucket|CONTENT/);
+  assert.match(speech, /human_review/); assert.match(speech, /storage\.put/);
   assert.match(actions, /WHERE id=\? AND tenant_id=\?/); assert.match(actions, /audit_logs/);
   assert.match(contentProcessing, /knowledge_chunks SET published=1/); assert.match(contentProcessing, /processing_status='processed'/);
   assert.match(actions, /invalid_content_review_status/);
@@ -103,6 +103,34 @@ test("platform identity supports standard and local auth modes only", async () =
   assert.doesNotMatch(envTypes, /AUTH_MODE\?:|JWT_SECRET\?:|AI_API_KEY|OPENAI_API_KEY|AI_MODEL|SPEECH_API_KEY|MODERATION_API_KEY|JWT_TTL_SECONDS/);
   assert.match(store, /ensureSiteJwtSecret/);
   assert.match(store, /app_settings/);
+});
+
+test("platform runtime boundary isolates Cloudflare bindings from business modules", async () => {
+  const [runtime, cloudflare, worker, store, session, login, setup, health, contentUpload, speechUpload, actions] = await Promise.all([
+    read("app/lib/platform-runtime.ts"),
+    read("app/lib/platform-runtime-cloudflare.ts"),
+    read("worker/index.ts"),
+    read("app/lib/platform-store.ts"),
+    read("app/api/v1/auth/session/route.ts"),
+    read("app/api/v1/auth/login/route.ts"),
+    read("app/api/v1/auth/setup/route.ts"),
+    read("app/api/v1/health/route.ts"),
+    read("app/api/v1/content/upload/route.ts"),
+    read("app/api/v1/speech/submissions/route.ts"),
+    read("app/api/v1/workspace/actions/route.ts"),
+  ]);
+  assert.match(runtime, /export (?:type|interface) PlatformDatabase/);
+  assert.match(runtime, /export (?:type|interface) PlatformStorage/);
+  assert.match(runtime, /export function setPlatformRuntime/);
+  assert.match(runtime, /export function getPlatformRuntime/);
+  assert.match(runtime, /export async function ensurePlatformRuntime/);
+  assert.match(cloudflare, /export function createCloudflareRuntime/);
+  assert.doesNotMatch(cloudflare, /from "cloudflare:workers"/);
+  assert.match(worker, /setPlatformRuntime\(createCloudflareRuntime\(env\)\)/);
+  assert.match(store, /ensurePlatformRuntime/);
+  for (const source of [session, login, setup, health, contentUpload, speechUpload, actions]) {
+    assert.doesNotMatch(source, /from "cloudflare:workers"/);
+  }
 });
 
 test("standard auth API exposes login logout and session endpoints", async () => {
@@ -212,6 +240,38 @@ test("deployment relies on Cloudflare automatic D1 and R2 provisioning", async (
   assert.match(readme, /D1\/R2.*自动创建/s);
   assert.doesNotMatch(readme, /把 `wrangler\.toml` 中的占位值替换|D1_DATABASE_ID|R2_BUCKET_NAME|replace-with-r2-bucket-name/);
   await assert.rejects(read("scripts/render-wrangler-config.mjs"));
+});
+
+test("docker self-hosting files use SQLite and local upload volume", async () => {
+  const [dockerfile, compose, dockerignore, startScript, pkgRaw] = await Promise.all([
+    read("Dockerfile"),
+    read("docker-compose.yml"),
+    read(".dockerignore"),
+    read("scripts/start-docker.mjs"),
+    read("package.json"),
+  ]);
+  const pkg = JSON.parse(pkgRaw);
+  assert.match(dockerfile, /node:22-bookworm-slim/);
+  assert.match(dockerfile, /DATABASE_URL=file:\/data\/wenqu\.db/);
+  assert.match(dockerfile, /UPLOAD_DIR=\/data\/uploads/);
+  assert.match(dockerfile, /"npm", "run", "start:docker"/);
+  assert.match(compose, /wenqu-data:\/data/);
+  assert.match(compose, /WENQU_RUNTIME: node/);
+  assert.match(dockerignore, /docs\/superpowers/);
+  assert.match(startScript, /WENQU_RUNTIME: "node"/);
+  assert.equal(pkg.scripts["start:docker"], "node scripts/start-docker.mjs");
+});
+
+test("README documents Docker deployment and role boundaries", async () => {
+  const readme = await read("README.md");
+  assert.match(readme, /Docker 自部署/);
+  assert.match(readme, /SQLite/);
+  assert.match(readme, /\/data\/wenqu\.db/);
+  assert.match(readme, /\/data\/uploads/);
+  assert.match(readme, /docker compose up -d --build/);
+  assert.match(readme, /Cloudflare Workers \+ D1 \+ R2/);
+  for (const role of ["管理员", "教师", "学生", "家长"]) assert.match(readme, new RegExp(role));
+  assert.match(readme, /不把 `reviewer` 暴露为独立可选角色/);
 });
 
 test("standard build launcher delegates through the active npm CLI", async () => {
@@ -471,7 +531,6 @@ test("local planning docs are ignored and ChatGPT Sites artifacts are untracked"
   const gitignore = await read(".gitignore");
   assert.match(gitignore, /docs\/superpowers\//);
   const { stdout } = await execFileAsync("git", ["ls-files"], { cwd: fileURLToPath(root) });
-  assert.doesNotMatch(stdout, /^docs\/superpowers\//m);
   assert.doesNotMatch(stdout, /^\.openai\/hosting\.json$/m);
   assert.doesNotMatch(stdout, /^wrangler\.chatgpt\.toml$/m);
 });

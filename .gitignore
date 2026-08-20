@@ -46,6 +46,7 @@ next-env.d.ts
 /work/
 /.worktrees/
 *.tsbuildinfo
+/data/
 
 # local planning and agent working notes
 /docs/superpowers/

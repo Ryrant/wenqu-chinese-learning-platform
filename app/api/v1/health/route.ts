@@ -1,20 +1,35 @@
-import { env } from "cloudflare:workers";
+import { ensurePlatformRuntime } from "../../../lib/platform-runtime";
 import { loadPlatformSettings } from "../../../lib/platform-settings";
+import { ensurePlatformSchema } from "../../../lib/platform-store";
 
 export async function GET() {
-  const bindings = env as unknown as { DB?: D1Database; CONTENT?: R2Bucket };
-  const settings = bindings.DB ? await loadPlatformSettings(bindings.DB) : null;
+  let database = null;
+  let storage = null;
+  try {
+    ({ database, storage } = await ensurePlatformRuntime());
+  } catch {
+    // Keep degraded health semantics when runtime is unavailable.
+  }
+  let settings = null;
+  if (database) {
+    try {
+      await ensurePlatformSchema(database);
+      settings = await loadPlatformSettings(database);
+    } catch {
+      database = null;
+    }
+  }
   return Response.json({
-    status: bindings.DB && bindings.CONTENT ? "ok" : "degraded",
+    status: database && storage ? "ok" : "degraded",
     service: "wenqu-platform", region: "sg", timestamp: new Date().toISOString(),
     providers: {
-      database: bindings.DB ? "available" : "unavailable",
-      storage: bindings.CONTENT ? "available" : "unavailable",
+      database: database ? "available" : "unavailable",
+      storage: storage ? "available" : "unavailable",
       textGeneration: settings?.aiKey || settings?.openAiKey ? "configured" : "not_configured_template_available",
       openai: settings?.openAiKey ? "configured" : "not_configured_template_available",
       aiModel: settings?.aiModel ?? "gpt-5.6-luna",
       speechScoring: settings?.speechKey ? "configured" : "not_configured_manual_review",
-      retrieval: bindings.DB ? "published_keyword_available" : "unavailable",
+      retrieval: database ? "published_keyword_available" : "unavailable",
       moderation: settings?.moderationKey ? "configured" : "rules_only",
     },
   }, { headers: { "cache-control": "no-store" } });

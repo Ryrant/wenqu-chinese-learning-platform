@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
 import { platformApiError, platformContext } from "../../../../lib/platform-store";
 
 export async function POST(request: Request) {
@@ -14,7 +14,9 @@ export async function POST(request: Request) {
     const id = crypto.randomUUID();
     const safeType = audio.type || "audio/webm";
     const objectKey = `${context.tenantId}/submissions/${id}/recording.webm`;
-    await (env as unknown as { CONTENT: R2Bucket }).CONTENT.put(objectKey, audio.stream(), { httpMetadata: { contentType: safeType }, customMetadata: { tenantId: context.tenantId, studentUserId: context.userId, reference } });
+    const storage = (await ensurePlatformRuntime()).storage;
+    if (!storage) return Response.json({ error: "storage_unavailable" }, { status: 503 });
+    await storage.put(objectKey, audio.stream(), { httpMetadata: { contentType: safeType }, customMetadata: { tenantId: context.tenantId, studentUserId: context.userId, reference } });
     await context.db.batch([
       context.db.prepare("INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,asset_key,confidence,review_status) VALUES (?,?,?,?,?,0,'human_review')").bind(id, context.tenantId, assignmentId, context.userId, objectKey),
       context.db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), context.tenantId, context.userId, "submission.audio_uploaded", "submission", id, JSON.stringify({ bytes: audio.size, contentType: safeType })),

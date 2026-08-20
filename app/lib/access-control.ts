@@ -1,3 +1,4 @@
+import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 
 export type AccessClause = { sql: string; args: unknown[] };
@@ -40,7 +41,7 @@ export function submissionAccessClause(context: PlatformContext, submissionAlias
   return clauses.length ? { sql: `(${clauses.join(" OR ")})`, args } : { sql: "1=0", args: [] };
 }
 
-export async function assertSubmissionReviewAccess(db: D1Database, context: PlatformContext, submissionId: string) {
+export async function assertSubmissionReviewAccess(db: PlatformDatabase, context: PlatformContext, submissionId: string) {
   if (context.roles.includes("admin")) return;
   const row = await db.prepare(`
     SELECT s.id

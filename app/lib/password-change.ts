@@ -1,7 +1,8 @@
 import { hashPassword, verifyPassword } from "./auth-password";
+import type { PlatformDatabase } from "./platform-runtime";
 
 export type ChangeAccountPasswordInput = {
-  db: D1Database;
+  db: PlatformDatabase;
   tenantId: string;
   userId: string;
   currentPassword: string;

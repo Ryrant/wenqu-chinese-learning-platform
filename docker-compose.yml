@@ -1,0 +1,15 @@
+services:
+  wenqu:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: file:/data/wenqu.db
+      UPLOAD_DIR: /data/uploads
+      WENQU_RUNTIME: node
+    volumes:
+      - wenqu-data:/data
+
+volumes:
+  wenqu-data:

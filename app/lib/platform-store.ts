@@ -1,11 +1,11 @@
-import { env } from "cloudflare:workers";
 import { sessionCookieName, verifySessionToken } from "./auth-token";
+import { ensurePlatformRuntime, type PlatformDatabase } from "./platform-runtime";
 
 export type PlatformRole = "student" | "teacher" | "guardian" | "admin";
 export type AuthMode = "standard" | "local";
-export type PlatformContext = { db: D1Database; tenantId: string; userId: string; userEmail: string; displayName: string; roles: PlatformRole[]; mustChangePassword?: boolean };
+export type PlatformContext = { db: PlatformDatabase; tenantId: string; userId: string; userEmail: string; displayName: string; roles: PlatformRole[]; mustChangePassword?: boolean };
 const ROLE_SET = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
-let schemaReady: Promise<void> | null = null;
+const schemaReady = new WeakMap<PlatformDatabase, Promise<void>>();
 
 export function getAuthMode(): AuthMode {
   return process.env.NODE_ENV === "development" ? "local" : "standard";
@@ -37,7 +37,7 @@ function tokenFromRequest(request: Request) {
   }
 }
 
-async function standardIdentity(request: Request, db: D1Database) {
+async function standardIdentity(request: Request, db: PlatformDatabase) {
   const token = tokenFromRequest(request);
   if (!token) throw new Error("authentication_required");
   const session = await verifySessionToken(token, await ensureSiteJwtSecret(db));
@@ -45,13 +45,13 @@ async function standardIdentity(request: Request, db: D1Database) {
   return { email: session.email.trim().toLowerCase(), displayName: session.displayName };
 }
 
-async function identity(request: Request, db: D1Database) {
+async function identity(request: Request, db: PlatformDatabase) {
   const mode = getAuthMode();
   if (mode === "standard") return standardIdentity(request, db);
   return localIdentity(request);
 }
 
-async function trySchema(db: D1Database, sql: string) {
+async function trySchema(db: PlatformDatabase, sql: string) {
   try {
     await db.prepare(sql).run();
   } catch (error) {
@@ -60,7 +60,7 @@ async function trySchema(db: D1Database, sql: string) {
   }
 }
 
-async function ensureCoreSchema(db: D1Database) {
+async function ensureCoreSchema(db: PlatformDatabase) {
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, region TEXT NOT NULL DEFAULT 'sg', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL, locale TEXT NOT NULL DEFAULT 'zh-CN', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -120,14 +120,21 @@ async function ensureCoreSchema(db: D1Database) {
   ]) await trySchema(db, statement);
 }
 
-export async function ensurePlatformSchema(db: D1Database) {
-  if (!schemaReady) {
-    schemaReady = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); })().catch((error) => { schemaReady = null; throw error; });
+export async function ensurePlatformSchema(db: PlatformDatabase) {
+  const cached = schemaReady.get(db);
+  if (cached) {
+    await cached;
+    return;
   }
-  await schemaReady;
+  const pending = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); })().catch((error) => {
+    schemaReady.delete(db);
+    throw error;
+  });
+  schemaReady.set(db, pending);
+  await pending;
 }
 
-export async function isInitialSetupRequired(db: D1Database) {
+export async function isInitialSetupRequired(db: PlatformDatabase) {
   const row = await db.prepare("SELECT COUNT(*) AS count FROM users").first<{ count: number }>();
   return Number(row?.count ?? 0) === 0;
 }
@@ -138,7 +145,7 @@ function randomSecret() {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function ensureSiteJwtSecret(db: D1Database) {
+export async function ensureSiteJwtSecret(db: PlatformDatabase) {
   const stored = await db.prepare("SELECT value FROM app_settings WHERE key='jwt_secret'").first<{ value: string }>();
   if (stored?.value) return stored.value;
   const generated = randomSecret();
@@ -146,7 +153,7 @@ export async function ensureSiteJwtSecret(db: D1Database) {
   const saved = await db.prepare("SELECT value FROM app_settings WHERE key='jwt_secret'").first<{ value: string }>();
   return saved?.value ?? generated;
 }
-async function ensureExtendedSchema(db: D1Database) {
+async function ensureExtendedSchema(db: PlatformDatabase) {
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS lesson_plans (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, topic TEXT NOT NULL, level TEXT NOT NULL, duration_minutes INTEGER NOT NULL, objectives_json TEXT NOT NULL DEFAULT '[]', activities_json TEXT NOT NULL DEFAULT '[]', citations_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'draft', created_by TEXT NOT NULL, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS lesson_plans_tenant_idx ON lesson_plans (tenant_id, created_at)"),
@@ -245,7 +252,7 @@ export async function seedInitialWorkspace(context: Omit<PlatformContext, "roles
 }
 
 export async function platformContext(request: Request, requiredRole?: PlatformRole): Promise<PlatformContext> {
-  const db = (env as unknown as { DB?: D1Database }).DB;
+  const db = (await ensurePlatformRuntime()).database;
   if (!db) throw new Error("database_unavailable");
   await ensurePlatformSchema(db);
   const { email, displayName } = await identity(request, db);

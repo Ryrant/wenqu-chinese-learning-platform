@@ -9,9 +9,16 @@ type D1Database = {
   prepare(query: string): D1PreparedStatement;
   batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
 };
+type R2ObjectBody = {
+  body: ReadableStream | null;
+  httpMetadata?: { contentType?: string };
+  customMetadata?: Record<string, string>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  text(): Promise<string>;
+};
 type R2Bucket = {
   put(key: string, value: ReadableStream | ArrayBuffer | string, options?: unknown): Promise<unknown>;
-  get(key: string): Promise<unknown>;
+  get(key: string): Promise<R2ObjectBody | null>;
 };
 type Fetcher = { fetch(request: Request): Promise<Response> };
 

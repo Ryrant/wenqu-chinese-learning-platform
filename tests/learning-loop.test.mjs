@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { build } from "esbuild";
 import ts from "typescript";
@@ -22,7 +23,7 @@ async function importTypeScript(path) {
 
 async function importBundledTypeScript(path) {
   const result = await build({
-    entryPoints: [new URL(path, root).pathname],
+    entryPoints: [fileURLToPath(new URL(path, root))],
     bundle: true,
     format: "esm",
     platform: "node",
