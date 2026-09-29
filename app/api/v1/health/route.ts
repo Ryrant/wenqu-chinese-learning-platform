@@ -21,7 +21,7 @@ export async function GET() {
   }
   return Response.json({
     status: database && storage ? "ok" : "degraded",
-    service: "wenqu-platform", region: "sg", timestamp: new Date().toISOString(),
+    service: "huawen-zhixing-platform", region: "sg", timestamp: new Date().toISOString(),
     providers: {
       database: database ? "available" : "unavailable",
       storage: storage ? "available" : "unavailable",

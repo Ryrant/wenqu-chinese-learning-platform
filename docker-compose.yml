@@ -1,15 +1,15 @@
 services:
-  wenqu:
+  huawen-zhixing:
     build: .
     ports:
       - "3000:3000"
     environment:
       NODE_ENV: production
-      DATABASE_URL: file:/data/wenqu.db
+      DATABASE_URL: file:/data/huawen-zhixing.db
       UPLOAD_DIR: /data/uploads
-      WENQU_RUNTIME: node
+      HUAWEN_ZHIXING_RUNTIME: node
     volumes:
-      - wenqu-data:/data
+      - huawen-zhixing-data:/data
 
 volumes:
-  wenqu-data:
+  huawen-zhixing-data:

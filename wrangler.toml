@@ -1,11 +1,11 @@
-name = "wenqu-chinese-learning-platform"
+name = "huawen-zhixing-platform"
 main = "worker/index.ts"
 compatibility_date = "2026-05-15"
 compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "wenqu-platform-db"
+database_name = "huawen-zhixing-db"
 migrations_dir = "drizzle"
 
 [[r2_buckets]]

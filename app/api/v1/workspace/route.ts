@@ -296,7 +296,7 @@ export async function GET(request: Request) {
     ];
     const settings = await loadPlatformSettings(db);
     return Response.json({
-      workspace: { tenantId, name: "华文趣味试用学校", region: "sg", sampleData: true },
+      workspace: { tenantId, name: "华文知行示范学校", region: "sg", sampleData: true },
       user: { id: userId, email: userEmail, displayName, roles },
       classes: classes.results,
       assignments: assignments.results,

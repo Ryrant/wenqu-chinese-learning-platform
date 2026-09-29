@@ -81,7 +81,7 @@ test("standard auth token helpers use Web Crypto without new dependencies", asyn
   const token = await read("app/lib/auth-token.ts");
   const pkg = JSON.parse(await read("package.json"));
   assert.match(token, /export type StandardSession/);
-  assert.match(token, /export const sessionCookieName = "wenqu_session"/);
+  assert.match(token, /export const sessionCookieName = "huawen_zhixing_session"/);
   assert.match(token, /export async function createSessionToken/);
   assert.match(token, /export async function verifySessionToken/);
   assert.match(token, /crypto\.subtle\.sign/);
@@ -99,7 +99,7 @@ test("platform identity supports standard and local auth modes only", async () =
   assert.doesNotMatch(store, /chatGptIdentity|oai-authenticated-user-email|signin-with-chatgpt|signout-with-chatgpt/i);
   assert.match(store, /verifySessionToken/);
   assert.match(store, /Authorization/);
-  assert.match(store, /wenqu_session/);
+  assert.match(store, /huawen_zhixing_session/);
   assert.doesNotMatch(envTypes, /AUTH_MODE\?:|JWT_SECRET\?:|AI_API_KEY|OPENAI_API_KEY|AI_MODEL|SPEECH_API_KEY|MODERATION_API_KEY|JWT_TTL_SECONDS/);
   assert.match(store, /ensureSiteJwtSecret/);
   assert.match(store, /app_settings/);
@@ -171,7 +171,7 @@ test("dashboard exposes standard mode login and logout flow", async () => {
   assert.match(dashboard, /\/api\/v1\/auth\/setup/);
   assert.match(dashboard, /\/api\/v1\/auth\/logout/);
   assert.match(dashboard, /type="password"/);
-  assert.match(dashboard, /初始化文趣工作区/);
+  assert.match(dashboard, /初始化华文知行工作区/);
   assert.match(dashboard, /创建管理员并进入工作区/);
   assert.match(css, /\.login-card/);
   assert.match(css, /\.logout-button/);
@@ -198,10 +198,10 @@ test("build uses the standard Wrangler configuration without Sites packaging", a
   assert.equal(pkg.scripts["cf:preview"], "npm run build && npx wrangler dev");
   assert.equal(pkg.scripts["cf:deploy"], "npm run build && npm run deploy");
   assert.match(vite, /\.\/wrangler\.toml/);
-  assert.doesNotMatch(vite, /sites\(|sites-vite-plugin|wrangler\.chatgpt|WENQU_DEPLOY_TARGET/);
+  assert.doesNotMatch(vite, /sites\(|sites-vite-plugin|wrangler\.chatgpt|HUAWEN_ZHIXING_DEPLOY_TARGET/);
   assert.match(standardWrangler, /binding = "DB"/);
   assert.match(standardWrangler, /binding = "CONTENT"/);
-  assert.match(standardWrangler, /database_name = "wenqu-platform-db"/);
+  assert.match(standardWrangler, /database_name = "huawen-zhixing-db"/);
   assert.doesNotMatch(standardWrangler, /\[vars\]|AUTH_MODE|JWT_TTL_SECONDS|database_id|bucket_name|00000000-0000-4000-8000-000000000000|replace-with-r2-bucket-name|required = \["ADMIN_PASSWORD", "JWT_SECRET"\]/);
   await assert.rejects(read(".openai/hosting.json"));
   await assert.rejects(read("wrangler.chatgpt.toml"));
@@ -252,13 +252,13 @@ test("docker self-hosting files use SQLite and local upload volume", async () =>
   ]);
   const pkg = JSON.parse(pkgRaw);
   assert.match(dockerfile, /node:22-bookworm-slim/);
-  assert.match(dockerfile, /DATABASE_URL=file:\/data\/wenqu\.db/);
+  assert.match(dockerfile, /DATABASE_URL=file:\/data\/huawen-zhixing\.db/);
   assert.match(dockerfile, /UPLOAD_DIR=\/data\/uploads/);
   assert.match(dockerfile, /"npm", "run", "start:docker"/);
-  assert.match(compose, /wenqu-data:\/data/);
-  assert.match(compose, /WENQU_RUNTIME: node/);
+  assert.match(compose, /huawen-zhixing-data:\/data/);
+  assert.match(compose, /HUAWEN_ZHIXING_RUNTIME: node/);
   assert.match(dockerignore, /docs\/superpowers/);
-  assert.match(startScript, /WENQU_RUNTIME: "node"/);
+  assert.match(startScript, /HUAWEN_ZHIXING_RUNTIME: "node"/);
   assert.equal(pkg.scripts["start:docker"], "node scripts/start-docker.mjs");
 });
 
@@ -266,7 +266,7 @@ test("README documents Docker deployment and role boundaries", async () => {
   const readme = await read("README.md");
   assert.match(readme, /Docker 自部署/);
   assert.match(readme, /SQLite/);
-  assert.match(readme, /\/data\/wenqu\.db/);
+  assert.match(readme, /\/data\/huawen-zhixing\.db/);
   assert.match(readme, /\/data\/uploads/);
   assert.match(readme, /docker compose up -d --build/);
   assert.match(readme, /Cloudflare Workers \+ D1 \+ R2/);
@@ -275,15 +275,15 @@ test("README documents Docker deployment and role boundaries", async () => {
 });
 
 test("standard build launcher delegates through the active npm CLI", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "wenqu-build-standard-"));
+  const directory = await mkdtemp(join(tmpdir(), "huawen-zhixing-build-standard-"));
   try {
     const outputPath = join(directory, "invocation.json");
     const npmCliPath = join(directory, "fake-npm.mjs");
     await writeFile(npmCliPath, `
       import { writeFile } from "node:fs/promises";
-      await writeFile(process.env.WENQU_TEST_OUTPUT, JSON.stringify({
+      await writeFile(process.env.HUAWEN_ZHIXING_TEST_OUTPUT, JSON.stringify({
         args: process.argv.slice(2),
-        target: process.env.WENQU_DEPLOY_TARGET ?? null,
+        target: process.env.HUAWEN_ZHIXING_DEPLOY_TARGET ?? null,
       }));
     `, "utf8");
     const script = fileURLToPath(new URL("../scripts/build-standard.mjs", import.meta.url));
@@ -291,7 +291,7 @@ test("standard build launcher delegates through the active npm CLI", async () =>
       env: {
         ...process.env,
         npm_execpath: npmCliPath,
-        WENQU_TEST_OUTPUT: outputPath,
+        HUAWEN_ZHIXING_TEST_OUTPUT: outputPath,
       },
     });
     const invocation = JSON.parse(await readFile(outputPath, "utf8"));
@@ -523,7 +523,7 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   assert.match(readme.slice(localDevIndex), /git clone https:\/\/github\.com\/Ryrant\/wenqu-chinese-learning-platform\.git/);
   assert.match(readme.slice(localDevIndex), /npm ci/);
   assert.match(readme.slice(localDevIndex), /npm run dev/);
-  assert.match(readme.slice(localDevIndex), /x-wenqu-dev-user/);
+  assert.match(readme.slice(localDevIndex), /x-huawen-zhixing-dev-user/);
   assert.doesNotMatch(readme.slice(localDevIndex), /AUTH_MODE|DEV_USER_EMAIL/);
 });
 

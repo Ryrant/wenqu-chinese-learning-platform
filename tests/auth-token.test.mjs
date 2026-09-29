@@ -20,7 +20,7 @@ const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled.outputTe
 const { createSessionToken, verifySessionToken } = await import(moduleUrl);
 const secret = "behavior-test-secret";
 const session = {
-  email: "admin@wenqu.test",
+  email: "admin@huawen-zhixing.test",
   displayName: "测试管理员",
   iat: 1_000,
   exp: 2_000,

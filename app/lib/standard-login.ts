@@ -53,7 +53,7 @@ export async function createInitialAdminAccount({ db, email, password, displayNa
   const displayName = configuredDisplayName?.trim() || normalizedEmail.split("@")[0];
   const passwordHash = await hashPassword(password);
   await db.batch([
-    db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,'sg','active')").bind(tenantId, "华文趣味试用学校"),
+    db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,'sg','active')").bind(tenantId, "华文知行示范学校"),
     db.prepare("INSERT OR IGNORE INTO users (id,email,display_name,password_hash,must_change_password,status) VALUES (?,?,?,?,0,'active')").bind(userId, normalizedEmail, displayName, passwordHash),
     ...(["student", "teacher", "guardian", "admin"] as const).map((role) => db.prepare("INSERT OR IGNORE INTO role_memberships (tenant_id,user_id,role,status) VALUES (?,?,?,'active')").bind(tenantId, userId, role)),
   ]);

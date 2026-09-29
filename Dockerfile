@@ -13,7 +13,7 @@ RUN npm run build
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-ENV DATABASE_URL=file:/data/wenqu.db
+ENV DATABASE_URL=file:/data/huawen-zhixing.db
 ENV UPLOAD_DIR=/data/uploads
 COPY --from=builder /app ./
 RUN mkdir -p /data/uploads && chown -R node:node /data /app

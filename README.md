@@ -1,6 +1,6 @@
 <div align="center">
-  <!-- <img src="./public/og.png" alt="文趣 · 华文趣味教学助手 Logo" width="120" /> -->
-  <h1>文趣 · 华文趣味教学助手</h1>
+  <!-- <img src="./public/og.png" alt="华文知行协同教学平台 Logo" width="120" /> -->
+  <h1>华文知行协同教学平台</h1>
   <p>支持 Cloudflare Workers + D1/R2 与 Docker + SQLite/本地文件存储的海外华文学校多租户教学平台</p>
 </div>
 
@@ -14,7 +14,7 @@
 
 ## ✨ 为什么做这个项目
 
-文趣面向海外华文学校和华裔青少年，提供学生、教师、家长和机构管理员四端工作台。项目围绕“诊断—学习—反馈—学情分析”闭环设计。Cloudflare 部署使用用户自己的 D1/R2；Docker 自部署使用容器数据卷中的 SQLite 和本地上传目录。
+华文知行协同教学平台面向海外华文学校和华裔青少年，提供学生、教师、家长和机构管理员四端工作台。项目围绕“诊断—学习—反馈—学情分析”闭环设计。Cloudflare 部署使用用户自己的 D1/R2；Docker 自部署使用容器数据卷中的 SQLite 和本地上传目录。
 
 ## 🚀 核心能力
 
@@ -51,7 +51,7 @@
 2. 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)。
 3. 进入 **Workers & Pages**，点击 **Create application**。
 4. 选择 **Import a repository** 或 **Continue with GitHub**，授权并选择你 Fork 的仓库。
-5. Project Name 可填写 `wenqu-chinese-learning-platform`。
+5. Project Name 可填写 `huawen-zhixing-platform`。
 6. Build command 填写：
 
    ```bash
@@ -69,7 +69,7 @@
    - D1 binding：`DB`
    - R2 binding：`CONTENT`
 
-部署成功后，访问 Cloudflare 分配的 `workers.dev` 域名，页面会提示初始化文趣工作区。按提示创建首个管理员邮箱和密码后即可进入后台。
+部署成功后，访问 Cloudflare 分配的 `workers.dev` 域名，页面会提示初始化华文知行工作区。按提示创建首个管理员邮箱和密码后即可进入后台。
 
 如需接入外部模型、语音评测或内容审核，进入后台 **平台设置** 添加 OpenAI Key、通用 AI Key、模型名、语音评测 Key 和内容审核 Key。配置会保存到你自己的 D1，不配置时系统会使用来源化模板或教师复核降级，不影响基础部署。
 
@@ -106,7 +106,7 @@ npm run cf:deploy
 
 Docker 自部署适合希望在自有服务器、NAS 或学校内网运行的场景。该方式不依赖 Cloudflare D1/R2，默认使用容器数据卷中的 SQLite 与本地文件目录：
 
-- 结构化数据：`/data/wenqu.db`
+- 结构化数据：`/data/huawen-zhixing.db`
 - 上传教材、图片和音频：`/data/uploads`
 
 启动：
@@ -146,10 +146,10 @@ https://你的项目名.你的子域.workers.dev/
 已有 Cloudflare 环境升级时，先备份 D1，再执行安全基线脚本。基线脚本仅在对应结构完整存在时登记迁移；旧环境会登记已经完整存在的基线结构，再执行尚未应用的 `0004`、`0005`，空库不会被误标记。随后查看并执行远端增量迁移：
 
 ```bash
-npx wrangler d1 export wenqu-platform-db --remote --output=wenqu-platform-db-before-v1.2.sql
-npx wrangler d1 execute wenqu-platform-db --remote --file=scripts/baseline-d1-migrations.sql
-npx wrangler d1 migrations list wenqu-platform-db --remote
-npx wrangler d1 migrations apply wenqu-platform-db --remote
+npx wrangler d1 export huawen-zhixing-db --remote --output=huawen-zhixing-db-before-v1.2.sql
+npx wrangler d1 execute huawen-zhixing-db --remote --file=scripts/baseline-d1-migrations.sql
+npx wrangler d1 migrations list huawen-zhixing-db --remote
+npx wrangler d1 migrations apply huawen-zhixing-db --remote
 ```
 
 随后执行发布验证：
@@ -224,7 +224,7 @@ npx wrangler deploy --dry-run --outdir .wrangler-dry-run
 
 | 模式 | 适用场景 | 身份来源 |
 | --- | --- | --- |
-| `local` | 本地开发 | 默认测试身份，或请求头 `x-wenqu-dev-user` |
+| `local` | 本地开发 | 默认测试身份，或请求头 `x-huawen-zhixing-dev-user` |
 | `standard` | 用户自托管 Cloudflare Workers | 部署后首次初始化管理员 + HttpOnly JWT Cookie |
 
 默认 `npm run build` 使用 `wrangler.toml` 生成标准 Cloudflare Workers 构建。`npm run build:standard` 保留为兼容入口，当前同样用于标准 Workers 部署。
@@ -238,7 +238,7 @@ Cloudflare Workers + D1 + R2 部署需要以下绑定：
 
 基础表与 v1.2 增量字段会在运行时进行幂等校验，正式数据库变更仍应通过 `drizzle/` 中的迁移文件管理。`lesson_plans`、`learning_recommendations` 和 `source_documents` 使用 `updated_at` 与 `archived_at` 保留更新时间和归档状态；归档内容会立即停止发布其知识片段。
 
-Docker 自部署不需要 Cloudflare 绑定，默认使用 `DATABASE_URL=file:/data/wenqu.db` 和 `UPLOAD_DIR=/data/uploads`。首次启动会创建 SQLite 数据库文件和上传目录，并沿用同一套运行时幂等建表逻辑。
+Docker 自部署不需要 Cloudflare 绑定，默认使用 `DATABASE_URL=file:/data/huawen-zhixing.db` 和 `UPLOAD_DIR=/data/uploads`。首次启动会创建 SQLite 数据库文件和上传目录，并沿用同一套运行时幂等建表逻辑。
 
 `v1.2.0` 的诊断数据包括题目、选择结果、正误、目标得分和完成时间；推荐数据记录来源、截止时间和状态。家长读取或操作孩子数据前，服务端会验证有效监护绑定；教师只能干预自己班级的学生；全部查询和写操作均限制在当前租户。
 
@@ -265,7 +265,7 @@ Docker 自部署不需要 Cloudflare 绑定，默认使用 `DATABASE_URL=file:/d
 ## 🗂️ 项目结构
 
 ```text
-wenqu-chinese-learning-platform/
+huawen-zhixing-platform/
 ├── app/                       # 页面、四端工作台与版本化 API
 ├── app/lib/                   # 身份、租户、数据初始化与共享类型
 ├── db/                        # Drizzle 数据模型
@@ -301,7 +301,7 @@ npm run dev
 
 ### 本地测试身份
 
-本地开发默认使用 `dev@wenqu.local` 作为测试身份。需要模拟其他账号时，可在请求中带上 `x-wenqu-dev-user` 请求头；不需要为本地启动配置认证环境变量。
+本地开发默认使用 `dev@huawen-zhixing.local` 作为测试身份。需要模拟其他账号时，可在请求中带上 `x-huawen-zhixing-dev-user` 请求头；不需要为本地启动配置认证环境变量。
 
 ### 命令
 

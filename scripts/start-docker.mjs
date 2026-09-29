@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-const databaseUrl = process.env.DATABASE_URL ?? "file:/data/wenqu.db";
+const databaseUrl = process.env.DATABASE_URL ?? "file:/data/huawen-zhixing.db";
 const uploadDir = process.env.UPLOAD_DIR ?? "/data/uploads";
 
 if (!databaseUrl.startsWith("file:")) {
@@ -28,7 +28,7 @@ const child = spawn(process.execPath, ["./node_modules/vinext/dist/cli.js", "sta
     ...process.env,
     DATABASE_URL: databaseUrl,
     UPLOAD_DIR: uploadDir,
-    WENQU_RUNTIME: "node",
+    HUAWEN_ZHIXING_RUNTIME: "node",
     NODE_ENV: process.env.NODE_ENV ?? "production",
   },
   stdio: "inherit",

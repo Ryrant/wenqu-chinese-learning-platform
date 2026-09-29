@@ -33,5 +33,5 @@
 ## 本地开发
 
 - Node.js 版本要求为 `>=22.13.0`。
-- 本地开发默认使用 local 模式和 `x-wenqu-dev-user` 请求头；标准登录本地预览可直接使用页面首次初始化。
+- 本地开发默认使用 local 模式和 `x-huawen-zhixing-dev-user` 请求头；标准登录本地预览可直接使用页面首次初始化。
 - `.wrangler/`、`.env*`、`node_modules/` 和构建产物不得提交。

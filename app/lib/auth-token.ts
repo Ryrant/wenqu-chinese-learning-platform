@@ -5,7 +5,7 @@ export type StandardSession = {
   exp: number;
 };
 
-export const sessionCookieName = "wenqu_session";
+export const sessionCookieName = "huawen_zhixing_session";
 
 const encoder = new TextEncoder();
 

@@ -9,7 +9,7 @@ import ts from "typescript";
 const root = new URL("../", import.meta.url);
 
 async function loadAuthModules() {
-  const directory = await mkdtemp(join(tmpdir(), "wenqu-standard-login-"));
+  const directory = await mkdtemp(join(tmpdir(), "huawen-zhixing-standard-login-"));
   const compile = async (input, output) => {
     const source = await readFile(new URL(input, root), "utf8");
     const transpiled = ts.transpileModule(source.replace('from "./auth-password"', 'from "./auth-password.js"'), {
@@ -69,8 +69,8 @@ function fakeDb(account) {
 test("standard login rejects an inactive account even with bootstrap credentials", async () => {
   const { modules, cleanup } = await loadAuthModules();
   try {
-    const db = fakeDb({ id: "usr_admin", email: "admin@wenqu.test", displayName: "管理员", passwordHash: await modules.hashPassword("TempPass-1234"), mustChangePassword: 0, status: "inactive" });
-    const account = await modules.authenticateStandardAccount({ db, email: "admin@wenqu.test", password: "Bootstrap-1234", adminEmail: "admin@wenqu.test", adminPassword: "Bootstrap-1234" });
+    const db = fakeDb({ id: "usr_admin", email: "admin@huawen-zhixing.test", displayName: "管理员", passwordHash: await modules.hashPassword("TempPass-1234"), mustChangePassword: 0, status: "inactive" });
+    const account = await modules.authenticateStandardAccount({ db, email: "admin@huawen-zhixing.test", password: "Bootstrap-1234", adminEmail: "admin@huawen-zhixing.test", adminPassword: "Bootstrap-1234" });
     assert.equal(account, null);
     assert.equal(db.state.batchCalls, 0);
   } finally { await cleanup(); }
@@ -80,7 +80,7 @@ test("initial admin setup creates the first account without deploy-time secrets"
   const { modules, cleanup } = await loadAuthModules();
   try {
     const db = fakeDb(null);
-    const account = await modules.createInitialAdminAccount({ db, email: "admin@wenqu.test", password: "Bootstrap-1234", displayName: "管理员" });
+    const account = await modules.createInitialAdminAccount({ db, email: "admin@huawen-zhixing.test", password: "Bootstrap-1234", displayName: "管理员" });
     assert.equal(account?.status, "active");
     assert.equal(account?.displayName, "管理员");
     assert.equal(db.state.batchCalls, 1);
@@ -90,8 +90,8 @@ test("initial admin setup creates the first account without deploy-time secrets"
 test("initial admin setup is closed once any user exists", async () => {
   const { modules, cleanup } = await loadAuthModules();
   try {
-    const db = fakeDb({ id: "usr_existing", email: "existing@wenqu.test", displayName: "已有用户", passwordHash: await modules.hashPassword("ExistingPass-1234"), mustChangePassword: 0, status: "active" });
-    const account = await modules.createInitialAdminAccount({ db, email: "admin@wenqu.test", password: "Bootstrap-1234", displayName: "管理员" });
+    const db = fakeDb({ id: "usr_existing", email: "existing@huawen-zhixing.test", displayName: "已有用户", passwordHash: await modules.hashPassword("ExistingPass-1234"), mustChangePassword: 0, status: "active" });
+    const account = await modules.createInitialAdminAccount({ db, email: "admin@huawen-zhixing.test", password: "Bootstrap-1234", displayName: "管理员" });
     assert.equal(account, null);
     assert.equal(db.state.batchCalls, 0);
   } finally { await cleanup(); }
@@ -101,7 +101,7 @@ test("standard login no longer bootstraps from deploy-time admin password", asyn
   const { modules, cleanup } = await loadAuthModules();
   try {
     const db = fakeDb(null);
-    const account = await modules.authenticateStandardAccount({ db, email: "admin@wenqu.test", password: "Bootstrap-1234", adminEmail: "admin@wenqu.test", adminPassword: "Bootstrap-1234" });
+    const account = await modules.authenticateStandardAccount({ db, email: "admin@huawen-zhixing.test", password: "Bootstrap-1234", adminEmail: "admin@huawen-zhixing.test", adminPassword: "Bootstrap-1234" });
     assert.equal(account, null);
     assert.equal(db.state.batchCalls, 0);
   } finally { await cleanup(); }
@@ -110,8 +110,8 @@ test("standard login no longer bootstraps from deploy-time admin password", asyn
 test("normal account login does not depend on bootstrap credentials", async () => {
   const { modules, cleanup } = await loadAuthModules();
   try {
-    const db = fakeDb({ id: "usr_student", email: "student@wenqu.test", displayName: "学生", passwordHash: await modules.hashPassword("StudentPass-1234"), mustChangePassword: 0, status: "active" });
-    const account = await modules.authenticateStandardAccount({ db, email: "student@wenqu.test", password: "StudentPass-1234" });
+    const db = fakeDb({ id: "usr_student", email: "student@huawen-zhixing.test", displayName: "学生", passwordHash: await modules.hashPassword("StudentPass-1234"), mustChangePassword: 0, status: "active" });
+    const account = await modules.authenticateStandardAccount({ db, email: "student@huawen-zhixing.test", password: "StudentPass-1234" });
     assert.equal(account?.id, "usr_student");
     assert.equal(db.state.batchCalls, 0);
   } finally { await cleanup(); }
@@ -120,7 +120,7 @@ test("normal account login does not depend on bootstrap credentials", async () =
 test("password change clears the route-equivalent session and workspace gate flow", async () => {
   const { modules, cleanup } = await loadAuthModules();
   try {
-    const db = fakeDb({ id: "usr_student", email: "student@wenqu.test", displayName: "学生", passwordHash: await modules.hashPassword("CurrentPass-1234"), mustChangePassword: 1, status: "active" });
+    const db = fakeDb({ id: "usr_student", email: "student@huawen-zhixing.test", displayName: "学生", passwordHash: await modules.hashPassword("CurrentPass-1234"), mustChangePassword: 1, status: "active" });
     const blocked = modules.workspacePasswordChangeGate("standard", { mustChangePassword: db.state.account.mustChangePassword === 1 });
     assert.equal(blocked?.status, 403);
     assert.deepEqual(await blocked?.json(), { error: "password_change_required" });

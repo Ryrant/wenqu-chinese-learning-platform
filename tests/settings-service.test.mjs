@@ -9,7 +9,7 @@ import ts from "typescript";
 const root = new URL("../", import.meta.url);
 
 async function loadSettingsModule() {
-  const directory = await mkdtemp(join(tmpdir(), "wenqu-settings-"));
+  const directory = await mkdtemp(join(tmpdir(), "huawen-zhixing-settings-"));
   const source = await readFile(new URL("app/lib/platform-settings.ts", root), "utf8");
   const transpiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },

@@ -27,10 +27,10 @@ async function importRuntimeNode() {
 }
 
 test("NodeSqliteDatabase implements D1-like prepare bind first all run and batch", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "wenqu-sqlite-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "huawen-zhixing-sqlite-"));
   try {
     const { NodeSqliteDatabase } = await importRuntimeNode();
-    const db = new NodeSqliteDatabase(`file:${path.join(dir, "wenqu.db")}`);
+    const db = new NodeSqliteDatabase(`file:${path.join(dir, "huawen-zhixing.db")}`);
     await db.prepare("CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL)").run();
     const insert = await db.prepare("INSERT INTO users (id,name) VALUES (?,?)").bind("u1", "测试用户").run();
     assert.equal(insert.meta.changes, 1);
@@ -50,7 +50,7 @@ test("NodeSqliteDatabase implements D1-like prepare bind first all run and batch
 });
 
 test("LocalFileStorage writes reads and rejects traversal keys", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "wenqu-storage-"));
+  const dir = await mkdtemp(path.join(tmpdir(), "huawen-zhixing-storage-"));
   try {
     const { LocalFileStorage } = await importRuntimeNode();
     const storage = new LocalFileStorage(dir);

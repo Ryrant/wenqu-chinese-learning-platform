@@ -161,7 +161,7 @@ export class LocalFileStorage implements PlatformStorage {
 }
 
 export async function createNodeRuntime(input: NodeRuntimeInput = {}): Promise<PlatformRuntime> {
-  const databaseUrl = input.databaseUrl ?? process.env.DATABASE_URL ?? "file:./data/wenqu.db";
+  const databaseUrl = input.databaseUrl ?? process.env.DATABASE_URL ?? "file:./data/huawen-zhixing.db";
   const uploadDir = input.uploadDir ?? process.env.UPLOAD_DIR ?? "./data/uploads";
   const databasePath = databasePathFromUrl(databaseUrl);
   await mkdir(dirname(resolve(databasePath)), { recursive: true });

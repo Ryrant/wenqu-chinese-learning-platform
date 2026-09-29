@@ -1,5 +1,5 @@
 name: Bug Report / 缺陷反馈
-description: Report a reproducible bug in 文趣 · 华文趣味教学助手 / 提交可复现的问题
+description: Report a reproducible bug in 华文知行协同教学平台 / 提交可复现的问题
 title: "[Bug] "
 labels:
   - bug
@@ -55,7 +55,7 @@ body:
     id: version
     attributes:
       label: Version / 版本
-      description: 文趣 version or commit hash. / 文趣版本或 commit hash。
+      description: 华文知行 version or commit hash. / 华文知行版本或 commit hash。
       placeholder: e.g. v1.0.0 or c5e4c24 / 例如 v1.0.0 或 c5e4c24
     validations:
       required: true

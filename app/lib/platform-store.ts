@@ -18,15 +18,15 @@ function idPart(value: string) {
 }
 
 function localIdentity(request: Request) {
-  const email = request.headers.get("x-wenqu-dev-user")?.trim().toLowerCase()
-    ?? "dev@wenqu.local";
+  const email = request.headers.get("x-huawen-zhixing-dev-user")?.trim().toLowerCase()
+    ?? "dev@huawen-zhixing.local";
   return { email, displayName: email.split("@")[0] };
 }
 
 function tokenFromRequest(request: Request) {
   const authorization = request.headers.get("Authorization");
   if (authorization?.startsWith("Bearer ")) return authorization.slice("Bearer ".length).trim();
-  // Session cookie: wenqu_session.
+  // Session cookie: huawen_zhixing_session.
   const cookie = request.headers.get("Cookie") ?? "";
   const match = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${sessionCookieName}=`));
   if (!match) return "";
@@ -219,7 +219,7 @@ async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
   ]);
   const festivalDoc = `${tenantId}-doc-festival`, textbookDoc = `${tenantId}-doc-textbook`;
   await db.batch([
-    db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,?,?)").bind(tenantId, "华文趣味试用学校", "sg", "active"),
+    db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,?,?)").bind(tenantId, "华文知行示范学校", "sg", "active"),
     db.prepare("INSERT OR IGNORE INTO users (id,email,display_name,locale) VALUES (?,?,?,?)").bind(userId, userEmail, displayName, "zh-CN"),
     ...(["student", "teacher", "guardian", "admin"] as PlatformRole[]).map((role) => db.prepare("INSERT OR IGNORE INTO role_memberships (tenant_id,user_id,role) VALUES (?,?,?)").bind(tenantId, userId, role)),
     db.prepare("INSERT OR IGNORE INTO classes (id,tenant_id,name,level,teacher_user_id,academic_year) VALUES (?,?,?,?,?,?)").bind(classId, tenantId, "四年级乙班", "A2", userId, "2026"),

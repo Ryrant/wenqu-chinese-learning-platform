@@ -62,7 +62,7 @@ export function getPlatformRuntime() {
 export async function ensurePlatformRuntime() {
   if (currentRuntime) return currentRuntime;
   if (runtimePromise) return runtimePromise;
-  if (typeof process !== "undefined" && process.versions?.node && process.env.WENQU_RUNTIME === "node") {
+  if (typeof process !== "undefined" && process.versions?.node && process.env.HUAWEN_ZHIXING_RUNTIME === "node") {
     const moduleName = "./platform-runtime-node";
     runtimePromise = import(moduleName)
       .then((module: typeof import("./platform-runtime-node")) => module.createNodeRuntime())
