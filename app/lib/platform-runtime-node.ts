@@ -135,7 +135,7 @@ export class LocalFileStorage implements PlatformStorage {
 
   async get(key: string): Promise<PlatformStoredObject | null> {
     const target = assertStoragePath(this.root, key);
-    let data: Buffer;
+    let data: Buffer<ArrayBuffer>;
     try {
       data = await readFile(target);
     } catch (error) {

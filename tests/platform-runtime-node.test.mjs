@@ -62,6 +62,13 @@ test("LocalFileStorage writes reads and rejects traversal keys", async () => {
     assert.ok(object);
     assert.equal(await object.text(), "中秋故事");
     assert.equal(object.httpMetadata.contentType, "text/plain");
+    const expected = new TextEncoder().encode("中秋故事");
+    const bytes = await object.arrayBuffer();
+    assert.ok(bytes instanceof ArrayBuffer);
+    assert.deepEqual(new Uint8Array(bytes), expected);
+    assert.deepEqual(new Uint8Array(await new Response(object.body).arrayBuffer()), expected);
+    new Uint8Array(bytes).fill(0);
+    assert.deepEqual(new Uint8Array(await object.arrayBuffer()), expected);
     await assert.rejects(() => storage.put("../escape.txt", new Blob(["bad"]).stream()), /invalid_storage_key/);
     await assert.rejects(() => storage.get("tenant-a/../../escape.txt"), /invalid_storage_key/);
   } finally {

@@ -33,6 +33,17 @@ test("password hashes verify the original password and reject another password",
   assert.equal(await verifyPassword("wrong-password", hash), false);
 });
 
+test("password hashing uses only the salt view bytes with ordinary and shared backing buffers", async () => {
+  const expected = await hashPassword("TempPass-1234", new Uint8Array(16).fill(7));
+  for (const backing of [new ArrayBuffer(24), new SharedArrayBuffer(24)]) {
+    new Uint8Array(backing).fill(99);
+    const salt = new Uint8Array(backing, 4, 16).fill(7);
+    const hash = await hashPassword("TempPass-1234", salt);
+    assert.equal(hash, expected);
+    assert.equal(await verifyPassword("TempPass-1234", hash), true);
+  }
+});
+
 test("malformed password hashes fail closed", async () => {
   assert.equal(await verifyPassword("TempPass-1234", "not-a-valid-hash"), false);
   assert.equal(await verifyPassword("TempPass-1234", "pbkdf2-sha256$100000$bad$bad"), false);

@@ -17,13 +17,13 @@ const navigation: Record<Role, string[]> = {
 
 type Toast = { title: string; detail: string; tone: "success" | "error" } | null;
 
-async function readJson<T extends Record<string, unknown>>(response: Response): Promise<T> {
+async function readJson<T extends Record<string, unknown>>(response: Response): Promise<T | { error: string }> {
   const text = await response.text();
   if (!text.trim()) return {} as T;
   try {
     return JSON.parse(text) as T;
   } catch {
-    return { error: `接口返回的不是有效 JSON（HTTP ${response.status}）` } as T;
+    return { error: `接口返回的不是有效 JSON（HTTP ${response.status}）` };
   }
 }
 
@@ -55,7 +55,7 @@ export function Dashboard() {
   async function loadAuthMode() {
     const response = await fetch("/api/v1/auth/session", { cache: "no-store" });
     const payload = await readJson<{ authMode?: "standard" | "local"; setupRequired?: boolean; user?: { mustChangePassword?: boolean }; error?: string }>(response);
-    if (!response.ok) throw new Error(payload.error ?? "会话状态加载失败");
+    if (!response.ok || "error" in payload) throw new Error(payload.error ?? "会话状态加载失败");
     setAuthMode(payload.authMode ?? null);
     setSetupRequired(payload.setupRequired === true);
     setMustChangePassword(payload.user?.mustChangePassword === true);
