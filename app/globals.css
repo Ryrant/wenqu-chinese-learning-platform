@@ -174,6 +174,13 @@ table{font-size:var(--font-control)}
   .task-management-row{grid-template-columns:1fr}
   .child-switcher{align-items:center}
 }
+.review-score-group{display:grid;gap:12px;min-width:0;border:1px solid var(--line);border-radius:12px;padding:14px}
+.review-score-group legend{padding:0 6px;font-weight:600}
+.submission-content audio,.family-work audio,.recording-preview audio{display:block;max-width:100%;width:100%;margin:12px 0}
+.recording-controls,.recording-preview{display:grid;gap:12px}
+.family-task-record{padding:18px 0;border-bottom:1px solid var(--line)}
+.family-task-record .row-actions{margin:12px 0;flex-wrap:wrap}
+.family-work{margin-top:12px;padding:14px;background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow-wrap:anywhere}
 @media(max-width:720px){
   .app-shell{padding-bottom:86px}
   .sidebar{height:76px;padding:8px 10px;overflow-x:auto;overflow-y:hidden}

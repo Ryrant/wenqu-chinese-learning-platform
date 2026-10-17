@@ -5,53 +5,89 @@ import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 import { searchPublishedKnowledge } from "./retrieval";
 
-export type ReviewSuggestion = { submissionId: string; suggestedScore: number; comment: string; weaknessTags: string[] };
-export type ConfirmedReview = { submissionId: string; score: number; comment: string };
+export type ObjectiveReviewScore = { objectiveId: string; score: number };
+export type DimensionReviewScore = { name: string; score: number };
+export type ReviewSuggestion = { submissionId: string; suggestedScore: number | null; comment: string; weaknessTags: string[]; objectiveScores: ObjectiveReviewScore[]; dimensionScores: DimensionReviewScore[] };
+export type ConfirmedReview = { submissionId: string; score: number; comment: string; objectiveScores: ObjectiveReviewScore[]; dimensionScores: DimensionReviewScore[] };
+
+function scoredItems(value: unknown, key: "objectiveId" | "name", allowed: string[]): Array<Record<string, string | number>> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("invalid_review_scores");
+  const seen = new Set<string>();
+  return value.map((item) => {
+    const id = item?.[key];
+    if (typeof id !== "string" || !allowed.includes(id) || seen.has(id) || typeof item.score !== "number" || !Number.isFinite(item.score) || item.score < 0 || item.score > 100) throw new Error("invalid_review_scores");
+    seen.add(id);
+    return { [key]: id, score: item.score };
+  });
+}
+
+export function parseReviewSuggestion(text: string, objectiveIds: string[], dimensionNames: string[]) {
+  const value = JSON.parse(text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+  if (!value || typeof value !== "object" || (value.suggestedScore !== null && (typeof value.suggestedScore !== "number" || !Number.isFinite(value.suggestedScore) || value.suggestedScore < 0 || value.suggestedScore > 100)) || typeof value.comment !== "string" || !value.comment.trim() || !Array.isArray(value.weaknessTags) || value.weaknessTags.some((tag: unknown) => typeof tag !== "string")) throw new Error("invalid_review_suggestion");
+  const objectiveScores = scoredItems(value.objectiveScores, "objectiveId", objectiveIds) as ObjectiveReviewScore[];
+  const dimensionScores = scoredItems(value.dimensionScores, "name", dimensionNames) as DimensionReviewScore[];
+  if (value.suggestedScore === null && (objectiveScores.length || dimensionScores.length)) throw new Error("invalid_review_suggestion");
+  return { suggestedScore: value.suggestedScore as number | null, comment: value.comment.slice(0, 2000), weaknessTags: value.weaknessTags.slice(0, 5) as string[], objectiveScores, dimensionScores };
+}
 
 export async function suggestTextReview(db: PlatformDatabase, context: PlatformContext, submissionId: string, config: { openAiKey?: string; model?: string }): Promise<ReviewSuggestion> {
   await assertSubmissionReviewAccess(db, context, submissionId);
   const submission = await db.prepare(`
-    SELECT s.id,s.text_answer AS textAnswer,s.review_status AS reviewStatus,a.title AS assignmentTitle
+    SELECT s.id,s.text_answer AS textAnswer,s.review_status AS reviewStatus,a.title AS assignmentTitle,a.rubric_json AS rubricJson
     FROM submissions s
     JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
     WHERE s.id=? AND s.tenant_id=? AND s.text_answer IS NOT NULL
-  `).bind(submissionId, context.tenantId).first<{ id: string; textAnswer: string; reviewStatus: string; assignmentTitle: string }>();
+  `).bind(submissionId, context.tenantId).first<{ id: string; textAnswer: string; reviewStatus: string; assignmentTitle: string; rubricJson: string }>();
   if (!submission) throw new Error("submission_not_found");
   if (submission.reviewStatus === "reviewed") throw new Error("submission_already_reviewed");
+  const objectives = await db.prepare(`SELECT lo.id,lo.title FROM submissions s
+    JOIN assignment_objectives ao ON ao.tenant_id=s.tenant_id AND ao.assignment_id=s.assignment_id
+    JOIN learning_objectives lo ON lo.tenant_id=ao.tenant_id AND lo.id=ao.objective_id
+    WHERE s.id=? AND s.tenant_id=?`).bind(submissionId, context.tenantId).all<{ id: string; title: string }>();
+  const rubric = JSON.parse(submission.rubricJson || "[]") as Array<{ name: string; weight: number }>;
   const chunks = await searchPublishedKnowledge(db, { tenantId: context.tenantId, query: `${submission.assignmentTitle} ${submission.textAnswer}`, limit: 5 });
   const result = await generateGroundedText({
     purpose: "review",
-    prompt: `请给出文字作业评分建议、评语和薄弱点标签。任务：${submission.assignmentTitle}\n学生答案：${submission.textAnswer}`,
+    prompt: `请按下面的任务目标和评分量规评价学生作品，仅返回 JSON：{"suggestedScore":0到100的数字或null,"comment":"评语及来源编号","weaknessTags":[],"objectiveScores":[{"objectiveId":"目标ID","score":0到100的数字}],"dimensionScores":[{"name":"量规维度名称","score":0到100的数字}]}。没有可靠评分依据时 suggestedScore 为 null，两个评分数组留空；未观察到的目标或维度不要评分。\n任务：${submission.assignmentTitle}\n目标：${JSON.stringify(objectives.results)}\n量规：${JSON.stringify(rubric)}\n学生答案：${submission.textAnswer}`,
     role: "teacher",
     contextChunks: chunks,
   }, config);
-  const scoreMatch = result.text.match(/([0-9]{1,3})\s*分/);
-  const suggestedScore = Math.max(0, Math.min(Number(scoreMatch?.[1] ?? 80), 100));
-  const weaknessTags = [...new Set((result.text.match(/薄弱点[:：]\s*([^\n]+)/)?.[1] ?? "表达完整度").split(/[、,，]/).map((item) => item.trim()).filter(Boolean))].slice(0, 5);
+  let suggestion: Omit<ReviewSuggestion, "submissionId"> = { suggestedScore: null, comment: "未获得可靠的评分建议，请教师依据作品和量规评价。", weaknessTags: [], objectiveScores: [], dimensionScores: [] };
+  if (result.status === "completed") {
+    try {
+      suggestion = parseReviewSuggestion(result.text, objectives.results.map((item) => item.id), rubric.map((item) => item.name));
+    } catch (error) {
+      console.warn("review_suggestion_invalid", { submissionId, reason: error instanceof SyntaxError ? "invalid_json" : "invalid_review_scores" });
+    }
+  }
   const outcomes = await db.batch([
     db.prepare(`INSERT INTO submission_reviews
-      (id,tenant_id,submission_id,reviewer_user_id,ai_suggested_score,ai_comment,weakness_tags_json,status)
-      SELECT ?,?,?,?,?,?,?,'ai_suggested'
+      (id,tenant_id,submission_id,reviewer_user_id,ai_suggested_score,ai_comment,weakness_tags_json,objective_scores_json,dimension_scores_json,status)
+      SELECT ?,?,?,?,?,?,?,?,?,'ai_suggested'
       WHERE EXISTS (SELECT 1 FROM submissions WHERE id=? AND tenant_id=? AND review_status!='reviewed')`)
-      .bind(crypto.randomUUID(), context.tenantId, submissionId, context.userId, suggestedScore, result.text, JSON.stringify(weaknessTags), submissionId, context.tenantId),
+      .bind(crypto.randomUUID(), context.tenantId, submissionId, context.userId, suggestion.suggestedScore, suggestion.comment, JSON.stringify(suggestion.weaknessTags), JSON.stringify(suggestion.objectiveScores), JSON.stringify(suggestion.dimensionScores), submissionId, context.tenantId),
     db.prepare(`UPDATE submissions SET review_status='ai_suggested_pending_review'
       WHERE id=? AND tenant_id=? AND review_status!='reviewed'`)
       .bind(submissionId, context.tenantId),
   ]);
   if (!outcomes[1].meta.changes) throw new Error("submission_already_reviewed");
-  return { submissionId, suggestedScore, comment: result.text, weaknessTags };
+  return { submissionId, ...suggestion };
 }
 
-export async function confirmSubmissionReview(db: PlatformDatabase, context: PlatformContext, input: { submissionId: string; score: number; comment: string }): Promise<ConfirmedReview> {
+export async function confirmSubmissionReview(db: PlatformDatabase, context: PlatformContext, input: { submissionId: string; score: number; comment: string; objectiveScores?: unknown; dimensionScores?: unknown }): Promise<ConfirmedReview> {
   await assertSubmissionReviewAccess(db, context, input.submissionId);
-  const score = Math.max(0, Math.min(input.score, 100));
+  if (typeof input.score !== "number" || !Number.isFinite(input.score) || input.score < 0 || input.score > 100) throw new Error("invalid_review_score");
+  const score = input.score;
   const comment = input.comment.slice(0, 2000);
-  const submission = await db.prepare(`SELECT student_user_id AS studentUserId,review_status AS reviewStatus
-    FROM submissions WHERE id=? AND tenant_id=?`)
+  const submission = await db.prepare(`SELECT s.student_user_id AS studentUserId,s.review_status AS reviewStatus,
+      s.family_task_id AS familyTaskId,s.family_confirmed_at AS familyConfirmedAt,a.rubric_json AS rubricJson
+    FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id WHERE s.id=? AND s.tenant_id=?`)
     .bind(input.submissionId, context.tenantId)
-    .first<{ studentUserId: string; reviewStatus: string }>();
+    .first<{ studentUserId: string; reviewStatus: string; familyTaskId: string | null; familyConfirmedAt: string | null; rubricJson: string }>();
   if (!submission) throw new Error("submission_not_found");
   if (submission.reviewStatus === "reviewed") throw new Error("submission_already_reviewed");
+  if (submission.familyTaskId && !submission.familyConfirmedAt) throw new Error("family_confirmation_required");
   const evidence = await db.prepare(`SELECT s.student_user_id AS studentUserId,ao.objective_id AS objectiveId
     FROM submissions s
     JOIN assignment_objectives ao ON ao.tenant_id=s.tenant_id AND ao.assignment_id=s.assignment_id
@@ -59,24 +95,31 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
     .bind(input.submissionId, context.tenantId)
     .all<{ studentUserId: string; objectiveId: string }>();
   if (!evidence.results.length) throw new Error("assignment_objective_not_found");
+  const rubric = JSON.parse(submission.rubricJson || "[]") as Array<{ name: string }>;
+  const objectiveScores = scoredItems(input.objectiveScores, "objectiveId", evidence.results.map((item) => item.objectiveId)) as ObjectiveReviewScore[];
+  const dimensionScores = scoredItems(input.dimensionScores, "name", rubric.map((item) => item.name)) as DimensionReviewScore[];
   try {
     await db.batch([
       db.prepare(`INSERT INTO submission_review_confirmations
         (id,tenant_id,submission_id,reviewer_user_id,score,comment)
         VALUES (?,?,?,?,?,?)`)
         .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, comment),
-      db.prepare("INSERT INTO submission_reviews (id,tenant_id,submission_id,reviewer_user_id,final_score,final_comment,weakness_tags_json,status) VALUES (?,?,?,?,?,?,?,'confirmed')")
-        .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, comment, "[]"),
+      db.prepare("INSERT INTO submission_reviews (id,tenant_id,submission_id,reviewer_user_id,final_score,final_comment,weakness_tags_json,objective_scores_json,dimension_scores_json,status) VALUES (?,?,?,?,?,?,?,?,?,'confirmed')")
+        .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, comment, "[]", JSON.stringify(objectiveScores), JSON.stringify(dimensionScores)),
       db.prepare(`UPDATE submissions
         SET score=?,confidence=1,feedback=?,review_status='reviewed',reviewed_at=CURRENT_TIMESTAMP
         WHERE id=? AND tenant_id=? AND review_status!='reviewed'`)
         .bind(score, comment, input.submissionId, context.tenantId),
-      ...evidence.results.map((item) => prepareMasteryEvidenceInsert(db, {
+      // 只更新教师明确评价的目标，不能把总分复制给所有关联能力。
+      ...objectiveScores.map((item) => prepareMasteryEvidenceInsert(db, {
         tenantId: context.tenantId,
-        studentUserId: item.studentUserId,
+        studentUserId: submission.studentUserId,
         objectiveId: item.objectiveId,
-        score: score / 100,
+        score: item.score / 100,
       })),
+      ...(submission.familyTaskId ? [db.prepare(`UPDATE learning_recommendations SET status='completed',completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND tenant_id=? AND student_user_id=? AND source_type='family'`)
+        .bind(submission.familyTaskId, context.tenantId, submission.studentUserId)] : []),
     ]);
   } catch (error) {
     const existing = await db.prepare(`SELECT id FROM submission_review_confirmations
@@ -86,5 +129,5 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
     if (existing) throw new Error("submission_already_reviewed");
     throw error;
   }
-  return { submissionId: input.submissionId, score, comment };
+  return { submissionId: input.submissionId, score, comment, objectiveScores, dimensionScores };
 }

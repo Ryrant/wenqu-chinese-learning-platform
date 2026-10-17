@@ -9,6 +9,7 @@ import {
   archiveFamilyTask,
   assertGuardianStudentAccess,
   createFamilyTask,
+  confirmFamilySubmission,
   createIntervention,
   setClassEnrollments,
   submitDiagnostic,
@@ -21,6 +22,7 @@ import { ensurePlatformRuntime, type PlatformDatabase } from "../../../../lib/pl
 import { aiProviderSettings, loadPlatformSettings } from "../../../../lib/platform-settings";
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 import { searchPublishedKnowledge } from "../../../../lib/retrieval";
+import { createStudentSubmission } from "../../../../lib/submission-service";
 
 type ActionBody = { action?: string; [key: string]: unknown };
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
     const roleByAction: Record<string, PlatformRole> = {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", update_lesson_plan: "teacher", archive_lesson_plan: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
-      create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian",
+      create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian", confirm_family_submission: "guardian",
       create_intervention: "teacher",
       create_invitation: "admin", review_content: "admin", reprocess_content: "admin", archive_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
       submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
@@ -224,12 +226,8 @@ export async function POST(request: Request) {
     if (action === "submit_text") {
       const assignmentId = requireText(body.assignmentId, "assignment_id");
       const answer = requireText(body.answer, "answer", 10000);
-      const assignment = await db.prepare("SELECT a.id FROM assignments a WHERE a.id=? AND a.tenant_id=? AND a.status='published' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.tenant_id=a.tenant_id AND e.class_id=a.class_id AND e.student_user_id=? AND e.status='active')").bind(assignmentId, tenantId, userId).first();
-      if (!assignment) return Response.json({ error: "published_assignment_not_found" }, { status: 404 });
-      const id = crypto.randomUUID();
-      await db.prepare("INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,review_status,confidence) VALUES (?,?,?,?,?,'human_review',0)").bind(id, tenantId, assignmentId, userId, answer).run();
-      await audit(db, tenantId, userId, "submission.created", "submission", id, { medium: "text" });
-      return Response.json({ id, reviewStatus: "human_review" }, { status: 201 });
+      const result = await createStudentSubmission(db, context, { assignmentId, textAnswer: answer, familyTaskId: text(body.familyTaskId, 120) || null });
+      return Response.json(result, { status: 201 });
     }
 
     if (action === "submit_diagnostic") {
@@ -266,6 +264,8 @@ export async function POST(request: Request) {
     if (action === "create_family_task") {
       const result = await createFamilyTask(db, context, {
         studentUserId: requireText(body.studentUserId, "student_user_id", 120),
+        assignmentId: requireText(body.assignmentId, "assignment_id", 120),
+        objectiveId: requireText(body.objectiveId, "objective_id", 120),
         title: requireText(body.title, "family_task_title", 120),
         detail: text(body.detail, 1000),
         dueAt: text(body.dueAt, 40) || null,
@@ -277,6 +277,8 @@ export async function POST(request: Request) {
     if (action === "update_family_task") {
       const result = await updateFamilyTask(db, context, {
         id: requireText(body.id, "family_task_id", 120),
+        assignmentId: requireText(body.assignmentId, "assignment_id", 120),
+        objectiveId: requireText(body.objectiveId, "objective_id", 120),
         title: requireText(body.title, "family_task_title", 120),
         detail: text(body.detail, 1000),
         dueAt: text(body.dueAt, 40) || null,
@@ -288,6 +290,15 @@ export async function POST(request: Request) {
     if (action === "archive_family_task") {
       const result = await archiveFamilyTask(db, context, requireText(body.id, "family_task_id", 120));
       await audit(db, tenantId, userId, "family_task.archived", "learning_recommendation", result.id);
+      return Response.json(result);
+    }
+
+    if (action === "confirm_family_submission") {
+      const result = await confirmFamilySubmission(db, context, {
+        submissionId: requireText(body.submissionId, "submission_id", 120),
+        helpLevel: requireText(body.helpLevel, "family_help_level", 30),
+      });
+      await audit(db, tenantId, userId, "family_submission.confirmed", "submission", result.submissionId, { helpLevel: result.helpLevel });
       return Response.json(result);
     }
 
@@ -314,9 +325,9 @@ export async function POST(request: Request) {
 
     if (action === "review_submission" || action === "confirm_submission_review") {
       const id = requireText(body.id, "submission_id");
-      const score = Math.max(0, Math.min(number(body.score, 0), 100));
+      const score = typeof body.score === "number" ? body.score : Number.NaN;
       if (action === "review_submission") await assertSubmissionReviewAccess(db, context, id);
-      const result = await confirmSubmissionReview(db, context, { submissionId: id, score, comment: text(body.comment, 2000) });
+      const result = await confirmSubmissionReview(db, context, { submissionId: id, score, comment: text(body.comment, 2000), objectiveScores: body.objectiveScores, dimensionScores: body.dimensionScores });
       await audit(db, tenantId, userId, "submission.reviewed", "submission", id, { score });
       return Response.json({ ...result, id, reviewStatus: "reviewed" });
     }

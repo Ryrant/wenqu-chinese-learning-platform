@@ -190,17 +190,35 @@ export async function createIntervention(db: PlatformDatabase, context: Platform
 
 export async function createFamilyTask(db: PlatformDatabase, context: PlatformContext, input: {
   studentUserId: string;
+  assignmentId: string;
+  objectiveId: string;
   title: string;
   detail: string;
   dueAt?: string | null;
 }) {
   await assertGuardianStudentAccess(db, context, input.studentUserId);
-  const id = await createRecommendation(db, { tenantId: context.tenantId, studentUserId: input.studentUserId, sourceType: "family", title: input.title, detail: input.detail, dueAt: input.dueAt, createdBy: context.userId });
-  await db.prepare(`INSERT INTO notifications (id,tenant_id,user_id,title,detail,kind,scheduled_for)
-    VALUES (?,?,?,?,?,'family_task',?)`)
-    .bind(crypto.randomUUID(), context.tenantId, input.studentUserId, input.title, input.detail, input.dueAt ?? null)
-    .run();
+  await assertFamilyAssignment(db, context, input);
+  const id = crypto.randomUUID();
+  await db.batch([
+    db.prepare(`INSERT INTO learning_recommendations
+      (id,tenant_id,student_user_id,objective_id,assignment_id,source_type,source_id,title,detail,due_at,status,created_by)
+      VALUES (?,?,?,?,?,'family',?,?,?,?,'pending',?)`)
+      .bind(id, context.tenantId, input.studentUserId, input.objectiveId, input.assignmentId, id, input.title, input.detail, input.dueAt ?? null, context.userId),
+    db.prepare(`INSERT INTO notifications (id,tenant_id,user_id,title,detail,kind,scheduled_for)
+      VALUES (?,?,?,?,?,'family_task',?)`)
+      .bind(crypto.randomUUID(), context.tenantId, input.studentUserId, input.title, input.detail, input.dueAt ?? null),
+  ]);
   return { id, status: "pending" };
+}
+
+async function assertFamilyAssignment(db: PlatformDatabase, context: PlatformContext, input: { studentUserId: string; assignmentId: string; objectiveId: string }) {
+  const assignment = await db.prepare(`SELECT a.id FROM assignments a
+    JOIN assignment_objectives ao ON ao.tenant_id=a.tenant_id AND ao.assignment_id=a.id AND ao.objective_id=?
+    JOIN learning_objectives lo ON lo.tenant_id=ao.tenant_id AND lo.id=ao.objective_id AND lo.status='active'
+    WHERE a.id=? AND a.tenant_id=? AND a.status='published'
+      AND EXISTS (SELECT 1 FROM enrollments e WHERE e.tenant_id=a.tenant_id AND e.class_id=a.class_id AND e.student_user_id=? AND e.status='active')`)
+    .bind(input.objectiveId, input.assignmentId, context.tenantId, input.studentUserId).first();
+  if (!assignment) throw new Error("invalid_family_assignment");
 }
 
 async function ownedFamilyTask(db: PlatformDatabase, context: PlatformContext, id: string) {
@@ -217,26 +235,51 @@ async function ownedFamilyTask(db: PlatformDatabase, context: PlatformContext, i
 
 export async function updateFamilyTask(db: PlatformDatabase, context: PlatformContext, input: {
   id: string;
+  assignmentId: string;
+  objectiveId: string;
   title: string;
   detail: string;
   dueAt?: string | null;
 }) {
-  await ownedFamilyTask(db, context, input.id);
-  await db.prepare(`UPDATE learning_recommendations
-    SET title=?,detail=?,due_at=?,updated_at=CURRENT_TIMESTAMP
-    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL`)
-    .bind(input.title, input.detail, input.dueAt ?? null, input.id, context.tenantId)
+  const task = await ownedFamilyTask(db, context, input.id);
+  await assertFamilyAssignment(db, context, { ...input, studentUserId: task.studentUserId });
+  const result = await db.prepare(`UPDATE learning_recommendations
+    SET title=?,detail=?,due_at=?,assignment_id=?,objective_id=?,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL
+      AND ((assignment_id IS ? AND objective_id IS ?)
+        OR NOT EXISTS (SELECT 1 FROM submissions s WHERE s.tenant_id=? AND s.family_task_id=?))`)
+    .bind(input.title, input.detail, input.dueAt ?? null, input.assignmentId, input.objectiveId, input.id, context.tenantId,
+      input.assignmentId, input.objectiveId, context.tenantId, input.id)
     .run();
+  if (!result.meta.changes) throw new Error("family_task_has_submissions");
   return { id: input.id, status: "updated" };
+}
+
+export async function confirmFamilySubmission(db: PlatformDatabase, context: PlatformContext, input: { submissionId: string; helpLevel: string }) {
+  if (!["independent", "prompted", "assisted"].includes(input.helpLevel)) throw new Error("invalid_family_help_level");
+  const submission = await db.prepare(`SELECT s.student_user_id AS studentUserId FROM submissions s
+    JOIN learning_recommendations lr ON lr.tenant_id=s.tenant_id AND lr.id=s.family_task_id AND lr.source_type='family'
+    WHERE s.id=? AND s.tenant_id=? AND lr.archived_at IS NULL`)
+    .bind(input.submissionId, context.tenantId).first<{ studentUserId: string }>();
+  if (!submission) throw new Error("submission_not_found");
+  await assertGuardianStudentAccess(db, context, submission.studentUserId);
+  const result = await db.prepare(`UPDATE submissions SET family_help_level=?,family_confirmed_at=CURRENT_TIMESTAMP
+    WHERE id=? AND tenant_id=? AND review_status!='reviewed'`)
+    .bind(input.helpLevel, input.submissionId, context.tenantId).run();
+  if (!result.meta.changes) throw new Error("submission_already_reviewed");
+  return { submissionId: input.submissionId, helpLevel: input.helpLevel };
 }
 
 export async function archiveFamilyTask(db: PlatformDatabase, context: PlatformContext, id: string) {
   await ownedFamilyTask(db, context, id);
-  await db.prepare(`UPDATE learning_recommendations
+  // 与提交时的活动任务条件共同保证：并发归档不会留下无法确认或评分的作品。
+  const result = await db.prepare(`UPDATE learning_recommendations
     SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL`)
-    .bind(id, context.tenantId)
+    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM submissions s WHERE s.tenant_id=? AND s.family_task_id=? AND s.review_status!='reviewed')`)
+    .bind(id, context.tenantId, context.tenantId, id)
     .run();
+  if (!result.meta.changes) throw new Error("family_submission_pending");
   return { id, status: "archived" };
 }
 
@@ -246,8 +289,10 @@ export async function updateRecommendationStatus(db: PlatformDatabase, context: 
     .bind(input.id, context.tenantId)
     .first<{ id: string; studentUserId: string; sourceType: RecommendationSource; createdBy: string }>();
   if (!row) throw new Error("recommendation_not_found");
+  // 家长确认交流不等于语言能力达标；家庭任务由作品的教师评价完成。
+  if (row.sourceType === "family" && input.status === "completed") throw new Error("family_review_required");
   if (!context.roles.includes("admin")) {
-    if (context.roles.includes("student") && row.studentUserId === context.userId && row.sourceType !== "diagnostic") {
+    if (context.roles.includes("student") && row.studentUserId === context.userId && row.sourceType !== "diagnostic" && row.sourceType !== "family") {
       // Diagnostic recommendations can only be completed by answering the review item.
     } else if (context.roles.includes("guardian") && row.sourceType === "family") {
       await assertGuardianStudentAccess(db, context, row.studentUserId);
@@ -304,7 +349,7 @@ export async function upsertLearningObjective(db: PlatformDatabase, context: Pla
       level=excluded.level,status=excluded.status WHERE tenant_id=excluded.tenant_id`)
     .bind(id, context.tenantId, input.code, input.title, input.skill, input.level, input.status)
     .run();
-  return { id, ...input };
+  return { ...input, id };
 }
 
 export async function upsertDiagnosticItem(db: PlatformDatabase, context: PlatformContext, input: {
@@ -335,5 +380,5 @@ export async function upsertDiagnosticItem(db: PlatformDatabase, context: Platfo
       status=excluded.status WHERE tenant_id=excluded.tenant_id`)
     .bind(id, context.tenantId, input.objectiveId, input.level, input.prompt, JSON.stringify(input.options.map((option) => option.trim())), input.correctOption, input.explanation, input.status, context.userId)
     .run();
-  return { id, ...input };
+  return { ...input, id };
 }

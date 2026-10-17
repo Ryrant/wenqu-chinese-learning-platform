@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { isRecommendationDue } from "./lib/learning-loop";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
-import { numberValue, stringValue } from "./lib/platform-types";
+import { FAMILY_HELP_LABELS, numberValue, stringValue } from "./lib/platform-types";
 
 type LoopProps = { data: WorkspaceData; act: Act; notify: Notify };
 
@@ -102,7 +102,7 @@ export function StudentTodayPlan({ data, act, notify, navigate }: LoopProps & { 
     const id = String(item.id);
     const kind = stringValue(item.kind, "");
     if (kind === "review") return navigate("成长档案");
-    if (kind === "assignment") return navigate("学习任务");
+    if (kind === "assignment" || kind === "family") return navigate("学习任务");
     setBusyId(id);
     try {
       await act("update_recommendation_status", { id, status: "completed" });
@@ -122,9 +122,9 @@ export function StudentTodayPlan({ data, act, notify, navigate }: LoopProps & { 
     {data.learningPlan.length ? data.learningPlan.map((item, index) => <div className="plan-row" key={String(item.id)}>
       <span className="plan-order">{index + 1}</span>
       <div><strong>{stringValue(item.title)}</strong><small>{kindLabels[stringValue(item.kind, "")] ?? "普通作业"} · {dueLabel(item.dueAt ?? item.due_at)}</small></div>
-      <button className="soft-button" type="button" disabled={busyId === String(item.id)} onClick={() => handle(item)}>
-        {stringValue(item.kind, "") === "review" ? "进入复习" : stringValue(item.kind, "") === "assignment" ? "进入作业" : busyId === String(item.id) ? "更新中…" : "标记完成"}
-      </button>
+      {item.kind === "family" && item.familyReviewStatus && item.familyReviewStatus !== "reviewed" ? <span className="status draft">{item.familyConfirmedAt ? "待教师评价" : "待家长确认"}</span> : <button className="soft-button" type="button" disabled={busyId === String(item.id)} onClick={() => handle(item)}>
+        {stringValue(item.kind, "") === "review" ? "进入复习" : item.kind === "assignment" || item.kind === "family" ? "进入作业" : busyId === String(item.id) ? "更新中…" : "标记完成"}
+      </button>}
     </div>) : <p className="empty-state">今天没有待办，完成新作业后会生成下一步计划。</p>}
   </article>;
 }
@@ -293,54 +293,77 @@ export function GuardianFamilyTasks({ data, act, notify }: LoopProps) {
   const [title, setTitle] = useState("亲子共读 15 分钟");
   const [detail, setDetail] = useState("一起阅读一篇华文短文，并请孩子复述主要内容。");
   const [dueAt, setDueAt] = useState("");
+  const [assignmentId, setAssignmentId] = useState("");
+  const [objectiveId, setObjectiveId] = useState("");
   const [editingId, setEditingId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [busySubmissionId, setBusySubmissionId] = useState("");
+  const [helpLevels, setHelpLevels] = useState<Record<string, string>>({});
+  const [editingHelpId, setEditingHelpId] = useState("");
   const tasks = data.recommendations.filter((item) => item.source_type === "family");
+  const assignments = data.assignments.filter((item) => item.status === "published");
+  const selectedAssignment = assignments.find((item) => item.id === assignmentId) ?? assignments[0];
+  const objectiveIds = stringValue(selectedAssignment?.objectiveIds, "").split(",");
+  const objectives = data.learningObjectives.filter((item) => objectiveIds.includes(String(item.id)));
+  const selectedObjectiveId = objectives.some((item) => item.id === objectiveId) ? objectiveId : String(objectives[0]?.id ?? "");
+  const targetLocked = !!editingId && data.submissions.some((item) => item.family_task_id === editingId);
 
-  function resetForm() {
-    setTitle("");
-    setDetail("");
-    setDueAt("");
-    setEditingId("");
-  }
+  function resetForm() { setTitle(""); setDetail(""); setDueAt(""); setAssignmentId(""); setObjectiveId(""); setEditingId(""); }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!data.selectedStudent) return notify("无法创建任务", "请先绑定并选择孩子。", "error");
+    if (!data.selectedStudent || !selectedAssignment || !selectedObjectiveId) return notify("无法创建任务", "请先选择孩子、已发布教学作业与练习目标。", "error");
+    setBusy(true);
     try {
-      await act(editingId ? "update_family_task" : "create_family_task", { id: editingId || undefined, studentUserId: data.selectedStudent.id, title, detail, dueAt: dueAt || null });
+      await act(editingId ? "update_family_task" : "create_family_task", { id: editingId || undefined, studentUserId: data.selectedStudent.id, assignmentId: selectedAssignment.id, objectiveId: selectedObjectiveId, title, detail, dueAt: dueAt ? new Date(dueAt).toISOString() : null });
       resetForm();
-      notify(editingId ? "亲子任务已更新" : "亲子任务已创建", editingId ? "修改已保存并记录审计。" : "任务已进入孩子的今日计划并生成平台通知。");
-    } catch (reason) {
-      notify("任务创建失败", reason instanceof Error ? reason.message : "请重试", "error");
-    }
+      notify(editingId ? "亲子任务已更新" : "亲子任务已创建", "孩子可在学习任务中选择这项家庭任务并提交作品。");
+    } catch (reason) { notify("任务保存失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+    finally { setBusy(false); }
   }
 
   return <section className="loop-grid">
     <form className="panel form-card" onSubmit={submit}>
       <div><span className="eyebrow">家长陪伴 · 不代替教师评分</span><h3>{editingId ? "编辑家庭任务" : "亲子家庭任务"}</h3><p className="form-context">任务对象：<strong>{data.selectedStudent?.displayName ?? "尚未选择孩子"}</strong></p></div>
-      <label>任务名称<input value={title} onChange={(event) => setTitle(event.target.value)} required/></label>
-      <label>任务说明<textarea value={detail} onChange={(event) => setDetail(event.target.value)} required maxLength={1000}/></label>
-      <label>截止时间<input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)}/></label>
-      <div className="form-actions">{editingId && <button type="button" className="soft-button" onClick={resetForm}>取消编辑</button>}<button className="primary-button" disabled={!data.selectedStudent}>{editingId ? "保存修改" : "发送给孩子"}</button></div>
+      <label>关联教学作业<select value={selectedAssignment ? String(selectedAssignment.id) : ""} required disabled={busy || targetLocked} onChange={(event) => { setAssignmentId(event.target.value); setObjectiveId(""); }}><option value="">请选择作业</option>{assignments.map((item) => <option key={String(item.id)} value={String(item.id)}>{stringValue(item.title)}</option>)}</select></label>
+      <label>练习目标<select value={selectedObjectiveId} required disabled={busy || targetLocked} onChange={(event) => setObjectiveId(event.target.value)}><option value="">请选择目标</option>{objectives.map((item) => <option key={String(item.id)} value={String(item.id)}>{stringValue(item.title)}</option>)}</select></label>
+      {targetLocked && <p>已有学生作品，教学作业与目标保持不变。</p>}
+      <label>任务名称<input value={title} disabled={busy} onChange={(event) => setTitle(event.target.value)} required/></label>
+      <label>任务说明<textarea value={detail} disabled={busy} onChange={(event) => setDetail(event.target.value)} required maxLength={1000}/></label>
+      <label>截止时间<input type="datetime-local" value={dueAt} disabled={busy} onChange={(event) => setDueAt(event.target.value)}/></label>
+      <div className="form-actions">{editingId && <button type="button" className="soft-button" disabled={busy} onClick={resetForm}>取消编辑</button>}<button className="primary-button" disabled={busy || !data.selectedStudent || !selectedAssignment || !selectedObjectiveId}>{busy ? "保存中…" : editingId ? "保存修改" : "发送给孩子"}</button></div>
+      {!assignments.length && <p>请先由教师向孩子所在班级发布关联目标的教学作业。</p>}
     </form>
     <article className="panel">
-      <h3>家庭任务记录</h3>
-      {tasks.length ? tasks.map((item) => <div className="history-row task-management-row" key={String(item.id)}>
-        <div><strong>{stringValue(item.title)}</strong><p>{stringValue(item.detail, "暂无任务说明")}</p><small>{dueLabel(item.due_at)} · {item.status === "completed" ? "已完成" : "待完成"} · 更新于 {fullDateLabel(item.updated_at ?? item.created_at)}</small></div>
-        <div className="row-actions"><button className="soft-button" type="button" onClick={() => {
-          setEditingId(String(item.id)); setTitle(stringValue(item.title, "")); setDetail(stringValue(item.detail, "")); setDueAt(typeof item.due_at === "string" ? item.due_at.slice(0, 16) : "");
-        }}>编辑</button><button className="soft-button" type="button" onClick={async () => {
-          try {
-            await act("update_recommendation_status", { id: item.id, status: item.status === "completed" ? "pending" : "completed" });
-            notify("任务状态已更新", item.status === "completed" ? "已重新设为待完成。" : "已标记完成。");
-          } catch (reason) {
-            notify("更新失败", reason instanceof Error ? reason.message : "请重试", "error");
-          }
-        }}>{item.status === "completed" ? "重新打开" : "标记完成"}</button><button className="danger-link" type="button" onClick={async () => {
-          try { await act("archive_family_task", { id: item.id }); notify("任务已归档", "该任务不再出现在孩子计划中，历史记录仍保留。"); }
-          catch (reason) { notify("归档失败", reason instanceof Error ? reason.message : "请重试", "error"); }
-        }}>归档任务</button></div>
-      </div>) : <p className="empty-state">还没有亲子任务。</p>}
+      <h3>家庭任务与学生作品</h3>
+      {tasks.length ? tasks.map((item) => {
+        const works = data.submissions.filter((work) => work.family_task_id === item.id);
+        return <section className="family-task-record" key={String(item.id)}>
+          <strong>{stringValue(item.title)}</strong><p>{stringValue(item.detail, "暂无任务说明")}</p><small>{stringValue(item.objectiveTitle, "尚未关联目标")} · {dueLabel(item.due_at)} · {item.status === "completed" ? "已完成" : "待完成"} · 更新于 {fullDateLabel(item.updated_at ?? item.created_at)}</small>
+          <div className="row-actions"><button className="soft-button" type="button" onClick={() => {
+            setEditingId(String(item.id)); setTitle(stringValue(item.title, "")); setDetail(stringValue(item.detail, "")); setAssignmentId(stringValue(item.assignment_id, "")); setObjectiveId(stringValue(item.objective_id, ""));
+            const date = typeof item.due_at === "string" ? new Date(item.due_at) : null;
+            setDueAt(date && !Number.isNaN(date.getTime()) ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
+          }}>编辑</button>{item.status === "completed" && <button className="soft-button" type="button" onClick={async () => {
+            try { await act("update_recommendation_status", { id: item.id, status: "pending" }); notify("任务已重新打开", "孩子可以提交新作品，原有评价保留。"); }
+            catch (reason) { notify("更新失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+          }}>重新打开</button>}<button className="danger-link" type="button" onClick={async () => {
+            try { await act("archive_family_task", { id: item.id }); notify("任务已归档", "历史作品与评价仍保留。"); }
+            catch (reason) { notify("归档失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+          }}>归档任务</button></div>
+          {!works.length && <p>{item.assignment_id ? "等待孩子提交作品。" : "请编辑任务，关联教学作业与目标。"}</p>}
+          {works.map((work) => <div className="family-work" key={String(work.id)}>
+            {work.asset_key ? <audio controls preload="metadata" src={`/api/v1/submissions/${encodeURIComponent(String(work.id))}/audio`} aria-label="孩子的家庭录音"/> : <p>{stringValue(work.text_answer)}</p>}
+            {!!work.family_confirmed_at && <p>交流已确认 · {FAMILY_HELP_LABELS[stringValue(work.family_help_level, "")]}</p>}
+            {work.review_status === "reviewed" ? <p>教师评价：{numberValue(work.score)} 分 · {stringValue(work.feedback)}</p> : work.family_confirmed_at && editingHelpId !== work.id ? <><span className="status draft">待教师评价</span><button className="soft-button" type="button" onClick={() => setEditingHelpId(String(work.id))}>修改帮助记录</button></> : <form className="form-card" onSubmit={async (event) => {
+              event.preventDefault(); setBusySubmissionId(String(work.id));
+              try { await act("confirm_family_submission", { submissionId: work.id, helpLevel: helpLevels[String(work.id)] ?? stringValue(work.family_help_level, "") }); setEditingHelpId(""); notify("交流与帮助情况已记录", "等待教师评价，家长确认不生成语言成绩。"); }
+              catch (reason) { notify("确认失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+              finally { setBusySubmissionId(""); }
+            }}><label>本次交流中的帮助程度<select required value={helpLevels[String(work.id)] ?? stringValue(work.family_help_level, "")} disabled={busySubmissionId === work.id} onChange={(event) => setHelpLevels({ ...helpLevels, [String(work.id)]: event.target.value })}><option value="">请选择实际帮助情况</option>{Object.entries(FAMILY_HELP_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><button className="soft-button" disabled={busySubmissionId === work.id}>确认交流及帮助情况</button></form>}
+          </div>)}
+        </section>;
+      }) : <p className="empty-state">还没有亲子任务。</p>}
     </article>
   </section>;
 }

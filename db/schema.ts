@@ -54,7 +54,8 @@ export const assignments = sqliteTable("assignments", {
 
 export const submissions = sqliteTable("submissions", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), assignmentId: text("assignment_id").notNull(), studentUserId: text("student_user_id").notNull(), textAnswer: text("text_answer"), assetKey: text("asset_key"), score: real("score"), confidence: real("confidence"), reviewStatus: text("review_status").notNull().default("auto"), feedback: text("feedback"), reviewedAt: text("reviewed_at"), submittedAt: createdAt(),
-}, (table) => [index("submissions_tenant_idx").on(table.tenantId), index("submissions_assignment_idx").on(table.assignmentId)]);
+  familyTaskId: text("family_task_id"), familyHelpLevel: text("family_help_level"), familyConfirmedAt: text("family_confirmed_at"),
+}, (table) => [index("submissions_tenant_idx").on(table.tenantId), index("submissions_assignment_idx").on(table.assignmentId), uniqueIndex("family_submission_pending_idx").on(table.tenantId, table.familyTaskId).where(sql`${table.familyTaskId} IS NOT NULL AND ${table.reviewStatus}!='reviewed'`)]);
 
 export const submissionReviews = sqliteTable("submission_reviews", {
   id: text("id").primaryKey(),
@@ -66,6 +67,8 @@ export const submissionReviews = sqliteTable("submission_reviews", {
   aiSuggestedScore: real("ai_suggested_score"),
   aiComment: text("ai_comment"),
   weaknessTagsJson: text("weakness_tags_json").notNull().default("[]"),
+  objectiveScoresJson: text("objective_scores_json").notNull().default("[]"),
+  dimensionScoresJson: text("dimension_scores_json").notNull().default("[]"),
   status: text("status", { enum: ["ai_suggested", "confirmed"] }).notNull(),
   createdAt: createdAt(),
 }, (table) => [
@@ -144,6 +147,7 @@ export const learningRecommendations = sqliteTable("learning_recommendations", {
   tenantId: text("tenant_id").notNull(),
   studentUserId: text("student_user_id").notNull(),
   objectiveId: text("objective_id"),
+  assignmentId: text("assignment_id"),
   sourceType: text("source_type", { enum: ["diagnostic", "teacher", "family", "system"] }).notNull(),
   sourceId: text("source_id"),
   title: text("title").notNull(),

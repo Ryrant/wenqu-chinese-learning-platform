@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StudentDiagnostic, StudentReviewCenter, StudentTodayPlan } from "./learning-loop-views";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { numberValue, stringValue } from "./lib/platform-types";
@@ -12,6 +12,7 @@ export function ProgressRing({ value, label }: { value: number; label: string })
 }
 
 type Props = { nav: string; data: WorkspaceData; act: Act; refresh: () => Promise<void>; notify: Notify; navigate: (target: string) => void };
+type RecordingDraft = { id: string; blob: Blob; url: string; assignmentId: string; familyTaskId: string | null; title: string };
 
 function PageTitle({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
   return <section className="welcome-row"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{detail}</p></div></section>;
@@ -25,9 +26,33 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const [selectedAssignment, setSelectedAssignment] = useState(String(data.assignments.find((item) => item.status === "published")?.id ?? ""));
   const [textAnswer, setTextAnswer] = useState("");
   const [recording, setRecording] = useState(false);
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const [recordingDraft, setRecordingDraft] = useState<RecordingDraft | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
+  const mounted = useRef(true);
   const published = data.assignments.filter((item) => item.status === "published");
+  const familyTasks = data.recommendations.filter((item) => item.source_type === "family" && item.status === "pending" && item.assignment_id && (!item.familyReviewStatus || item.familyReviewStatus === "reviewed"));
+  const familyTask = familyTasks.find((item) => `family:${item.id}` === selectedAssignment);
+  const assignmentId = familyTask ? String(familyTask.assignment_id) : selectedAssignment.startsWith("family:") ? "" : selectedAssignment;
+  const assignment = published.find((item) => item.id === assignmentId);
+  const targetSelector = <label>提交任务<select value={selectedAssignment} onChange={(event) => setSelectedAssignment(event.target.value)} required disabled={recording || recordingBusy}>
+    <option value="">请选择任务</option>{published.map((item) => <option value={String(item.id)} key={String(item.id)}>{stringValue(item.title)}</option>)}
+    {familyTasks.map((item) => <option value={`family:${item.id}`} key={`family:${item.id}`}>家庭：{stringValue(item.title)}</option>)}
+  </select></label>;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (recorder.current) {
+        recorder.current.onstop = null;
+        if (recorder.current.state !== "inactive") recorder.current.stop();
+        recorder.current.stream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+  useEffect(() => () => { if (recordingDraft) URL.revokeObjectURL(recordingDraft.url); }, [recordingDraft]);
+  useEffect(() => { if (recorder.current?.state === "recording") recorder.current.stop(); }, [nav]);
   const masteryAverage = data.mastery.length
     ? Math.round(data.mastery.reduce((sum, row) => sum + numberValue(row.mastery) * 100, 0) / data.mastery.length)
     : 0;
@@ -35,11 +60,12 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   function speak() {
     if (!("speechSynthesis" in window)) return notify("无法播放", "当前浏览器不支持系统语音合成。", "error");
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance("一家人一起吃月饼。团圆是中秋节重要的文化主题。");
+    if (!assignment) return notify("请先选择任务", "选择任务后可以听任务标题。", "error");
+    const utterance = new SpeechSynthesisUtterance(stringValue(assignment.title));
     utterance.lang = "zh-CN";
     utterance.rate = 0.82;
     window.speechSynthesis.speak(utterance);
-    notify("正在播放", "示范音由当前设备的中文语音引擎实时生成。");
+    notify("正在朗读任务标题", "使用当前设备的中文语音引擎。");
   }
 
   async function askTutor(event: React.FormEvent) {
@@ -82,8 +108,9 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     event.preventDefault();
     setBusy(true);
     try {
-      await act("submit_text", { assignmentId: selectedAssignment, answer: textAnswer });
+      await act("submit_text", { assignmentId, familyTaskId: familyTask?.id ?? null, answer: textAnswer });
       setTextAnswer("");
+      if (familyTask) setSelectedAssignment("");
       notify("作业已提交", "答案已进入教师人工审核队列。没有伪造自动分数。");
     } catch (reason) {
       notify("提交失败", reason instanceof Error ? reason.message : "请重试", "error");
@@ -93,44 +120,67 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   }
 
   async function toggleRecording() {
-    if (recording && recorder.current) {
-      recorder.current.stop();
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia) return notify("无法录音", "当前浏览器不支持麦克风录音。", "error");
+    if (recording && recorder.current) { if (recorder.current.state !== "inactive") recorder.current.stop(); return; }
+    if (!assignment) return notify("请先选择任务", "选择一个已发布任务后再录音。", "error");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return notify("无法录音", "当前浏览器不支持麦克风录音。", "error");
+    let stream: MediaStream | null = null;
+    setRecordingBusy(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mounted.current) { stream.getTracks().forEach((track) => track.stop()); return; }
       const mediaRecorder = new MediaRecorder(stream);
       recorder.current = mediaRecorder;
       chunks.current = [];
+      const target = { assignmentId, familyTaskId: familyTask ? String(familyTask.id) : null, title: stringValue(familyTask?.title ?? assignment.title) };
       mediaRecorder.ondataavailable = (event) => { if (event.data.size) chunks.current.push(event.data); };
-      mediaRecorder.onstop = async () => {
-        setRecording(false);
-        stream.getTracks().forEach((track) => track.stop());
+      mediaRecorder.onstop = () => {
+        mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+        if (!mounted.current) return;
         const blob = new Blob(chunks.current, { type: mediaRecorder.mimeType || "audio/webm" });
-        const form = new FormData();
-        form.append("audio", blob, "recording.webm");
-        form.append("assignmentId", selectedAssignment);
-        form.append("reference", "一家人一起吃月饼。");
-        setBusy(true);
-        try {
-          const response = await fetch("/api/v1/speech/submissions", { method: "POST", body: form });
-          const result = await response.json() as { message?: string; error?: string };
-          if (!response.ok) throw new Error(result.error);
-          await refresh();
-          notify("录音已保存", result.message ?? "已转教师复核。");
-        } catch (reason) {
-          notify("录音提交失败", reason instanceof Error ? reason.message : "请重试", "error");
-        } finally {
-          setBusy(false);
-        }
+        setRecording(false);
+        setRecordingDraft({ ...target, id: crypto.randomUUID(), blob, url: URL.createObjectURL(blob) });
+      };
+      mediaRecorder.onerror = () => {
+        mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+        if (mounted.current) { setRecording(false); notify("录音中断", "请检查麦克风后重新录音。", "error"); }
       };
       mediaRecorder.start();
+      setRecordingDraft(null);
       setRecording(true);
-    } catch {
-      notify("麦克风未授权", "请允许浏览器访问麦克风后再试。", "error");
-    }
+    } catch (reason) {
+      stream?.getTracks().forEach((track) => track.stop());
+      notify("无法开始录音", reason instanceof Error ? reason.message : "请检查麦克风权限后重试。", "error");
+    } finally { if (mounted.current) setRecordingBusy(false); }
   }
+
+  async function uploadRecording() {
+    if (!recordingDraft) return;
+    const draft = recordingDraft;
+    const form = new FormData();
+    form.append("audio", draft.blob, "recording.webm");
+    form.append("assignmentId", draft.assignmentId);
+    form.append("submissionId", draft.id);
+    form.append("reference", draft.title);
+    if (draft.familyTaskId) form.append("familyTaskId", draft.familyTaskId);
+    setRecordingBusy(true);
+    try {
+      const response = await fetch("/api/v1/speech/submissions", { method: "POST", body: form });
+      const result = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(result.error);
+      setRecordingDraft(null);
+      if (draft.familyTaskId) setSelectedAssignment("");
+      notify("录音已保存", result.message ?? "已转教师复核。");
+      try { await refresh(); } catch (reason) { notify("录音已保存", `列表刷新失败：${reason instanceof Error ? reason.message : "请刷新页面"}`, "error"); }
+    } catch (reason) {
+      notify("录音提交失败", `${reason instanceof Error ? reason.message : "请重试"}；录音已保留，可再次提交。`, "error");
+    } finally { setRecordingBusy(false); }
+  }
+
+  const recordingControls = <div className="recording-controls">
+    <div className="hero-actions"><button className="soft-button" type="button" onClick={speak} disabled={!assignment}>听任务标题</button>
+      <button className={`soft-button ${recording ? "danger-button" : ""}`} type="button" onClick={toggleRecording} disabled={(!assignment && !recording) || recordingBusy}>{recording ? "停止录音并试听" : recordingDraft ? "重新录音" : "开始录音"}</button></div>
+    {recordingDraft && <div className="recording-preview"><p>提交到：{recordingDraft.title}</p><audio controls src={recordingDraft.url} aria-label="录音试听"/><button className="primary-button" type="button" disabled={recordingBusy} onClick={uploadRecording}>{recordingBusy ? "正在提交…" : "提交录音给老师"}</button></div>}
+  </div>;
 
   if (nav === "AI 课堂") return <section>
     <PageTitle eyebrow="来源透明 · 学生问答" title="AI 课堂" detail="回答只基于本租户已发布内容；找不到来源时会明确拒答。"/>
@@ -157,10 +207,11 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     </article>)}</div>
     <form className="panel form-card" onSubmit={submitText}>
       <h3>提交文字作业</h3>
-      <label>任务<select value={selectedAssignment} onChange={(event) => setSelectedAssignment(event.target.value)} required>{published.map((item) => <option value={String(item.id)} key={String(item.id)}>{stringValue(item.title)}</option>)}</select></label>
+      {targetSelector}
       <label>我的回答<textarea value={textAnswer} onChange={(event) => setTextAnswer(event.target.value)} placeholder="写下你的完整句子或小故事" required maxLength={10000}/></label>
-      <button className="primary-button" disabled={busy || !selectedAssignment}>提交给老师审核</button>
+      <button className="primary-button" disabled={busy || !assignment}>提交给老师审核</button>
     </form>
+    <article className="panel form-card"><h3>提交录音作品</h3>{recordingControls}</article>
   </section>;
 
   if (nav === "成长档案") return <section>
@@ -178,7 +229,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     </article>
   </section>;
 
-  const current = published[0];
+  const current = assignment;
   return <>
     <PageTitle eyebrow="学习总览 · 数据实时读取" title={`早上好，${data.user.displayName}！`} detail="今天也一起发现中文里的小惊喜。"/>
     <StudentTodayPlan data={data} act={act} notify={notify} navigate={navigate}/>
@@ -186,12 +237,10 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       <div className="hero-copy">
         <span className="tag">正在学习 · {stringValue(current?.activity_type, "等待教师发布任务")}</span>
         <h2>{stringValue(current?.title, "新的学习任务")}</h2>
-        <p>听示范音，完成口语录音。录音会保存到 R2，并进入教师审核。</p>
+        <p>录音后可以试听和重录，确认后提交给老师。</p>
         <div className="lesson-meta"><span>建议 12 分钟</span><i/><span>{data.submissions.length} 次提交</span></div>
-        <div className="hero-actions">
-          <button className="soft-button" type="button" onClick={speak}>▶ 听示范发音</button>
-          <button className={`primary-button ${recording ? "danger-button" : ""}`} type="button" onClick={toggleRecording} disabled={!selectedAssignment || busy}>{recording ? "停止并提交录音" : "● 开始真实录音"}</button>
-        </div>
+        {targetSelector}
+        {recordingControls}
       </div>
       <div className="hero-art" aria-label="中秋团圆主题插画"><span className="sun-disc">圆</span><span className="roof roof-back"/><span className="roof roof-front"/><span className="lantern lantern-a">福</span><span className="lantern lantern-b">乐</span><span className="hill hill-a"/><span className="hill hill-b"/><span className="person person-a">小</span><span className="person person-b">语</span></div>
     </section>

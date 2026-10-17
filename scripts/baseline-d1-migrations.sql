@@ -63,3 +63,13 @@ AND EXISTS (SELECT 1 FROM pragma_table_info('learning_recommendations') WHERE na
 AND EXISTS (SELECT 1 FROM pragma_table_info('learning_recommendations') WHERE name='archived_at')
 AND EXISTS (SELECT 1 FROM pragma_table_info('source_documents') WHERE name='updated_at')
 AND EXISTS (SELECT 1 FROM pragma_table_info('source_documents') WHERE name='archived_at');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0006_learning_workflow_evidence.sql'
+WHERE EXISTS (SELECT 1 FROM pragma_table_info('submission_reviews') WHERE name='objective_scores_json')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submission_reviews') WHERE name='dimension_scores_json')
+AND EXISTS (SELECT 1 FROM pragma_table_info('learning_recommendations') WHERE name='assignment_id')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_task_id')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_help_level')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_confirmed_at')
+AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='family_submission_pending_idx');

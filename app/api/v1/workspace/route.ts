@@ -141,17 +141,20 @@ export async function GET(request: Request) {
       FROM assignments a JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
       LEFT JOIN submissions s ON s.assignment_id=a.id AND s.tenant_id=a.tenant_id
       LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
-      WHERE a.tenant_id=? AND ${classAccess.sql} GROUP BY a.id ORDER BY a.created_at DESC`)
-      .bind(focusStudentId, tenantId, ...classAccess.args);
-    const submissionsQuery = db.prepare(`SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName,
+      WHERE a.tenant_id=? AND ${classAccess.sql}${guardianSubmissionFilter ? " AND EXISTS (SELECT 1 FROM enrollments fe WHERE fe.tenant_id=a.tenant_id AND fe.class_id=a.class_id AND fe.student_user_id=? AND fe.status='active')" : ""} GROUP BY a.id ORDER BY a.created_at DESC`)
+      .bind(focusStudentId, tenantId, ...classAccess.args, ...guardianSubmissionArgs);
+    const submissionsQuery = db.prepare(`SELECT * FROM (SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName,ft.title AS familyTaskTitle,
+      ROW_NUMBER() OVER (ORDER BY s.created_at DESC,s.rowid DESC) AS submissionRank,
       group_concat(DISTINCT lo.title) AS objectiveTitles
       FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
       JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
       LEFT JOIN users u ON u.id=s.student_user_id
+      LEFT JOIN learning_recommendations ft ON ft.id=s.family_task_id AND ft.tenant_id=s.tenant_id AND ft.source_type='family'
       LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
       LEFT JOIN learning_objectives lo ON lo.id=ao.objective_id AND lo.tenant_id=ao.tenant_id
       WHERE s.tenant_id=? AND ${submissionAccess.sql}${guardianSubmissionFilter}
-      GROUP BY s.id ORDER BY s.created_at DESC LIMIT 50`)
+      GROUP BY s.id) WHERE submissionRank<=50 OR (family_task_id IS NOT NULL AND review_status!='reviewed')
+      ORDER BY created_at DESC,submissionRank`)
       .bind(tenantId, ...submissionAccess.args, ...guardianSubmissionArgs);
     const weeklyStatsQuery = db.prepare(`SELECT
       SUM(CASE WHEN created_at>=datetime('now','-7 days') THEN 1 ELSE 0 END) AS submittedCount,
@@ -192,10 +195,11 @@ export async function GET(request: Request) {
         .bind(tenantId, admin ? 1 : 0, userId)
       : null;
     const recommendationsQuery = db.prepare(`SELECT lr.*,lo.title AS objectiveTitle,di.prompt AS reviewPrompt,
-      di.options_json AS reviewOptionsJson
+      di.options_json AS reviewOptionsJson,fs.review_status AS familyReviewStatus,fs.family_confirmed_at AS familyConfirmedAt
       FROM learning_recommendations lr
       LEFT JOIN learning_objectives lo ON lo.id=lr.objective_id AND lo.tenant_id=lr.tenant_id
       LEFT JOIN diagnostic_items di ON di.id=lr.source_id AND di.tenant_id=lr.tenant_id
+      LEFT JOIN submissions fs ON fs.id=(SELECT latest.id FROM submissions latest WHERE latest.tenant_id=lr.tenant_id AND latest.family_task_id=lr.id ORDER BY latest.created_at DESC,latest.rowid DESC LIMIT 1)
       WHERE lr.tenant_id=? AND lr.student_user_id=? AND lr.archived_at IS NULL ORDER BY
       CASE lr.status WHEN 'pending' THEN 0 ELSE 1 END,COALESCE(lr.due_at,'9999-12-31'),lr.created_at DESC`)
       .bind(tenantId, focusStudentId);

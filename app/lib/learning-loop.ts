@@ -80,6 +80,6 @@ export function validateRubric(value: unknown): RubricDimension[] {
     if (!name || !Number.isInteger(weight) || weight < 1 || weight > 100) throw new Error("invalid_rubric");
     return { name, weight };
   });
-  if (rubric.reduce((sum, item) => sum + item.weight, 0) !== 100) throw new Error("invalid_rubric");
+  if (new Set(rubric.map((item) => item.name)).size !== rubric.length || rubric.reduce((sum, item) => sum + item.weight, 0) !== 100) throw new Error("invalid_rubric");
   return rubric;
 }

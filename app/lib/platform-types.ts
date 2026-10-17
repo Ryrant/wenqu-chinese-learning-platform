@@ -1,5 +1,6 @@
-﻿export type Role = "student" | "teacher" | "guardian" | "admin";
+export type Role = "student" | "teacher" | "guardian" | "admin";
 export type Row = Record<string, unknown>;
+export const FAMILY_HELP_LABELS: Record<string, string> = { independent: "独立完成", prompted: "提供了提示", assisted: "共同完成或较多帮助" };
 export type MemberRow = Row & { id: string; email: string; displayName: string; status: string; roles: string };
 export type GuardianLinkRow = Row & { guardianUserId: string; studentUserId: string; status: string };
 export type SecretStatus = { configured: boolean; suffix: string };

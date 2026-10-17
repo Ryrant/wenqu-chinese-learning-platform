@@ -188,8 +188,15 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     "ALTER TABLE lesson_plans ADD COLUMN archived_at TEXT",
     "ALTER TABLE learning_recommendations ADD COLUMN updated_at TEXT",
     "ALTER TABLE learning_recommendations ADD COLUMN archived_at TEXT",
+    "ALTER TABLE submission_reviews ADD COLUMN objective_scores_json TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE submission_reviews ADD COLUMN dimension_scores_json TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE learning_recommendations ADD COLUMN assignment_id TEXT",
+    "ALTER TABLE submissions ADD COLUMN family_task_id TEXT",
+    "ALTER TABLE submissions ADD COLUMN family_help_level TEXT",
+    "ALTER TABLE submissions ADD COLUMN family_confirmed_at TEXT",
   ]) await trySchema(db, statement);
   await db.batch([
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_submission_pending_idx ON submissions (tenant_id,family_task_id) WHERE family_task_id IS NOT NULL AND review_status!='reviewed'"),
     db.prepare("UPDATE lesson_plans SET updated_at=created_at WHERE updated_at IS NULL"),
     db.prepare("UPDATE learning_recommendations SET updated_at=created_at WHERE updated_at IS NULL"),
     db.prepare("UPDATE source_documents SET updated_at=created_at WHERE updated_at IS NULL"),
@@ -294,6 +301,8 @@ export function platformApiError(error: unknown) {
         ? 404
         : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
+          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "submission_id_conflict"].includes(message) ? 409
+          : message.startsWith("invalid_") ? 400
       : message === "authentication_config_missing"
           ? 500
           : 500;

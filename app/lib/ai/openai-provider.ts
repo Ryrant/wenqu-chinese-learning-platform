@@ -24,8 +24,13 @@ export function createOpenAiProvider(config: { apiKey?: string; model?: string }
         }),
       });
       if (!response.ok) throw new Error("openai_generation_failed");
-      const data = await response.json() as { output_text?: string; usage?: { input_tokens?: number; output_tokens?: number } };
-      const text = data.output_text?.trim();
+      const data = await response.json() as { status?: string; output_text?: string; output?: Array<{ type: string; content?: Array<{ type: string; text?: string }> }>; usage?: { input_tokens?: number; output_tokens?: number } };
+      if (data.status && data.status !== "completed") throw new Error("openai_incomplete_output");
+      // REST 返回的正文位于 output 消息中，顶层 output_text 仅作为兼容入口。
+      const text = (data.output?.filter((item) => item.type === "message")
+        .flatMap((item) => item.content ?? [])
+        .filter((item) => item.type === "output_text")
+        .map((item) => item.text ?? "").join("") || data.output_text || "").trim();
       if (!text) throw new Error("openai_empty_output");
       return {
         text,

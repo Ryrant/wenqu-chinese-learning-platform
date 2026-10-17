@@ -148,6 +148,7 @@ test("teacher confirmation is one atomic batch guarded by a durable unique fact"
     submissionId: "submission",
     score: 90,
     comment: "很好",
+    objectiveScores: [{ objectiveId: "objective", score: 90 }],
   });
   assert.equal(firstCount, 1);
   assert.equal(allCount, 1);
