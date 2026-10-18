@@ -1,5 +1,7 @@
 "use client";
 
+import { AbilityEvidenceProfile, TeacherAbilityProfiles } from "./diagnostic-evidence";
+
 import { useState } from "react";
 import {
   AdminEnrollmentEditor,
@@ -177,6 +179,7 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
     <PageTitle eyebrow="最新学习证据 · 班级范围" title="教学总览" detail="按学生与目标读取最新掌握度，避免历史快照重复计入。"/>
     <MetricGrid items={[["班级", data.classes.length, "当前教师可访问", "green"], ["已发布任务", published.length, "目标与量规可追溯", "blue"], ["待批阅", pending.length, "等待教师确认", "orange"], ["平均掌握度", `${mastery}%`, "仅最新快照", "purple"]]}/>
     <TeacherMasteryHeatmap data={data}/>
+    <TeacherAbilityProfiles data={data}/>
   </section>;
 
   if (nav === "班级管理") return <section>
@@ -221,6 +224,7 @@ export function GuardianView({ nav, data, act, notify, selectStudent }: Guardian
   if (nav === "成长报告") return <section>
     <PageTitle eyebrow="可追溯学情" title="成长报告" detail="周报只使用最近 7 天真实作业、教师确认成绩、最新掌握度和待复习项。" action={childSwitch}/>
     <GuardianWeeklyReport data={data}/>
+    <AbilityEvidenceProfile key={data.selectedStudent?.id} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
     <article className="panel reviewed-work-list"><h3>已审核作品</h3>{reviewed.length ? reviewed.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{stringValue(item.assignmentTitle)}</strong><small>{localDate(item.reviewed_at ?? item.created_at)} · 学习目标：{stringValue(item.objectiveTitles, "未关联目标")}</small><p>教师反馈：{textSummary(item.feedback, "教师暂未填写文字反馈")}</p></div><span className="status published">{numberValue(item.score)} 分</span></div>) : <p className="empty-state">当前孩子最近还没有教师确认的作品。</p>}</article>
   </section>;
 

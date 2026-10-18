@@ -73,3 +73,14 @@ AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_ta
 AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_help_level')
 AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_confirmed_at')
 AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='family_submission_pending_idx');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0007_ability_evidence.sql'
+WHERE EXISTS (SELECT 1 FROM pragma_table_info('diagnostic_items') WHERE name='ability')
+AND EXISTS (SELECT 1 FROM pragma_table_info('diagnostic_items') WHERE name='media_id')
+AND EXISTS (SELECT 1 FROM pragma_table_info('diagnostic_items') WHERE name='revision')
+AND EXISTS (SELECT 1 FROM pragma_table_info('diagnostic_answers') WHERE name='evidence_json')
+AND EXISTS (SELECT 1 FROM pragma_table_info('assignments') WHERE name='diagnostic_mode')
+AND EXISTS (SELECT 1 FROM pragma_table_info('assignments') WHERE name='diagnostic_prompt')
+AND EXISTS (SELECT 1 FROM pragma_table_info('assignments') WHERE name='diagnostic_media_id')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='diagnostic_snapshot_json');

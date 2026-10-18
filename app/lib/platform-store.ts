@@ -194,6 +194,14 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     "ALTER TABLE submissions ADD COLUMN family_task_id TEXT",
     "ALTER TABLE submissions ADD COLUMN family_help_level TEXT",
     "ALTER TABLE submissions ADD COLUMN family_confirmed_at TEXT",
+    "ALTER TABLE diagnostic_items ADD COLUMN ability TEXT NOT NULL DEFAULT 'reading'",
+    "ALTER TABLE diagnostic_items ADD COLUMN media_id TEXT",
+    "ALTER TABLE diagnostic_items ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE diagnostic_answers ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE assignments ADD COLUMN diagnostic_mode TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE assignments ADD COLUMN diagnostic_prompt TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE assignments ADD COLUMN diagnostic_media_id TEXT",
+    "ALTER TABLE submissions ADD COLUMN diagnostic_snapshot_json TEXT NOT NULL DEFAULT '{}'",
   ]) await trySchema(db, statement);
   await db.batch([
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_submission_pending_idx ON submissions (tenant_id,family_task_id) WHERE family_task_id IS NOT NULL AND review_status!='reviewed'"),

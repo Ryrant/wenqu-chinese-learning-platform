@@ -20,6 +20,9 @@ const bundle = await build({
     export { POST as upload } from './app/api/v1/speech/submissions/route';
     export { POST as submit } from './app/api/v1/submissions/route';
     export { GET as audio } from './app/api/v1/submissions/[id]/audio/route';
+    export { GET as profile } from './app/api/v1/ability-profile/route';
+    export { POST as uploadMedia } from './app/api/v1/diagnostic-media/route';
+    export { GET as media } from './app/api/v1/diagnostic-media/[id]/route';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
@@ -67,10 +70,10 @@ async function fixture(t) {
   ]);
   const text = (familyTaskId) => act(actors.student, "submit_text", { assignmentId: assignment.id, answer: "这道家常菜很好吃，我想介绍它。", familyTaskId }, 201);
   const review = (id, extra = {}) => ({ id, score: 80, comment: "表达完整，下一步练习说明步骤。", ...extra });
-  const upload = async (cookie, { id = crypto.randomUUID(), familyTaskId, bytes = new Uint8Array(512).fill(7) } = {}, status = 201) => {
+  const upload = async (cookie, { id = crypto.randomUUID(), familyTaskId, assignmentId = assignment.id, bytes = new Uint8Array(512).fill(7) } = {}, status = 201) => {
     const form = new FormData();
     form.set("audio", new File([bytes], "recording.wav", { type: "audio/wav" }));
-    form.set("assignmentId", assignment.id);
+    form.set("assignmentId", assignmentId);
     form.set("submissionId", id);
     if (familyTaskId) form.set("familyTaskId", familyTaskId);
     const response = await api.upload(new Request("http://127.0.0.1/api/v1/speech/submissions", { method: "POST", headers: { cookie }, body: form }));
@@ -83,7 +86,19 @@ async function fixture(t) {
     const response = await api.workspace(new Request("http://127.0.0.1/api/v1/workspace", { headers: { cookie } }));
     const result = await response.json(); assert.equal(response.status, 200, JSON.stringify(result)); return result;
   };
-  return { db, act, actors, ids, tenantId, goals, assignment, text, review, upload, readAudio, workspace };
+  const profile = async (cookie, studentId = ids.student, expectedStatus = 200) => {
+    const response = await api.profile(new Request(`http://127.0.0.1/api/v1/ability-profile?studentId=${studentId}`, { headers: cookie ? { cookie } : {} }));
+    const result = await response.json(); assert.equal(response.status, expectedStatus, JSON.stringify(result)); return result;
+  };
+  const uploadMedia = async (cookie, kind, expectedStatus = 201, file) => {
+    const form = new FormData(); form.set("kind", kind);
+    const bytes = kind === "image" ? Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lWQAAAAASUVORK5CYII=", "base64") : new Uint8Array(512).fill(3);
+    form.set("file", file ?? new File([bytes], kind === "image" ? "picture.png" : "listen.wav", { type: kind === "image" ? "image/png" : "audio/wav" }));
+    const response = await api.uploadMedia(new Request("http://127.0.0.1/api/v1/diagnostic-media", { method: "POST", headers: cookie ? { cookie } : {}, body: form }));
+    const result = await response.json(); assert.equal(response.status, expectedStatus, JSON.stringify(result)); return result;
+  };
+  const readMedia = (cookie, id) => api.media(new Request(`http://127.0.0.1/api/v1/diagnostic-media/${id}`, { headers: cookie ? { cookie } : {} }), { params: Promise.resolve({ id }) });
+  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia };
 }
 
 test("unconfigured and invalid AI suggestions leave grades and mastery unset; structured REST output is validated", async (t) => {
@@ -243,6 +258,138 @@ test("family archive and submission cannot interleave into an unreviewable work"
   });
 });
 
+async function diagnosticTask(f, mode, objectiveId = f.goals[0]) {
+  const media = mode === "speaking" ? await f.uploadMedia(f.actors.teacher, "image") : null;
+  const input = { classId: f.classroom.id, title: mode === "speaking" ? "看图介绍家常菜" : "写一段菜品推荐", activityType: "能力差异诊断", objectiveIds: [objectiveId], rubric,
+    diagnosticMode: mode, diagnosticPrompt: "请独立完成，说明主要内容和理由。", diagnosticMediaId: media?.id ?? null };
+  const task = await f.act(f.actors.teacher, "create_assignment", input, 201);
+  await f.act(f.actors.teacher, "publish_assignment", { id: task.id });
+  return { ...task, mediaId: media?.id ?? null, input };
+}
+
+test("diagnostic stimuli enforce kind, publication and tenant scope; tasks require the correct response medium", async (t) => {
+  const f = await fixture(t);
+  await f.uploadMedia(f.actors.student, "image", 403);
+  await f.uploadMedia(null, "audio", 401);
+  await f.uploadMedia(f.actors.teacher, "image", 400, new File(["<svg onload='alert(1)'/>"], "fake.png", { type: "image/png" }));
+  const image = await f.uploadMedia(f.actors.teacher, "image");
+  assert.equal((await f.readMedia(f.actors.student, image.id)).status, 404);
+  const teacherPreview = await f.readMedia(f.actors.teacher, image.id);
+  assert.equal(teacherPreview.status, 200);
+  assert.equal(teacherPreview.headers.get("cache-control"), "private, no-store");
+  const base = { classId: f.classroom.id, title: "图片口述", activityType: "诊断", objectiveIds: [f.goals[0]], rubric, diagnosticMode: "speaking", diagnosticPrompt: "描述图片。" };
+  await f.act(f.actors.teacher, "create_assignment", base, 400);
+  const task = await f.act(f.actors.teacher, "create_assignment", { ...base, diagnosticMediaId: image.id }, 201);
+  assert.equal((await f.readMedia(f.actors.student, image.id)).status, 404);
+  await f.act(f.actors.teacher, "publish_assignment", { id: task.id });
+  assert.equal((await f.readMedia(f.actors.student, image.id)).status, 200);
+  assert.equal((await f.readMedia(f.actors.otherTenant, image.id)).status, 404);
+  await f.act(f.actors.student, "submit_text", { assignmentId: task.id, answer: "用文字冒充口述" }, 400);
+  const oral = await f.upload(f.actors.student, { assignmentId: task.id });
+  const anotherClass = await f.act(f.actors.otherTeacher, "create_class", { name: "同学生的另一班级", level: "A2" }, 201);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: anotherClass.id, studentUserIds: [f.ids.student] });
+  assert.ok(!(await f.profile(f.actors.otherTeacher)).evidence.some((item) => item.id === oral.id));
+  assert.equal((await f.readMedia(f.actors.otherTeacher, image.id)).status, 404);
+  const writing = await diagnosticTask(f, "writing", f.goals[2]);
+  await f.upload(f.actors.student, { assignmentId: writing.id }, 400);
+  const question = { objectiveId: f.goals[1], level: "A2", prompt: "听录音选答案", options: ["一", "二", "三", "四"], correctOption: 0, ability: "listening" };
+  await f.act(f.actors.admin, "upsert_diagnostic_item", question, 400);
+  await f.act(f.actors.admin, "upsert_diagnostic_item", { ...question, mediaId: image.id }, 400);
+  const audio = await f.uploadMedia(f.actors.admin, "audio");
+  await f.act(f.actors.admin, "upsert_diagnostic_item", { ...question, mediaId: audio.id }, 201);
+  assert.equal((await f.readMedia(f.actors.student, audio.id)).status, 200);
+  const workspace = await f.workspace(f.actors.student);
+  const item = workspace.diagnosticItems.find((item) => item.mediaId === audio.id);
+  assert.equal(item.ability, "listening");
+  assert.ok(!("correct_option" in item) && !("correctOption" in item) && !("explanation" in item));
+});
+
+test("equal choice totals retain different listening, reading, speaking and writing evidence through teacher review", async (t) => {
+  const f = await fixture(t);
+  assert.deepEqual((await f.profile(f.actors.student)).evidence, []);
+  const audio = await f.uploadMedia(f.actors.admin, "audio");
+  const reading = await f.act(f.actors.admin, "upsert_diagnostic_item", { objectiveId: f.goals[1], level: "B1", prompt: "阅读菜谱，选择主要食材。", options: ["鸡蛋", "番茄", "土豆", "米饭"], correctOption: 0 }, 201);
+  const listening = await f.act(f.actors.admin, "upsert_diagnostic_item", { objectiveId: f.goals[1], level: "B1", prompt: "听完录音，选择先做的步骤。", options: ["洗菜", "切菜", "炒菜", "盛菜"], correctOption: 0, ability: "listening", mediaId: audio.id }, 201);
+  const resultA = await f.act(f.actors.student, "submit_diagnostic", { level: "B1", answers: [{ itemId: reading.id, selectedOption: 1, revision: 1 }, { itemId: listening.id, selectedOption: 0, revision: 1 }] }, 201);
+  const resultB = await f.act(f.actors.stranger, "submit_diagnostic", { level: "B1", answers: [{ itemId: reading.id, selectedOption: 0, revision: 1 }, { itemId: listening.id, selectedOption: 1, revision: 1 }] }, 201);
+  assert.equal(resultA.score, 0.5); assert.equal(resultB.score, 0.5);
+  const speaking = await diagnosticTask(f, "speaking");
+  const writing = await diagnosticTask(f, "writing", f.goals[2]);
+  const oralA = await f.upload(f.actors.student, { assignmentId: speaking.id });
+  const oralB = await f.upload(f.actors.stranger, { assignmentId: speaking.id });
+  const writtenA = await f.act(f.actors.student, "submit_text", { assignmentId: writing.id, answer: "我推荐番茄炒蛋，因为简单又好吃。" }, 201);
+  const writtenB = await f.act(f.actors.stranger, "submit_text", { assignmentId: writing.id, answer: "先洗净番茄，再切块，最后和鸡蛋一起炒。" }, 201);
+  let profile = await f.profile(f.actors.student);
+  assert.equal(profile.evidence.filter((item) => item.status === "pending").length, 2);
+  assert.deepEqual(profile.evidence.find((item) => item.id === oralA.id).scores, []);
+  for (const [id, goal, score] of [[oralA.id, f.goals[0], 90], [oralB.id, f.goals[0], 30], [writtenA.id, f.goals[2], 45], [writtenB.id, f.goals[2], 85]]) {
+    await f.act(f.actors.teacher, "confirm_submission_review", f.review(id, { score: 77, objectiveScores: [{ objectiveId: goal, score }], dimensionScores: [{ name: "语言表达", score }], comment: "本次评价已按目标分别记录。" }));
+  }
+  profile = await f.profile(f.actors.student);
+  const other = await f.profile(f.actors.stranger, f.ids.stranger);
+  const scoreFor = (data, ability) => data.evidence.find((item) => item.ability === ability && item.status === "assessed").scores[0].score;
+  assert.deepEqual(["listening", "speaking", "reading", "writing"].map((ability) => scoreFor(profile, ability)), [100, 90, 0, 45]);
+  assert.deepEqual(["listening", "speaking", "reading", "writing"].map((ability) => scoreFor(other, ability)), [0, 30, 100, 85]);
+  const oral = profile.evidence.find((item) => item.id === oralA.id);
+  assert.equal(oral.reviewer, "teacher"); assert.ok(oral.measuredAt); assert.equal(oral.hasAudio, true);
+  assert.equal(oral.mediaId, speaking.mediaId); assert.equal(oral.dimensions[0].score, 90);
+  assert.equal((await f.readAudio(f.actors.guardian, oralA.id)).status, 200);
+  assert.equal(profile.evidence.find((item) => item.id === writtenA.id).textAnswer, "我推荐番茄炒蛋，因为简单又好吃。");
+  const repeat = await f.upload(f.actors.student, { assignmentId: speaking.id });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(repeat.id));
+  const unassessed = (await f.profile(f.actors.student)).evidence.find((item) => item.id === repeat.id);
+  assert.equal(unassessed.status, "unassessed"); assert.equal(unassessed.evidenceCount, 0); assert.deepEqual(unassessed.scores, []);
+});
+
+test("evidence is immutable after content edits, scoped to the learner, and does not invent legacy snapshots", async (t) => {
+  const f = await fixture(t);
+  const media = await f.uploadMedia(f.actors.admin, "audio");
+  const original = { objectiveId: f.goals[1], level: "B1", prompt: "原始听力问题", options: ["原答案甲", "原答案乙", "原答案丙", "原答案丁"], correctOption: 0, ability: "listening", mediaId: media.id };
+  const question = await f.act(f.actors.admin, "upsert_diagnostic_item", original, 201);
+  const attempt = await f.act(f.actors.student, "submit_diagnostic", { level: "B1", answers: [{ itemId: question.id, selectedOption: 0, revision: 1 }] }, 201);
+  await f.act(f.actors.admin, "upsert_diagnostic_item", { ...original, id: question.id, prompt: "已编辑的题目", options: ["新甲", "新乙", "新丙", "新丁"], correctOption: 2, status: "inactive" });
+  const task = await diagnosticTask(f, "writing", f.goals[2]);
+  const work = await f.act(f.actors.student, "submit_text", { assignmentId: task.id, answer: "原始文字作品" }, 201);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: f.goals[2], score: 60 }] }));
+  await f.db.prepare("UPDATE assignments SET title='修改后任务',diagnostic_prompt='修改后要求' WHERE id=?").bind(task.id).run();
+  const profile = await f.profile(f.actors.student);
+  assert.equal(profile.evidence.find((item) => item.kind === "choice").answers[0].prompt, "原始听力问题");
+  assert.equal(profile.evidence.find((item) => item.kind === "choice").answers[0].selected, "原答案甲");
+  assert.equal(profile.evidence.find((item) => item.id === work.id).title, task.input.title);
+  assert.equal(profile.evidence.find((item) => item.id === work.id).prompt, task.input.diagnosticPrompt);
+  assert.equal((await f.readMedia(f.actors.student, media.id)).status, 200);
+  for (const actor of ["teacher", "guardian", "admin"]) assert.equal((await f.profile(f.actors[actor])).student.id, f.ids.student);
+  for (const actor of ["stranger", "otherTeacher", "otherGuardian", "otherTenant"]) await f.profile(f.actors[actor], f.ids.student, 404);
+  await f.profile(null, f.ids.student, 401);
+  await f.db.prepare("INSERT INTO diagnostic_answers (id,tenant_id,attempt_id,item_id,selected_option,is_correct) VALUES ('legacy',?,?,?,0,1)")
+    .bind(f.tenantId, attempt.attemptId, "legacy-item").run();
+  assert.equal((await f.profile(f.actors.student)).legacyAnswerCount, 1);
+  await f.db.prepare("UPDATE guardian_student_links SET status='disabled' WHERE guardian_user_id=?").bind(f.ids.guardian).run();
+  await f.profile(f.actors.guardian, f.ids.student, 404);
+  assert.equal((await f.readMedia(f.actors.guardian, media.id)).status, 404);
+});
+
+test("stale papers are rejected without grades and listening review retains scoped access to its current audio", async (t) => {
+  const f = await fixture(t);
+  const media = await f.uploadMedia(f.actors.admin, "audio");
+  const input = { objectiveId: f.goals[1], level: "B1", prompt: "旧听力问题", options: ["甲", "乙", "丙", "丁"], correctOption: 1, ability: "listening", mediaId: media.id };
+  const question = await f.act(f.actors.admin, "upsert_diagnostic_item", input, 201);
+  const seen = (await f.workspace(f.actors.student)).diagnosticItems.find((item) => item.id === question.id);
+  assert.equal(seen.revision, 1);
+  await f.act(f.actors.admin, "upsert_diagnostic_item", { ...input, id: question.id, prompt: "新听力问题", options: ["新甲", "新乙", "新丙", "新丁"] });
+  await f.act(f.actors.student, "submit_diagnostic", { level: "B1", answers: [{ itemId: question.id, selectedOption: 0, revision: seen.revision }] }, 400);
+  assert.deepEqual((await f.profile(f.actors.student)).evidence, []);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM diagnostic_attempts WHERE student_user_id=?").bind(f.ids.student).first()).count, 0);
+  await f.act(f.actors.student, "submit_diagnostic", { level: "B1", answers: [{ itemId: question.id, selectedOption: 0, revision: 2 }] }, 201);
+  const nextAudio = await f.uploadMedia(f.actors.admin, "audio");
+  await f.act(f.actors.admin, "upsert_diagnostic_item", { ...input, id: question.id, mediaId: nextAudio.id, status: "inactive" });
+  const review = (await f.workspace(f.actors.student)).recommendations.find((item) => item.source_id === question.id);
+  assert.equal(review.reviewAbility, "listening"); assert.equal(review.reviewMediaId, nextAudio.id);
+  assert.equal((await f.readMedia(f.actors.student, nextAudio.id)).status, 200);
+  assert.equal((await f.readMedia(f.actors.stranger, nextAudio.id)).status, 404);
+  assert.equal((await f.readMedia(f.actors.student, media.id)).status, 200);
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {
@@ -252,6 +399,8 @@ test("additive migration upgrades existing data and runtime initialization is re
     assert.ok(db.prepare("SELECT name FROM pragma_table_info('submissions') WHERE name='family_confirmed_at'").get());
     db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0006_learning_workflow_evidence.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0007_ability_evidence.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM pragma_table_info('submissions') WHERE name='diagnostic_snapshot_json'").get());
   } finally { db.close(); }
   const runtimeDb = new api.NodeSqliteDatabase("file::memory:");
   try { await api.ensurePlatformSchema(runtimeDb); await api.ensurePlatformSchema(runtimeDb); } finally { runtimeDb.close(); }

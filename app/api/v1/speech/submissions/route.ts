@@ -19,7 +19,8 @@ export async function POST(request: Request) {
       if (existing.studentUserId !== context.userId || existing.assignmentId !== assignmentId || existing.familyTaskId !== familyTaskId || !existing.assetKey) throw new Error("submission_id_conflict");
       return Response.json({ id, reviewStatus: existing.reviewStatus, message: "这份录音已保存，无需重复提交。" }, { status: 200 });
     }
-    await assertSubmissionTarget(context.db, context, { assignmentId, familyTaskId });
+    const target = await assertSubmissionTarget(context.db, context, { assignmentId, familyTaskId });
+    if (target.diagnosticMode === "writing") throw new Error("invalid_diagnostic_submission");
     const safeType = audio.type || "audio/webm";
     // 并发重传各自写入独立对象，不能覆盖另一请求已经关联的作品原件。
     const objectKey = `${context.tenantId}/submissions/${id}/${crypto.randomUUID()}.webm`;

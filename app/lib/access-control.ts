@@ -3,6 +3,23 @@ import type { PlatformContext } from "./platform-store";
 
 export type AccessClause = { sql: string; args: unknown[] };
 
+// 用于画像及历史诊断素材，权限取决于学生归属，不能只校验租户相同。
+export function studentAccessClause(context: PlatformContext, studentId: string, tenantId: string): AccessClause {
+  if (context.roles.includes("admin")) return { sql: "1=1", args: [] };
+  const clauses: string[] = [];
+  const args: unknown[] = [];
+  if (context.roles.includes("student")) { clauses.push(`${studentId}=?`); args.push(context.userId); }
+  if (context.roles.includes("guardian")) {
+    clauses.push(`EXISTS (SELECT 1 FROM guardian_student_links gl WHERE gl.tenant_id=${tenantId} AND gl.student_user_id=${studentId} AND gl.guardian_user_id=? AND gl.status='active')`);
+    args.push(context.userId);
+  }
+  if (context.roles.includes("teacher")) {
+    clauses.push(`EXISTS (SELECT 1 FROM enrollments e JOIN classes c ON c.id=e.class_id AND c.tenant_id=e.tenant_id WHERE e.tenant_id=${tenantId} AND e.student_user_id=${studentId} AND e.status='active' AND c.teacher_user_id=?)`);
+    args.push(context.userId);
+  }
+  return { sql: clauses.length ? `(${clauses.join(" OR ")})` : "1=0", args };
+}
+
 export function classAccessClause(context: PlatformContext, classAlias = "c"): AccessClause {
   if (context.roles.includes("admin")) return { sql: "1=1", args: [] };
   const clauses: string[] = [];

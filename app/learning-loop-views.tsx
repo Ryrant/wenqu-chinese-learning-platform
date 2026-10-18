@@ -4,6 +4,7 @@ import { useState } from "react";
 import { isRecommendationDue } from "./lib/learning-loop";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { FAMILY_HELP_LABELS, numberValue, stringValue } from "./lib/platform-types";
+import { DiagnosticMediaInput, DiagnosticStimulus } from "./diagnostic-evidence";
 
 type LoopProps = { data: WorkspaceData; act: Act; notify: Notify };
 
@@ -34,30 +35,30 @@ function fullDateLabel(value: unknown) {
   });
 }
 
-export function StudentDiagnostic({ data, act, notify }: LoopProps) {
+export function StudentDiagnostic({ data, act, notify, onStartAssignment }: LoopProps & { onStartAssignment?: (id: string) => void }) {
   const levels = [...new Set(data.diagnosticItems.map((item) => stringValue(item.level, "A2")))];
   const [selectedLevel, setSelectedLevel] = useState(levels[0] ?? "A2");
   const items = data.diagnosticItems.filter((item) => stringValue(item.level, "A2") === selectedLevel);
-  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [answers, setAnswers] = useState<Record<string, { selectedOption: number; revision: number }>>({});
   const [busy, setBusy] = useState(false);
   const level = selectedLevel;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (Object.keys(answers).length !== items.length) {
-      notify("还有题目未完成", "请回答全部四选一题目后再提交。", "error");
+    if (!items.every((item) => answers[String(item.id)]?.revision === Number(item.revision))) {
+      notify("还有题目未完成或已更新", "请按当前题面回答全部四选一题目后再提交。", "error");
       return;
     }
     setBusy(true);
     try {
       const result = await act("submit_diagnostic", {
         level,
-        answers: items.map((item) => ({ itemId: String(item.id), selectedOption: answers[String(item.id)] })),
+        answers: items.map((item) => ({ itemId: String(item.id), ...answers[String(item.id)] })),
       });
       setAnswers({});
       notify("诊断已完成", `本次正确率 ${Math.round(numberValue(result.score) * 100)}%，错题已加入复习中心。`);
     } catch (reason) {
-      notify("诊断提交失败", reason instanceof Error ? reason.message : "请稍后重试", "error");
+      notify("诊断提交失败", reason instanceof Error && reason.message === "invalid_diagnostic_revision" ? "题目在作答期间已更新，请刷新页面后重新作答；本次未生成成绩。" : reason instanceof Error ? reason.message : "请稍后重试", "error");
     } finally {
       setBusy(false);
     }
@@ -68,10 +69,10 @@ export function StudentDiagnostic({ data, act, notify }: LoopProps) {
       <div><span className="eyebrow">不依赖外部模型</span><h3>客观题入学诊断</h3></div>
       {data.diagnosticSummary && <span className="score-pill">最近 {Math.round(numberValue(data.diagnosticSummary.score) * 100)}%</span>}
     </div>
-    <p>按学习目标计算正确率，提交后更新掌握度并自动生成错题复习。</p>
+    <p>选择题记录阅读或听力表现；口述与短文表达由教师评价，不能用选择题总分代替。</p>
     {levels.length > 1 && <label className="diagnostic-level">
       诊断级别
-      <select value={selectedLevel} onChange={(event) => {
+      <select value={selectedLevel} disabled={busy} onChange={(event) => {
         setSelectedLevel(event.target.value);
         setAnswers({});
       }}>
@@ -82,16 +83,24 @@ export function StudentDiagnostic({ data, act, notify }: LoopProps) {
       {items.map((item, index) => {
         const id = String(item.id);
         const options = optionsFrom(item.optionsJson ?? item.options_json);
+        const mediaId = item.mediaId ?? item.media_id;
         return <fieldset key={id}>
           <legend><b>{index + 1}.</b> {stringValue(item.prompt)} <small>{stringValue(item.objectiveTitle)}</small></legend>
+          {item.ability === "listening" && !!mediaId && <DiagnosticStimulus id={String(mediaId)} kind="audio"/>}
           <div className="option-grid">{options.map((option, optionIndex) => <label key={option}>
-            <input type="radio" name={`diagnostic-${id}`} checked={answers[id] === optionIndex} onChange={() => setAnswers({ ...answers, [id]: optionIndex })}/>
+            <input type="radio" name={`diagnostic-${id}`} disabled={busy} checked={answers[id]?.revision === Number(item.revision) && answers[id]?.selectedOption === optionIndex} onChange={() => setAnswers({ ...answers, [id]: { selectedOption: optionIndex, revision: Number(item.revision) } })}/>
             <span>{String.fromCharCode(65 + optionIndex)}. {option}</span>
           </label>)}</div>
         </fieldset>;
       })}
       <button className="primary-button" disabled={busy}>{busy ? "正在提交…" : "提交诊断"}</button>
     </form> : <p className="empty-state">机构尚未发布当前级别的诊断题。</p>}
+    <h4>口述与短文诊断</h4>
+    {data.assignments.filter((item) => item.status === "published" && item.diagnostic_mode).map((item) => <div className="history-row" key={String(item.id)}>
+      <div><strong>{stringValue(item.title)}</strong><small>{item.diagnostic_mode === "speaking" ? "图片口述 · 提交录音" : "短文表达 · 提交文字"} · 教师评价</small></div>
+      {onStartAssignment && <button className="soft-button" type="button" onClick={() => onStartAssignment(String(item.id))}>进入诊断任务</button>}
+    </div>)}
+    {!data.assignments.some((item) => item.status === "published" && item.diagnostic_mode) && <p className="empty-state">老师发布图片口述或短文诊断后，可在此进入。没有作品的能力保持待评估。</p>}
   </section>;
 }
 
@@ -159,6 +168,7 @@ export function StudentReviewCenter({ data, act, notify }: LoopProps) {
       return <div className="review-card" key={id}>
         <strong>{stringValue(item.reviewPrompt, stringValue(item.title))}</strong>
         <small>{stringValue(item.objectiveTitle)} · {dueLabel(item.due_at)}</small>
+        {item.reviewAbility === "listening" && !!item.reviewMediaId && <DiagnosticStimulus id={String(item.reviewMediaId)} kind="audio"/>}
         <div className="option-grid">{options.map((option, index) => <label key={option}>
           <input type="radio" name={`review-${id}`} checked={answers[id] === index} onChange={() => setAnswers({ ...answers, [id]: index })}/>
           <span>{String.fromCharCode(65 + index)}. {option}</span>
@@ -175,7 +185,12 @@ export function TeacherAssignmentCreator({ data, act, notify }: LoopProps) {
   const [objectiveId, setObjectiveId] = useState(String(data.learningObjectives.find((item) => item.status !== "inactive")?.id ?? ""));
   const [dueAt, setDueAt] = useState("");
   const [busy, setBusy] = useState(false);
-  const rubric = [
+  const [diagnosticMode, setDiagnosticMode] = useState("");
+  const [diagnosticPrompt, setDiagnosticPrompt] = useState("");
+  const [diagnosticMediaId, setDiagnosticMediaId] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [publishingId, setPublishingId] = useState("");
+  const rubric = diagnosticMode ? [{ name: "任务完成", weight: 40 }, { name: "表达清晰", weight: 35 }, { name: "组织条理", weight: 25 }] : [
     { name: "内容准确性", weight: 40 },
     { name: "语言表达", weight: 35 },
     { name: "文化理解", weight: 25 },
@@ -192,8 +207,10 @@ export function TeacherAssignmentCreator({ data, act, notify }: LoopProps) {
         objectiveIds: [objectiveId],
         rubric,
         dueAt: dueAt || null,
+        diagnosticMode, diagnosticPrompt, diagnosticMediaId,
       });
       setTitle("");
+      setDiagnosticPrompt(""); setDiagnosticMediaId("");
       notify("目标任务草稿已创建", "任务关联了学习目标和三维评分量规，可审核后发布。");
     } catch (reason) {
       notify("创建失败", reason instanceof Error ? reason.message : "请重试", "error");
@@ -202,16 +219,31 @@ export function TeacherAssignmentCreator({ data, act, notify }: LoopProps) {
     }
   }
 
-  return <form className="panel form-card" onSubmit={submit}>
+  return <section className="loop-section"><form className="panel form-card" onSubmit={submit}>
     <div><span className="eyebrow">目标对齐 · 三维量规</span><h3>目标与评分量规任务</h3></div>
+    <fieldset className="diagnostic-form-fields" disabled={busy || uploading}>
     <label>任务名称<input value={title} onChange={(event) => setTitle(event.target.value)} required/></label>
     <label>班级<select value={classId} onChange={(event) => setClassId(event.target.value)} required>{data.classes.map((item) => <option key={String(item.id)} value={String(item.id)}>{stringValue(item.name)}</option>)}</select></label>
     <label>学习目标<select value={objectiveId} onChange={(event) => setObjectiveId(event.target.value)} required>{data.learningObjectives.filter((item) => item.status !== "inactive").map((item) => <option key={String(item.id)} value={String(item.id)}>{stringValue(item.code)} · {stringValue(item.title)}</option>)}</select></label>
+    <label>任务用途<select value={diagnosticMode} disabled={busy || uploading} onChange={(event) => { setDiagnosticMode(event.target.value); setDiagnosticMediaId(""); }}><option value="">普通学习任务</option><option value="speaking">图片口述诊断</option><option value="writing">短文表达诊断</option></select></label>
+    {diagnosticMode && <><label>诊断要求<textarea value={diagnosticPrompt} disabled={busy} onChange={(event) => setDiagnosticPrompt(event.target.value)} required maxLength={2000} placeholder="说明观察什么、需要完成什么，以及可以使用的帮助。"/></label>
+      <DiagnosticMediaInput kind="image" value={diagnosticMediaId} onChange={setDiagnosticMediaId} uploading={uploading} setUploading={setUploading} notify={notify} disabled={busy}/>
+      <small>{diagnosticMode === "speaking" ? "图片口述必须提供图片，学生提交录音。" : "短文表达提交文字；图片可选。"}每个目标由教师独立评价。</small></>}
     <label>截止时间<input type="datetime-local" value={dueAt} onChange={(event) => setDueAt(event.target.value)}/></label>
     <div className="rubric-list">{rubric.map((item) => <span key={item.name}><b>{item.name}</b>{item.weight}%</span>)}</div>
     <small>固定 3 个维度，权重合计 100%。</small>
-    <button className="primary-button" disabled={busy || !classId || !objectiveId}>{busy ? "保存中…" : "保存任务草稿"}</button>
-  </form>;
+    </fieldset>
+    <button className="primary-button" disabled={busy || uploading || !classId || !objectiveId || (diagnosticMode === "speaking" && !diagnosticMediaId)}>{busy ? "保存中…" : "保存任务草稿"}</button>
+  </form><article className="panel"><h3>本班任务与发布</h3>{data.assignments.filter((item) => item.class_id === classId).map((item) => <div className="assignment-publish-row" key={String(item.id)}>
+    <strong>{stringValue(item.title)}</strong>{!!item.diagnostic_prompt && <p>{String(item.diagnostic_prompt)}</p>}
+    {!!item.diagnostic_media_id && <DiagnosticStimulus id={String(item.diagnostic_media_id)} kind="image"/>}
+    {item.status === "published" ? <span className="status published">已发布</span> : item.status === "draft" || item.status === "review" ? <button className="soft-button" type="button" disabled={!!publishingId} onClick={async () => {
+      setPublishingId(String(item.id));
+      try { await act("publish_assignment", { id: item.id }); notify("任务已发布", "学生可以进入诊断并提交作品。"); }
+      catch (reason) { notify("发布失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+      finally { setPublishingId(""); }
+    }}>{publishingId === item.id ? "发布中…" : "审核并发布"}</button> : <span>{stringValue(item.status)}</span>}
+  </div>)}{!data.assignments.some((item) => item.class_id === classId) && <p className="empty-state">当前班级还没有任务。</p>}</article></section>;
 }
 
 export function TeacherMasteryHeatmap({ data }: Pick<LoopProps, "data">) {
@@ -378,6 +410,11 @@ export function AdminObjectiveLibrary({ data, act, notify }: LoopProps) {
   const [options, setOptions] = useState(["", "", "", ""]);
   const [correctOption, setCorrectOption] = useState(0);
   const [explanation, setExplanation] = useState("");
+  const [ability, setAbility] = useState("reading");
+  const [mediaId, setMediaId] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [savingQuestion, setSavingQuestion] = useState(false);
+  const [questionLevel, setQuestionLevel] = useState("A2");
 
   async function saveObjective(event: React.FormEvent) {
     event.preventDefault();
@@ -393,13 +430,15 @@ export function AdminObjectiveLibrary({ data, act, notify }: LoopProps) {
 
   async function saveQuestion(event: React.FormEvent) {
     event.preventDefault();
+    setSavingQuestion(true);
     try {
-      await act("upsert_diagnostic_item", { objectiveId, level, prompt, options, correctOption, explanation, status: "active" });
+      await act("upsert_diagnostic_item", { objectiveId, level: questionLevel, prompt, options, correctOption, explanation, ability, mediaId, status: "active" });
       setPrompt(""); setOptions(["", "", "", ""]); setExplanation("");
+      setMediaId("");
       notify("诊断题已保存", "四选一题目已加入学生入学诊断。");
     } catch (reason) {
       notify("题目保存失败", reason instanceof Error ? reason.message : "请重试", "error");
-    }
+    } finally { setSavingQuestion(false); }
   }
 
   return <section className="loop-section">
@@ -415,12 +454,17 @@ export function AdminObjectiveLibrary({ data, act, notify }: LoopProps) {
       </form>
       <form className="panel form-card" onSubmit={saveQuestion}>
         <h3>新增四选一诊断题</h3>
+        <fieldset className="diagnostic-form-fields" disabled={uploading || savingQuestion}>
+        <label>诊断能力<select value={ability} disabled={uploading || savingQuestion} onChange={(event) => { setAbility(event.target.value); setMediaId(""); }}><option value="reading">阅读理解</option><option value="listening">听力理解</option></select></label>
+        <label>题目级别<select value={questionLevel} onChange={(event) => setQuestionLevel(event.target.value)}><option>A1</option><option>A2</option><option>B1</option><option>B2</option></select></label>
+        {ability === "listening" && <DiagnosticMediaInput kind="audio" value={mediaId} onChange={setMediaId} uploading={uploading} setUploading={setUploading} notify={notify} disabled={savingQuestion}/>}
         <label>关联目标<select value={objectiveId} onChange={(event) => setObjectiveId(event.target.value)} required><option value="">请选择</option>{data.learningObjectives.map((item) => <option value={String(item.id)} key={String(item.id)}>{stringValue(item.code)} · {stringValue(item.title)}</option>)}</select></label>
         <label>题干<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} required maxLength={500}/></label>
         {options.map((option, index) => <label key={index}>选项 {String.fromCharCode(65 + index)}<input value={option} onChange={(event) => setOptions(options.map((value, optionIndex) => optionIndex === index ? event.target.value : value))} required/></label>)}
         <label>正确选项<select value={correctOption} onChange={(event) => setCorrectOption(Number(event.target.value))}>{options.map((_, index) => <option value={index} key={index}>{String.fromCharCode(65 + index)}</option>)}</select></label>
         <label>解析<textarea value={explanation} onChange={(event) => setExplanation(event.target.value)} maxLength={1000}/></label>
-        <button className="primary-button" disabled={!objectiveId}>保存诊断题</button>
+        </fieldset>
+        <button className="primary-button" disabled={!objectiveId || savingQuestion || uploading || (ability === "listening" && !mediaId)}>{savingQuestion ? "正在保存…" : "保存诊断题"}</button>
       </form>
     </section>
     <article className="panel"><h3>题库概览</h3>{data.diagnosticItems.length ? data.diagnosticItems.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{stringValue(item.prompt)}</strong><small>{stringValue(item.objectiveTitle)} · {stringValue(item.level)} · {stringValue(item.status)}</small></div><span className="status published">四选一</span></div>) : <p className="empty-state">题库为空，请先新增课程目标和诊断题。</p>}</article>

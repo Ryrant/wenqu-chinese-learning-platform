@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { StudentDiagnostic, StudentReviewCenter, StudentTodayPlan } from "./learning-loop-views";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { numberValue, stringValue } from "./lib/platform-types";
+import { AbilityEvidenceProfile, DiagnosticStimulus } from "./diagnostic-evidence";
 
 export function ProgressRing({ value, label }: { value: number; label: string }) {
   return <div className="progress-ring" style={{ "--progress": `${value * 3.6}deg` } as React.CSSProperties}>
@@ -24,7 +25,9 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
   const [busy, setBusy] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(String(data.assignments.find((item) => item.status === "published")?.id ?? ""));
-  const [textAnswer, setTextAnswer] = useState("");
+  const [textDrafts, setTextDrafts] = useState<Record<string, string>>({});
+  const textAnswer = textDrafts[selectedAssignment] ?? "";
+  const setTextAnswer = (value: string) => setTextDrafts((drafts) => ({ ...drafts, [selectedAssignment]: value }));
   const [recording, setRecording] = useState(false);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingDraft, setRecordingDraft] = useState<RecordingDraft | null>(null);
@@ -36,7 +39,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const familyTask = familyTasks.find((item) => `family:${item.id}` === selectedAssignment);
   const assignmentId = familyTask ? String(familyTask.assignment_id) : selectedAssignment.startsWith("family:") ? "" : selectedAssignment;
   const assignment = published.find((item) => item.id === assignmentId);
-  const targetSelector = <label>提交任务<select value={selectedAssignment} onChange={(event) => setSelectedAssignment(event.target.value)} required disabled={recording || recordingBusy}>
+  const targetSelector = <label>提交任务<select value={selectedAssignment} onChange={(event) => setSelectedAssignment(event.target.value)} required disabled={recording || recordingBusy || busy}>
     <option value="">请选择任务</option>{published.map((item) => <option value={String(item.id)} key={String(item.id)}>{stringValue(item.title)}</option>)}
     {familyTasks.map((item) => <option value={`family:${item.id}`} key={`family:${item.id}`}>家庭：{stringValue(item.title)}</option>)}
   </select></label>;
@@ -178,7 +181,8 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
 
   const recordingControls = <div className="recording-controls">
     <div className="hero-actions"><button className="soft-button" type="button" onClick={speak} disabled={!assignment}>听任务标题</button>
-      <button className={`soft-button ${recording ? "danger-button" : ""}`} type="button" onClick={toggleRecording} disabled={(!assignment && !recording) || recordingBusy}>{recording ? "停止录音并试听" : recordingDraft ? "重新录音" : "开始录音"}</button></div>
+      <button className={`soft-button ${recording ? "danger-button" : ""}`} type="button" onClick={toggleRecording} disabled={(!assignment && !recording) || recordingBusy || (!recording && assignment?.diagnostic_mode === "writing")}>{recording ? "停止录音并试听" : recordingDraft ? "重新录音" : "开始录音"}</button></div>
+    {assignment?.diagnostic_mode === "writing" && <p>这是短文表达诊断，请在学习任务中提交文字。</p>}
     {recordingDraft && <div className="recording-preview"><p>提交到：{recordingDraft.title}</p><audio controls src={recordingDraft.url} aria-label="录音试听"/><button className="primary-button" type="button" disabled={recordingBusy} onClick={uploadRecording}>{recordingBusy ? "正在提交…" : "提交录音给老师"}</button></div>}
   </div>;
 
@@ -200,22 +204,32 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
 
   if (nav === "学习任务") return <section>
     <PageTitle eyebrow="诊断与真实作业提交" title="我的学习任务" detail={`${published.length} 项已发布任务；提交后进入教师审核。`}/>
-    <StudentDiagnostic data={data} act={act} notify={notify}/>
+    <StudentDiagnostic data={data} act={act} notify={notify} onStartAssignment={(id) => {
+      if (recording || recordingBusy || busy) return notify("请先完成当前提交", "处理当前作品后再切换任务。", "error");
+      setSelectedAssignment(id);
+      document.getElementById("student-submission")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }}/>
     <div className="cards-list">{published.map((item) => <article className="panel task-card" key={String(item.id)}>
       <span className="status published">进行中</span><h3>{stringValue(item.title)}</h3>
       <p>{stringValue(item.activity_type)} · 截止 {stringValue(item.due_at)}</p>
     </article>)}</div>
+    <section id="student-submission">
+    {!!assignment?.diagnostic_mode && <article className="panel diagnostic-task-prompt"><h3>{assignment.diagnostic_mode === "speaking" ? "图片口述诊断" : "短文表达诊断"}：{stringValue(assignment.title)}</h3><p>{stringValue(assignment.diagnostic_prompt)}</p>
+      {!!assignment.diagnostic_media_id && <DiagnosticStimulus id={String(assignment.diagnostic_media_id)} kind="image"/>}
+      <p>完成后提交{assignment.diagnostic_mode === "speaking" ? "录音" : "文字"}，由教师按学习目标评价。</p></article>}
     <form className="panel form-card" onSubmit={submitText}>
       <h3>提交文字作业</h3>
       {targetSelector}
-      <label>我的回答<textarea value={textAnswer} onChange={(event) => setTextAnswer(event.target.value)} placeholder="写下你的完整句子或小故事" required maxLength={10000}/></label>
-      <button className="primary-button" disabled={busy || !assignment}>提交给老师审核</button>
+      <label>我的回答<textarea value={textAnswer} onChange={(event) => setTextAnswer(event.target.value)} disabled={busy || assignment?.diagnostic_mode === "speaking"} placeholder={assignment?.diagnostic_mode === "speaking" ? "图片口述请使用下方录音提交。" : "写下你的完整句子或小故事"} required maxLength={10000}/></label>
+      <button className="primary-button" disabled={busy || !assignment || assignment.diagnostic_mode === "speaking"}>提交给老师审核</button>
     </form>
     <article className="panel form-card"><h3>提交录音作品</h3>{recordingControls}</article>
+    </section>
   </section>;
 
   if (nav === "成长档案") return <section>
     <PageTitle eyebrow="来自掌握度快照与作业记录" title="成长档案" detail="每一项都能追溯到真实学习证据。"/>
+    <AbilityEvidenceProfile studentId={data.user.id} revision={data.generatedAt}/>
     <StudentReviewCenter data={data} act={act} notify={notify}/>
     <section className="metric-grid">{data.mastery.map((item) => <article className="metric-card" key={String(item.objectiveId ?? item.skill)}>
       <span>{stringValue(item.skill)}</span><strong>{Math.round(numberValue(item.mastery) * 100)}</strong><small>{numberValue(item.evidenceCount)} 条学习证据</small>
@@ -237,10 +251,10 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       <div className="hero-copy">
         <span className="tag">正在学习 · {stringValue(current?.activity_type, "等待教师发布任务")}</span>
         <h2>{stringValue(current?.title, "新的学习任务")}</h2>
-        <p>录音后可以试听和重录，确认后提交给老师。</p>
+        <p>{current?.diagnostic_mode ? "先查看完整诊断要求，再提交作品给教师评价。" : "录音后可以试听和重录，确认后提交给老师。"}</p>
         <div className="lesson-meta"><span>建议 12 分钟</span><i/><span>{data.submissions.length} 次提交</span></div>
         {targetSelector}
-        {recordingControls}
+        {current?.diagnostic_mode ? <button className="primary-button" type="button" onClick={() => navigate("学习任务")}>查看诊断要求并作答</button> : recordingControls}
       </div>
       <div className="hero-art" aria-label="中秋团圆主题插画"><span className="sun-disc">圆</span><span className="roof roof-back"/><span className="roof roof-front"/><span className="lantern lantern-a">福</span><span className="lantern lantern-b">乐</span><span className="hill hill-a"/><span className="hill hill-b"/><span className="person person-a">小</span><span className="person person-b">语</span></div>
     </section>

@@ -1,8 +1,10 @@
 import { blendMastery, calculateDiagnosticScores, isRecommendationDue, matchesDiagnosticItemSet } from "./learning-loop";
 import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
+import { assertDiagnosticMedia } from "./diagnostic-media";
+import type { ChoiceSnapshot } from "./diagnostic-types";
 
-type DiagnosticAnswerInput = { itemId: string; selectedOption: number };
+type DiagnosticAnswerInput = { itemId: string; selectedOption: number; revision: number };
 type RecommendationSource = "diagnostic" | "teacher" | "family" | "system";
 
 const tomorrowIso = () => new Date(Date.now() + 86400000).toISOString();
@@ -79,16 +81,19 @@ export async function submitDiagnostic(db: PlatformDatabase, context: PlatformCo
     throw new Error("invalid_diagnostic_answers");
   }
   const rows = await db.prepare(`WITH ranked AS (
-      SELECT id,objective_id,prompt,correct_option,
+      SELECT id,objective_id,prompt,correct_option,options_json,ability,media_id,revision,
         ROW_NUMBER() OVER (ORDER BY sort_order,created_at,id) AS rn
       FROM diagnostic_items WHERE tenant_id=? AND level=? AND status='active'
-    ) SELECT id,objective_id AS objectiveId,prompt,correct_option AS correctOption
-      FROM ranked WHERE rn<=30 ORDER BY rn`)
-    .bind(context.tenantId, input.level)
-    .all<{ id: string; objectiveId: string; prompt: string; correctOption: number }>();
+    ) SELECT r.id,r.objective_id AS objectiveId,r.prompt,r.correct_option AS correctOption,
+        r.options_json AS optionsJson,r.ability,r.media_id AS mediaId,lo.title AS objectiveTitle,r.revision
+      FROM ranked r JOIN learning_objectives lo ON lo.id=r.objective_id AND lo.tenant_id=? WHERE rn<=30 ORDER BY rn`)
+    .bind(context.tenantId, input.level, context.tenantId)
+    .all<{ id: string; objectiveId: string; prompt: string; correctOption: number; optionsJson: string; ability: "listening" | "reading"; mediaId: string | null; objectiveTitle: string; revision: number }>();
   if (!rows.results.length || !matchesDiagnosticItemSet(rows.results.map((item) => item.id), [...unique.keys()])) {
     throw new Error("invalid_diagnostic_answers");
   }
+  // 题目 ID 不变也可能换题面；按学生实际作答的版本核验，不能把旧选择套到新选项。
+  if (rows.results.some((item) => unique.get(item.id)!.revision !== item.revision)) throw new Error("invalid_diagnostic_revision");
 
   const attemptId = crypto.randomUUID();
   const evidence = rows.results.map((item) => ({
@@ -101,8 +106,10 @@ export async function submitDiagnostic(db: PlatformDatabase, context: PlatformCo
       VALUES (?,?,?,?,?,'completed')`).bind(attemptId, context.tenantId, context.userId, input.level, score),
     ...rows.results.map((item) => {
       const selectedOption = unique.get(item.id)!.selectedOption;
-      return db.prepare(`INSERT INTO diagnostic_answers (id,tenant_id,attempt_id,item_id,selected_option,is_correct)
-        VALUES (?,?,?,?,?,?)`).bind(crypto.randomUUID(), context.tenantId, attemptId, item.id, selectedOption, selectedOption === Number(item.correctOption) ? 1 : 0);
+      const snapshot: ChoiceSnapshot = { version: 1, revision: item.revision, ability: item.ability, objectiveId: item.objectiveId, objectiveTitle: item.objectiveTitle,
+        prompt: item.prompt, options: JSON.parse(item.optionsJson), correctOption: Number(item.correctOption), mediaId: item.mediaId };
+      return db.prepare(`INSERT INTO diagnostic_answers (id,tenant_id,attempt_id,item_id,selected_option,is_correct,evidence_json)
+        VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), context.tenantId, attemptId, item.id, selectedOption, selectedOption === Number(item.correctOption) ? 1 : 0, JSON.stringify(snapshot));
     }),
   ]);
 
@@ -361,7 +368,13 @@ export async function upsertDiagnosticItem(db: PlatformDatabase, context: Platfo
   correctOption: number;
   explanation: string;
   status: "active" | "inactive";
+  ability?: string;
+  mediaId?: string | null;
 }) {
+  const ability = input.ability ?? "reading";
+  if (ability !== "reading" && ability !== "listening") throw new Error("invalid_diagnostic_ability");
+  if (ability === "listening" && !input.mediaId) throw new Error("invalid_diagnostic_media");
+  if (input.mediaId) await assertDiagnosticMedia(context, input.mediaId, "audio");
   if (input.options.length !== 4 || input.options.some((option) => !option.trim()) || new Set(input.options.map((option) => option.trim())).size !== 4) throw new Error("invalid_diagnostic_options");
   if (!Number.isInteger(input.correctOption) || input.correctOption < 0 || input.correctOption > 3) throw new Error("invalid_correct_option");
   const objective = await db.prepare("SELECT id FROM learning_objectives WHERE id=? AND tenant_id=?")
@@ -373,12 +386,12 @@ export async function upsertDiagnosticItem(db: PlatformDatabase, context: Platfo
   }
   const id = input.id || crypto.randomUUID();
   await db.prepare(`INSERT INTO diagnostic_items
-    (id,tenant_id,objective_id,level,prompt,options_json,correct_option,explanation,status,created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?)
+    (id,tenant_id,objective_id,level,prompt,options_json,correct_option,explanation,status,created_by,ability,media_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET objective_id=excluded.objective_id,level=excluded.level,prompt=excluded.prompt,
       options_json=excluded.options_json,correct_option=excluded.correct_option,explanation=excluded.explanation,
-      status=excluded.status WHERE tenant_id=excluded.tenant_id`)
-    .bind(id, context.tenantId, input.objectiveId, input.level, input.prompt, JSON.stringify(input.options.map((option) => option.trim())), input.correctOption, input.explanation, input.status, context.userId)
+      status=excluded.status,ability=excluded.ability,media_id=excluded.media_id,revision=diagnostic_items.revision+1 WHERE tenant_id=excluded.tenant_id`)
+    .bind(id, context.tenantId, input.objectiveId, input.level, input.prompt, JSON.stringify(input.options.map((option) => option.trim())), input.correctOption, input.explanation, input.status, context.userId, ability, ability === "listening" ? input.mediaId : null)
     .run();
   return { ...input, id };
 }

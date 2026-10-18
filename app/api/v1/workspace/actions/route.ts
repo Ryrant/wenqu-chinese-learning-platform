@@ -23,6 +23,7 @@ import { aiProviderSettings, loadPlatformSettings } from "../../../../lib/platfo
 import { platformApiError, platformContext, type PlatformRole } from "../../../../lib/platform-store";
 import { searchPublishedKnowledge } from "../../../../lib/retrieval";
 import { createStudentSubmission } from "../../../../lib/submission-service";
+import { assertDiagnosticMedia } from "../../../../lib/diagnostic-media";
 
 type ActionBody = { action?: string; [key: string]: unknown };
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -101,6 +102,8 @@ export async function POST(request: Request) {
         options,
         correctOption: number(body.correctOption, -1),
         explanation: text(body.explanation, 1000),
+        ability: body.ability === undefined ? "reading" : requireText(body.ability, "diagnostic_ability", 20),
+        mediaId: text(body.mediaId, 120) || null,
         status: body.status === "inactive" ? "inactive" : "active",
       });
       await audit(db, tenantId, userId, "diagnostic_item.saved", "diagnostic_item", result.id, { status: result.status });
@@ -137,8 +140,14 @@ export async function POST(request: Request) {
       if (objectives.results.length !== objectiveIds.length) throw new Error("invalid_objective_ids");
       const rubric = validateRubric(body.rubric);
       const dueAt = text(body.dueAt, 40) || null;
+      const diagnosticMode = text(body.diagnosticMode, 20);
+      if (!["", "speaking", "writing"].includes(diagnosticMode)) throw new Error("invalid_diagnostic_mode");
+      const diagnosticPrompt = diagnosticMode ? requireText(body.diagnosticPrompt, "diagnostic_prompt", 2000) : "";
+      const diagnosticMediaId = diagnosticMode ? text(body.diagnosticMediaId, 120) || null : null;
+      if (diagnosticMode === "speaking" && !diagnosticMediaId) throw new Error("invalid_diagnostic_media");
+      if (diagnosticMediaId) await assertDiagnosticMedia(context, diagnosticMediaId, "image");
       await db.batch([
-        db.prepare("INSERT INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,rubric_json,created_by) VALUES (?,?,?,?,?,'draft',?,?,?)").bind(id, tenantId, classId, title, activityType, dueAt, JSON.stringify(rubric), userId),
+        db.prepare("INSERT INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,rubric_json,created_by,diagnostic_mode,diagnostic_prompt,diagnostic_media_id) VALUES (?,?,?,?,?,'draft',?,?,?,?,?,?)").bind(id, tenantId, classId, title, activityType, dueAt, JSON.stringify(rubric), userId, diagnosticMode, diagnosticPrompt, diagnosticMediaId),
         ...objectiveIds.map((objectiveId) => db.prepare("INSERT INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,?)").bind(tenantId, id, objectiveId, 1 / objectiveIds.length)),
       ]);
       await audit(db, tenantId, userId, "assignment.created", "assignment", id, { title, objectiveIds, rubric });
@@ -233,7 +242,7 @@ export async function POST(request: Request) {
     if (action === "submit_diagnostic") {
       const answers = Array.isArray(body.answers) ? body.answers.map((value) => {
         const item = value && typeof value === "object" ? value as Record<string, unknown> : {};
-        return { itemId: text(item.itemId, 120), selectedOption: number(item.selectedOption, -1) };
+        return { itemId: text(item.itemId, 120), selectedOption: number(item.selectedOption, -1), revision: number(item.revision, -1) };
       }) : [];
       const result = await submitDiagnostic(db, context, { level: text(body.level, 20) || "A2", answers });
       await audit(db, tenantId, userId, "diagnostic.completed", "diagnostic_attempt", result.attemptId, { score: result.score, incorrectCount: result.incorrectCount });

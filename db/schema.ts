@@ -50,11 +50,13 @@ export const learningObjectives = sqliteTable("learning_objectives", {
 
 export const assignments = sqliteTable("assignments", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(), title: text("title").notNull(), activityType: text("activity_type").notNull(), status: text("status", { enum: ["draft", "review", "published", "closed"] }).notNull().default("draft"), dueAt: text("due_at"), rubricJson: text("rubric_json").notNull().default("[]"), createdBy: text("created_by").notNull(), publishedAt: text("published_at"), createdAt: createdAt(),
+  diagnosticMode: text("diagnostic_mode").notNull().default(""), diagnosticPrompt: text("diagnostic_prompt").notNull().default(""), diagnosticMediaId: text("diagnostic_media_id"),
 }, (table) => [index("assignments_tenant_idx").on(table.tenantId), index("assignments_class_idx").on(table.classId)]);
 
 export const submissions = sqliteTable("submissions", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), assignmentId: text("assignment_id").notNull(), studentUserId: text("student_user_id").notNull(), textAnswer: text("text_answer"), assetKey: text("asset_key"), score: real("score"), confidence: real("confidence"), reviewStatus: text("review_status").notNull().default("auto"), feedback: text("feedback"), reviewedAt: text("reviewed_at"), submittedAt: createdAt(),
   familyTaskId: text("family_task_id"), familyHelpLevel: text("family_help_level"), familyConfirmedAt: text("family_confirmed_at"),
+  diagnosticSnapshotJson: text("diagnostic_snapshot_json").notNull().default("{}"),
 }, (table) => [index("submissions_tenant_idx").on(table.tenantId), index("submissions_assignment_idx").on(table.assignmentId), uniqueIndex("family_submission_pending_idx").on(table.tenantId, table.familyTaskId).where(sql`${table.familyTaskId} IS NOT NULL AND ${table.reviewStatus}!='reviewed'`)]);
 
 export const submissionReviews = sqliteTable("submission_reviews", {
@@ -104,6 +106,9 @@ export const diagnosticItems = sqliteTable("diagnostic_items", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
   objectiveId: text("objective_id").notNull(),
+  ability: text("ability").notNull().default("reading"),
+  mediaId: text("media_id"),
+  revision: integer("revision").notNull().default(1),
   level: text("level").notNull(),
   prompt: text("prompt").notNull(),
   optionsJson: text("options_json").notNull(),
@@ -136,6 +141,7 @@ export const diagnosticAnswers = sqliteTable("diagnostic_answers", {
   itemId: text("item_id").notNull(),
   selectedOption: integer("selected_option").notNull(),
   isCorrect: integer("is_correct", { mode: "boolean" }).notNull(),
+  evidenceJson: text("evidence_json").notNull().default("{}"),
   createdAt: createdAt(),
 }, (table) => [
   index("diagnostic_answers_attempt_idx").on(table.tenantId, table.attemptId),
