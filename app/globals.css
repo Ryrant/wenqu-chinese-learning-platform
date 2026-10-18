@@ -2,6 +2,8 @@
 
 .ability-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
 .diagnostic-form-fields{display:grid;gap:16px;border:0;padding:0;margin:0;min-width:0}
+.support-evidence{min-width:0;margin-top:10px}.support-evidence summary{cursor:pointer;color:var(--green);padding:8px 0}.support-evidence .generated-copy{overflow-wrap:anywhere;font-size:var(--font-caption)}.plan-row>div{min-width:0}
+.plan-row:has(.support-evidence[open]){display:grid;grid-template-columns:28px minmax(0,1fr);align-items:start}.plan-row:has(.support-evidence[open])>button{grid-column:2;justify-self:start}
 .ability-card{min-width:0;border:1px solid var(--line);border-radius:14px;padding:20px;background:var(--card)}
 .ability-card h4{margin:0 0 10px}.ability-card summary{cursor:pointer;color:var(--green);padding:10px 0}
 .ability-evidence{padding:16px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.ability-evidence h5{font-size:var(--font-body);margin:0 0 8px}.ability-evidence small{display:block;color:var(--muted)}

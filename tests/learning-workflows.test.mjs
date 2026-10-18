@@ -390,6 +390,135 @@ test("stale papers are rejected without grades and listening review retains scop
   assert.equal((await f.readMedia(f.actors.student, media.id)).status, 200);
 });
 
+async function supportEvidence(f) {
+  const objectiveId = f.goals[1];
+  const audio = await f.uploadMedia(f.actors.admin, "audio");
+  const reading = await f.act(f.actors.admin, "upsert_diagnostic_item", { objectiveId, level: "B1", prompt: "阅读本单元短句。", options: ["甲", "乙", "丙", "丁"], correctOption: 0 }, 201);
+  const listening = await f.act(f.actors.admin, "upsert_diagnostic_item", { objectiveId: f.goals[0], level: "B1", prompt: "听录音选择内容。", options: ["甲", "乙", "丙", "丁"], correctOption: 0, ability: "listening", mediaId: audio.id }, 201);
+  const speaking = await diagnosticTask(f, "speaking", objectiveId);
+  for (let index = 0; index < 2; index++) {
+    const totals = [];
+    for (const [actor, choice, spoken] of [["student", 1, 90], ["stranger", 0, 30]]) {
+      const attempt = await f.act(f.actors[actor], "submit_diagnostic", { level: "B1", answers: [
+        { itemId: reading.id, selectedOption: choice, revision: 1 }, { itemId: listening.id, selectedOption: 1 - choice, revision: 1 },
+      ] }, 201);
+      totals.push(attempt.score);
+      const work = await f.upload(f.actors[actor], { assignmentId: speaking.id });
+      await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId, score: spoken }] }));
+    }
+    assert.deepEqual(totals, [0.5, 0.5]);
+  }
+  const suggest = async (actor = "student", teacher = "teacher", status = 200) =>
+    (await f.act(f.actors[teacher], "suggest_intervention", { studentUserId: f.ids[actor], objectiveId }, status)).suggestion;
+  return { objectiveId, speaking, reading, listening, suggest };
+}
+
+test("equal totals produce different teacher-confirmed support tasks from the same objective and retain the evidence in student plans", async (t) => {
+  const f = await fixture(t);
+  const s = await supportEvidence(f);
+  const count = async (table, where = "") => (await f.db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).first()).count;
+  const masteryBefore = await count("mastery_snapshots");
+  const before = await count("learning_recommendations", "WHERE source_type='teacher'");
+  const a = await s.suggest();
+  const b = await s.suggest("stranger");
+  assert.ok(a.ready && b.ready);
+  assert.deepEqual(a.supports, ["reading"]);
+  assert.deepEqual(b.supports, ["speaking"]);
+  assert.match(a.detail, /字词、短句配对/);
+  assert.match(b.detail, /关键词.*句首提示/);
+  assert.equal(a.measures.find((item) => item.ability === "listening").availableCount, 0, "another objective must not affect this support direction");
+  assert.equal(await count("learning_recommendations", "WHERE source_type='teacher'"), before, "preview must not publish");
+  const publish = (studentUserId, draft, extra = {}) => f.act(f.actors.teacher, "create_intervention", {
+    studentUserId, objectiveId: s.objectiveId, title: draft.title, detail: draft.detail, evidenceKey: draft.evidenceKey, ...extra,
+  }, 201);
+  const edited = `${a.detail}\n教师核对：先保留三个关键词提示。`;
+  const taskA = await publish(f.ids.student, a, { detail: edited, rationale: "伪造的依据不能写入" });
+  const taskB = await publish(f.ids.stranger, b);
+  const student = await f.workspace(f.actors.student);
+  const other = await f.workspace(f.actors.stranger);
+  const planA = student.learningPlan.find((item) => item.id === taskA.id);
+  const planB = other.learningPlan.find((item) => item.id === taskB.id);
+  assert.equal(planA.objective_id, planB.objective_id);
+  assert.notEqual(planA.title, planB.title);
+  assert.ok(planA.detail.startsWith(edited));
+  assert.ok(planA.detail.includes(a.rationale));
+  assert.ok(!planA.detail.includes("伪造的依据"));
+  assert.ok(!student.recommendations.some((item) => item.id === taskB.id));
+  assert.ok((await f.workspace(f.actors.guardian)).recommendations.some((item) => item.id === taskA.id && item.detail === planA.detail));
+  const repeat = await publish(f.ids.student, a, { title: "重复请求不得覆盖已发布任务" });
+  assert.equal(repeat.id, taskA.id); assert.equal(repeat.created, false);
+  assert.equal(await count("learning_recommendations", "WHERE source_type='teacher'"), before + 2);
+  await f.act(f.actors.student, "update_recommendation_status", { id: taskA.id, status: "completed" });
+  assert.equal((await f.workspace(f.actors.student)).learningPlan.some((item) => item.id === taskA.id), false);
+  assert.equal(await count("mastery_snapshots"), masteryBefore, "practice completion must not manufacture a grade");
+  assert.equal((await publish(f.ids.student, a)).status, "completed", "retry must not reopen completed work");
+});
+
+test("support drafts remain unassessed for missing, single, ungraded and helped evidence", async (t) => {
+  const f = await fixture(t);
+  const input = { studentUserId: f.ids.student, objectiveId: f.goals[1] };
+  const suggest = async () => (await f.act(f.actors.teacher, "suggest_intervention", input)).suggestion;
+  let draft = await suggest();
+  assert.equal(draft.ready, false); assert.equal(draft.evidenceKey, null); assert.equal(draft.detail, "");
+  const question = await f.act(f.actors.admin, "upsert_diagnostic_item", { objectiveId: input.objectiveId, level: "B1", prompt: "本目标阅读", options: ["甲", "乙", "丙", "丁"], correctOption: 0 }, 201);
+  const task = await diagnosticTask(f, "speaking", input.objectiveId);
+  for (let index = 0; index < 2; index++) {
+    await f.act(f.actors.student, "submit_diagnostic", { level: "B1", answers: [{ itemId: question.id, selectedOption: 0, revision: 1 }] }, 201);
+    const family = await f.act(f.actors.guardian, "create_family_task", { ...input, assignmentId: task.id, title: "有提示的口述", detail: "请提交录音并确认帮助程度。" }, 201);
+    const work = await f.upload(f.actors.student, { assignmentId: task.id, familyTaskId: family.id });
+    await f.act(f.actors.guardian, "confirm_family_submission", { submissionId: work.id, helpLevel: "prompted" });
+    await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: input.objectiveId, score: 90 }] }));
+    if (index === 0) {
+      draft = await suggest();
+      assert.equal(draft.measures.find((item) => item.ability === "reading").score, null);
+      assert.equal(draft.measures.find((item) => item.ability === "reading").availableCount, 1);
+    }
+  }
+  await f.upload(f.actors.student, { assignmentId: task.id });
+  const totalOnly = await f.upload(f.actors.student, { assignmentId: task.id });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(totalOnly.id));
+  draft = await suggest();
+  assert.equal(draft.ready, false);
+  assert.equal(draft.measures.find((item) => item.ability === "speaking").availableCount, 0);
+  await f.act(f.actors.teacher, "create_intervention", { ...input, title: "不得发布无依据草稿", detail: "测试", evidenceKey: "forged" }, 409);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM learning_recommendations WHERE source_type='teacher'").first()).count, 0);
+  await f.act(f.actors.teacher, "create_intervention", { ...input, title: "教师手动安排", detail: "人工判断需要补充口述诊断。" }, 201);
+});
+
+test("support evidence is revalidated on publish and cannot cross roles, students, classes or tenants", async (t) => {
+  const f = await fixture(t);
+  const s = await supportEvidence(f);
+  const sameSecond = "2026-10-18 10:00:00";
+  await f.db.prepare("UPDATE submissions SET reviewed_at=? WHERE tenant_id=? AND student_user_id=? AND review_status='reviewed'").bind(sameSecond, f.tenantId, f.ids.student).run();
+  await f.db.prepare("UPDATE diagnostic_attempts SET completed_at=? WHERE tenant_id=? AND student_user_id=?").bind(sameSecond, f.tenantId, f.ids.student).run();
+  const draft = await s.suggest();
+  for (const actor of ["student", "guardian", "otherGuardian"]) await s.suggest("student", actor, 403);
+  for (const actor of ["otherTeacher", "otherTenant"]) await s.suggest("student", actor, 404);
+  const publish = (extra = {}, expectedStatus = 409) => f.act(f.actors.teacher, "create_intervention", { studentUserId: f.ids.student, objectiveId: s.objectiveId, title: draft.title, detail: draft.detail, evidenceKey: draft.evidenceKey, ...extra }, expectedStatus);
+  await publish({ studentUserId: f.ids.stranger });
+  await publish({ detail: "" }, 400);
+  const work = await f.upload(f.actors.student, { assignmentId: s.speaking.id, id: "ffffffff-ffff-4fff-8fff-ffffffffffff" });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: s.objectiveId, score: 0 }] }));
+  await f.db.prepare("UPDATE submissions SET reviewed_at=? WHERE id=?").bind(sameSecond, work.id).run();
+  const attempt = await f.act(f.actors.student, "submit_diagnostic", { level: "B1", answers: [{ itemId: s.reading.id, selectedOption: 0, revision: 1 }, { itemId: s.listening.id, selectedOption: 0, revision: 1 }] }, 201);
+  await f.db.prepare("UPDATE diagnostic_attempts SET completed_at=? WHERE id=?").bind(sameSecond, attempt.attemptId).run();
+  await publish();
+  const latest = await s.suggest();
+  assert.notEqual(latest.evidenceKey, draft.evidenceKey);
+  assert.equal(latest.measures.find((item) => item.ability === "speaking").score, 45, "latest teacher confirmation must be used even within the same second");
+  const readLatest = latest.measures.find((item) => item.ability === "reading");
+  assert.equal(readLatest.score, 50);
+  assert.ok(readLatest.records.some((item) => item.id === `${attempt.attemptId}:reading`), "latest same-second attempt must replace an older record");
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM learning_recommendations WHERE source_type='teacher'").first()).count, 0);
+  const otherClass = await f.act(f.actors.otherTeacher, "create_class", { name: "另一班级", level: "A2" }, 201);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: otherClass.id, studentUserIds: [f.ids.student] });
+  const scoped = await s.suggest("student", "otherTeacher");
+  assert.equal(scoped.ready, false);
+  assert.equal(scoped.measures.find((item) => item.ability === "speaking").availableCount, 0);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: f.classroom.id, studentUserIds: [] });
+  await publish({}, 403);
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {

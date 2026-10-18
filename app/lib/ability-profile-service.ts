@@ -13,21 +13,21 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
   const submissions = submissionAccessClause(context, "s", "c");
   const [choices, works] = await Promise.all([
     db.prepare(`SELECT da.evidence_json AS snapshot,da.selected_option AS selectedOption,da.is_correct AS isCorrect,
-        dt.id AS attemptId,dt.level,dt.completed_at AS completedAt
+        dt.id AS attemptId,dt.level,dt.completed_at AS completedAt,dt.rowid AS sequence
       FROM diagnostic_answers da JOIN diagnostic_attempts dt ON dt.id=da.attempt_id AND dt.tenant_id=da.tenant_id
       WHERE da.tenant_id=? AND dt.student_user_id=? ORDER BY dt.completed_at DESC,dt.id,da.rowid`)
-      .bind(tenantId, studentId).all<{ snapshot: string; selectedOption: number; isCorrect: number; attemptId: string; level: string; completedAt: string }>(),
+      .bind(tenantId, studentId).all<{ snapshot: string; selectedOption: number; isCorrect: number; attemptId: string; level: string; completedAt: string; sequence: number }>(),
     db.prepare(`SELECT s.id,s.text_answer AS textAnswer,s.asset_key AS assetKey,s.review_status AS reviewStatus,
         s.created_at AS submittedAt,s.reviewed_at AS reviewedAt,s.feedback,s.family_help_level AS familyHelp,
         s.diagnostic_snapshot_json AS snapshot,sr.objective_scores_json AS objectiveScores,sr.dimension_scores_json AS dimensions,
-        u.display_name AS reviewer
+        u.display_name AS reviewer,COALESCE(sr.rowid,s.rowid) AS sequence
       FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
       JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
       LEFT JOIN submission_reviews sr ON sr.tenant_id=s.tenant_id AND sr.submission_id=s.id AND sr.status='confirmed'
       LEFT JOIN users u ON u.id=sr.reviewer_user_id
       WHERE s.tenant_id=? AND s.student_user_id=? AND s.diagnostic_snapshot_json!='{}' AND ${submissions.sql}
       ORDER BY s.created_at DESC,s.rowid DESC`)
-      .bind(tenantId, studentId, ...submissions.args).all<{ id: string; textAnswer: string | null; assetKey: string | null; reviewStatus: string; submittedAt: string; reviewedAt: string | null; feedback: string | null; familyHelp: string | null; snapshot: string; objectiveScores: string | null; dimensions: string | null; reviewer: string | null }>(),
+      .bind(tenantId, studentId, ...submissions.args).all<{ id: string; textAnswer: string | null; assetKey: string | null; reviewStatus: string; submittedAt: string; reviewedAt: string | null; feedback: string | null; familyHelp: string | null; snapshot: string; objectiveScores: string | null; dimensions: string | null; reviewer: string | null; sequence: number }>(),
   ]);
   const grouped = new Map<string, { evidence: AbilityEvidence; results: Map<string, { title: string; correct: number; count: number }> }>();
   let legacyAnswerCount = 0;
@@ -40,7 +40,7 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
     if (!group) {
       group = { results: new Map(), evidence: {
         id: key, ability: snapshot.ability, kind: "choice", title: `${row.level} ${snapshot.ability === "listening" ? "听力" : "阅读"}选择题`,
-        submittedAt: row.completedAt, measuredAt: row.completedAt, status: "assessed", evidenceCount: 0, scores: [], answers: [],
+        submittedAt: row.completedAt, measuredAt: row.completedAt, status: "assessed", sequence: row.sequence, evidenceCount: 0, scores: [], answers: [],
         submissionId: null, textAnswer: null, hasAudio: false, prompt: "", mediaId: null, reviewer: "客观题核对", feedback: null, dimensions: [], familyHelp: null,
       } };
       grouped.set(key, group);
@@ -61,7 +61,7 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
     const scores = row.reviewStatus === "reviewed" ? measured.map((item) => ({ ...item, title: snapshot.objectives.find((goal) => goal.id === item.objectiveId)?.title ?? item.objectiveId })) : [];
     const status = row.reviewStatus !== "reviewed" ? "pending" : scores.length ? "assessed" : "unassessed";
     evidence.push({ id: row.id, ability: snapshot.ability, kind: "work", title: snapshot.title, submittedAt: row.submittedAt,
-      measuredAt: row.reviewedAt, status, evidenceCount: status === "assessed" ? 1 : 0, scores, answers: [],
+      measuredAt: row.reviewedAt, status, sequence: row.sequence, evidenceCount: status === "assessed" ? 1 : 0, scores, answers: [],
       submissionId: row.id, textAnswer: row.textAnswer, hasAudio: !!row.assetKey, prompt: snapshot.prompt, mediaId: snapshot.mediaId,
       reviewer: row.reviewer, feedback: row.feedback, dimensions: JSON.parse(row.dimensions ?? "[]"), familyHelp: row.familyHelp,
     });

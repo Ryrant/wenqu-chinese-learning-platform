@@ -7,12 +7,18 @@ export type EvidenceScore = { objectiveId: string; title: string; score: number 
 export type ChoiceEvidenceAnswer = { prompt: string; selected: string; expected: string; correct: boolean; mediaId: string | null };
 export type AbilityEvidence = {
   id: string; ability: Ability; kind: "choice" | "work"; title: string; submittedAt: string; measuredAt: string | null;
-  status: "assessed" | "pending" | "unassessed"; evidenceCount: number; scores: EvidenceScore[];
+  status: "assessed" | "pending" | "unassessed"; sequence: number; evidenceCount: number; scores: EvidenceScore[];
   answers: ChoiceEvidenceAnswer[]; submissionId: string | null; textAnswer: string | null; hasAudio: boolean;
   prompt: string; mediaId: string | null; reviewer: string | null; feedback: string | null;
   dimensions: Array<{ name: string; score: number }>; familyHelp: string | null;
 };
 export type AbilityProfile = {
   student: { id: string; displayName: string }; legacyAnswerCount: number; evidence: AbilityEvidence[];
+};
+export type SupportEvidence = { id: string; title: string; score: number; measuredAt: string };
+export type InterventionSuggestion = {
+  studentUserId: string; objectiveId: string; ready: boolean; title: string; detail: string;
+  rationale: string; evidenceKey: string | null; supports: Ability[];
+  measures: Array<{ ability: Ability; availableCount: number; score: number | null; records: SupportEvidence[] }>;
 };
 export const diagnosticMediaUrl = (id: string) => `/api/v1/diagnostic-media/${encodeURIComponent(id)}`;

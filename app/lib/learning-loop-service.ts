@@ -3,6 +3,7 @@ import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 import { assertDiagnosticMedia } from "./diagnostic-media";
 import type { ChoiceSnapshot } from "./diagnostic-types";
+import { suggestIntervention } from "./intervention-support";
 
 type DiagnosticAnswerInput = { itemId: string; selectedOption: number; revision: number };
 type RecommendationSource = "diagnostic" | "teacher" | "family" | "system";
@@ -186,11 +187,29 @@ export async function createIntervention(db: PlatformDatabase, context: Platform
   title: string;
   detail: string;
   dueAt?: string | null;
+  evidenceKey?: string;
 }) {
   await assertTeacherStudentAccess(db, context, input.studentUserId);
   const objective = await db.prepare("SELECT id FROM learning_objectives WHERE id=? AND tenant_id=? AND status='active'")
     .bind(input.objectiveId, context.tenantId).first();
   if (!objective) throw new Error("objective_not_found");
+  if (input.evidenceKey !== undefined) {
+    if (!input.detail.trim()) throw new Error("invalid_intervention_detail");
+    const suggestion = await suggestIntervention(context, input.studentUserId, input.objectiveId);
+    if (!suggestion.ready || input.evidenceKey !== suggestion.evidenceKey) throw new Error("support_evidence_changed");
+    const sourceId = `support:${context.userId}:${suggestion.evidenceKey}`;
+    const result = await db.prepare(`INSERT INTO learning_recommendations
+      (id,tenant_id,student_user_id,objective_id,source_type,source_id,title,detail,due_at,status,created_by)
+      VALUES (?,?,?,?,'teacher',?,?,?,?,'pending',?)
+      ON CONFLICT(tenant_id,student_user_id,source_type,source_id) DO NOTHING`)
+      .bind(crypto.randomUUID(), context.tenantId, input.studentUserId, input.objectiveId, sourceId, input.title,
+        `${input.detail}\n\n【教师确认的选择依据】\n${suggestion.rationale}`, input.dueAt ?? null, context.userId).run();
+    const saved = await db.prepare(`SELECT id,status FROM learning_recommendations
+      WHERE tenant_id=? AND student_user_id=? AND source_type='teacher' AND source_id=?`)
+      .bind(context.tenantId, input.studentUserId, sourceId).first<{ id: string; status: string }>();
+    if (!saved) throw new Error("intervention_save_failed");
+    return { ...saved, created: !!result.meta.changes };
+  }
   const id = await createRecommendation(db, { tenantId: context.tenantId, studentUserId: input.studentUserId, objectiveId: input.objectiveId, sourceType: "teacher", title: input.title, detail: input.detail, dueAt: input.dueAt, createdBy: context.userId });
   return { id, status: "pending" };
 }

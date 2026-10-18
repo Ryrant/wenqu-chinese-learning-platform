@@ -309,7 +309,7 @@ export function platformApiError(error: unknown) {
         ? 404
         : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
-          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "submission_id_conflict"].includes(message) ? 409
+          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "submission_id_conflict", "support_evidence_changed"].includes(message) ? 409
           : message.startsWith("invalid_") ? 400
       : message === "authentication_config_missing"
           ? 500

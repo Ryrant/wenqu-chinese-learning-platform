@@ -24,6 +24,7 @@ import { platformApiError, platformContext, type PlatformRole } from "../../../.
 import { searchPublishedKnowledge } from "../../../../lib/retrieval";
 import { createStudentSubmission } from "../../../../lib/submission-service";
 import { assertDiagnosticMedia } from "../../../../lib/diagnostic-media";
+import { suggestIntervention } from "../../../../lib/intervention-support";
 
 type ActionBody = { action?: string; [key: string]: unknown };
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", update_lesson_plan: "teacher", archive_lesson_plan: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
       create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian", confirm_family_submission: "guardian",
-      create_intervention: "teacher",
+      create_intervention: "teacher", suggest_intervention: "teacher",
       create_invitation: "admin", review_content: "admin", reprocess_content: "admin", archive_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
       submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
     };
@@ -258,6 +259,11 @@ export async function POST(request: Request) {
       return Response.json(result);
     }
 
+    if (action === "suggest_intervention") {
+      const suggestion = await suggestIntervention(context, requireText(body.studentUserId, "student_user_id", 120), requireText(body.objectiveId, "objective_id", 120));
+      return Response.json({ suggestion }, { headers: { "Cache-Control": "private, no-store" } });
+    }
+
     if (action === "create_intervention") {
       const result = await createIntervention(db, context, {
         studentUserId: requireText(body.studentUserId, "student_user_id", 120),
@@ -265,6 +271,7 @@ export async function POST(request: Request) {
         title: requireText(body.title, "intervention_title", 120),
         detail: text(body.detail, 1000),
         dueAt: text(body.dueAt, 40) || null,
+        evidenceKey: body.evidenceKey === undefined ? undefined : requireText(body.evidenceKey, "evidence_key", 64),
       });
       await audit(db, tenantId, userId, "intervention.created", "learning_recommendation", result.id);
       return Response.json(result, { status: 201 });
