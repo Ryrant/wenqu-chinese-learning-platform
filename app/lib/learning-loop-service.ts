@@ -4,6 +4,8 @@ import type { PlatformContext } from "./platform-store";
 import { assertDiagnosticMedia } from "./diagnostic-media";
 import type { ChoiceSnapshot } from "./diagnostic-types";
 import { suggestIntervention } from "./intervention-support";
+import { createFamilyPlan, exchangePartner, readFamilyPlan, readFamilyWorkSnapshot } from "./family-task";
+import { assertSubmissionReviewAccess } from "./access-control";
 
 type DiagnosticAnswerInput = { itemId: string; selectedOption: number; revision: number };
 type RecommendationSource = "diagnostic" | "teacher" | "family" | "system";
@@ -221,15 +223,18 @@ export async function createFamilyTask(db: PlatformDatabase, context: PlatformCo
   title: string;
   detail: string;
   dueAt?: string | null;
+  templateId?: string;
+  partner?: string;
 }) {
   await assertGuardianStudentAccess(db, context, input.studentUserId);
   await assertFamilyAssignment(db, context, input);
+  const plan = createFamilyPlan(input.templateId, input.partner);
   const id = crypto.randomUUID();
   await db.batch([
     db.prepare(`INSERT INTO learning_recommendations
-      (id,tenant_id,student_user_id,objective_id,assignment_id,source_type,source_id,title,detail,due_at,status,created_by)
-      VALUES (?,?,?,?,?,'family',?,?,?,?,'pending',?)`)
-      .bind(id, context.tenantId, input.studentUserId, input.objectiveId, input.assignmentId, id, input.title, input.detail, input.dueAt ?? null, context.userId),
+      (id,tenant_id,student_user_id,objective_id,assignment_id,source_type,source_id,title,detail,due_at,status,created_by,family_plan_json)
+      VALUES (?,?,?,?,?,'family',?,?,?,?,'pending',?,?)`)
+      .bind(id, context.tenantId, input.studentUserId, input.objectiveId, input.assignmentId, id, input.title, input.detail, input.dueAt ?? null, context.userId, JSON.stringify(plan)),
     db.prepare(`INSERT INTO notifications (id,tenant_id,user_id,title,detail,kind,scheduled_for)
       VALUES (?,?,?,?,?,'family_task',?)`)
       .bind(crypto.randomUUID(), context.tenantId, input.studentUserId, input.title, input.detail, input.dueAt ?? null),
@@ -248,11 +253,11 @@ async function assertFamilyAssignment(db: PlatformDatabase, context: PlatformCon
 }
 
 async function ownedFamilyTask(db: PlatformDatabase, context: PlatformContext, id: string) {
-  const row = await db.prepare(`SELECT id,student_user_id AS studentUserId,created_by AS createdBy
+  const row = await db.prepare(`SELECT id,student_user_id AS studentUserId,created_by AS createdBy,family_plan_json AS familyPlanJson
     FROM learning_recommendations
     WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL`)
     .bind(id, context.tenantId)
-    .first<{ id: string; studentUserId: string; createdBy: string }>();
+    .first<{ id: string; studentUserId: string; createdBy: string; familyPlanJson: string }>();
   if (!row) throw new Error("family_task_not_found");
   if (!context.roles.includes("admin") && row.createdBy !== context.userId) throw new Error("forbidden");
   await assertGuardianStudentAccess(db, context, row.studentUserId);
@@ -266,32 +271,47 @@ export async function updateFamilyTask(db: PlatformDatabase, context: PlatformCo
   title: string;
   detail: string;
   dueAt?: string | null;
+  templateId?: string;
+  partner?: string;
+  revision?: number;
 }) {
   const task = await ownedFamilyTask(db, context, input.id);
   await assertFamilyAssignment(db, context, { ...input, studentUserId: task.studentUserId });
+  const previous = readFamilyPlan(task.familyPlanJson);
+  if (input.revision !== undefined && (!Number.isInteger(input.revision) || input.revision < 0)) throw new Error("invalid_family_revision");
+  if (input.revision !== undefined && input.revision !== (previous?.revision ?? 0)) throw new Error("family_task_changed");
+  const basePlan = input.templateId === undefined ? previous ?? createFamilyPlan() : createFamilyPlan(input.templateId, input.partner ?? previous?.partner);
+  const plan = { ...basePlan, partner: exchangePartner(input.partner ?? basePlan.partner), revision: (previous?.revision ?? 0) + 1 };
   const result = await db.prepare(`UPDATE learning_recommendations
-    SET title=?,detail=?,due_at=?,assignment_id=?,objective_id=?,updated_at=CURRENT_TIMESTAMP
-    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL
+    SET title=?,detail=?,due_at=?,assignment_id=?,objective_id=?,family_plan_json=?,updated_at=CURRENT_TIMESTAMP
+    WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL AND family_plan_json=?
       AND ((assignment_id IS ? AND objective_id IS ?)
         OR NOT EXISTS (SELECT 1 FROM submissions s WHERE s.tenant_id=? AND s.family_task_id=?))`)
-    .bind(input.title, input.detail, input.dueAt ?? null, input.assignmentId, input.objectiveId, input.id, context.tenantId,
+    .bind(input.title, input.detail, input.dueAt ?? null, input.assignmentId, input.objectiveId, JSON.stringify(plan), input.id, context.tenantId, task.familyPlanJson,
       input.assignmentId, input.objectiveId, context.tenantId, input.id)
     .run();
-  if (!result.meta.changes) throw new Error("family_task_has_submissions");
+  if (!result.meta.changes) {
+    const latest = await ownedFamilyTask(db, context, input.id);
+    throw new Error(latest.familyPlanJson !== task.familyPlanJson ? "family_task_changed" : "family_task_has_submissions");
+  }
   return { id: input.id, status: "updated" };
 }
 
-export async function confirmFamilySubmission(db: PlatformDatabase, context: PlatformContext, input: { submissionId: string; helpLevel: string }) {
+export async function confirmFamilySubmission(db: PlatformDatabase, context: PlatformContext, input: { submissionId: string; helpLevel: string }, teacherWitness = false) {
   if (!["independent", "prompted", "assisted"].includes(input.helpLevel)) throw new Error("invalid_family_help_level");
-  const submission = await db.prepare(`SELECT s.student_user_id AS studentUserId FROM submissions s
+  const submission = await db.prepare(`SELECT s.student_user_id AS studentUserId,s.family_snapshot_json AS familySnapshotJson FROM submissions s
     JOIN learning_recommendations lr ON lr.tenant_id=s.tenant_id AND lr.id=s.family_task_id AND lr.source_type='family'
     WHERE s.id=? AND s.tenant_id=? AND lr.archived_at IS NULL`)
-    .bind(input.submissionId, context.tenantId).first<{ studentUserId: string }>();
+    .bind(input.submissionId, context.tenantId).first<{ studentUserId: string; familySnapshotJson: string }>();
   if (!submission) throw new Error("submission_not_found");
-  await assertGuardianStudentAccess(db, context, submission.studentUserId);
-  const result = await db.prepare(`UPDATE submissions SET family_help_level=?,family_confirmed_at=CURRENT_TIMESTAMP
+  if (teacherWitness) {
+    await assertSubmissionReviewAccess(db, context, input.submissionId);
+    const snapshot = readFamilyWorkSnapshot(submission.familySnapshotJson);
+    if (!snapshot || snapshot.partner === "family") throw new Error("family_confirmation_required");
+  } else await assertGuardianStudentAccess(db, context, submission.studentUserId);
+  const result = await db.prepare(`UPDATE submissions SET family_help_level=?,family_confirmed_at=CURRENT_TIMESTAMP,family_confirmed_by=?,family_confirmation_role=?
     WHERE id=? AND tenant_id=? AND review_status!='reviewed'`)
-    .bind(input.helpLevel, input.submissionId, context.tenantId).run();
+    .bind(input.helpLevel, context.userId, teacherWitness ? "teacher" : "guardian", input.submissionId, context.tenantId).run();
   if (!result.meta.changes) throw new Error("submission_already_reviewed");
   return { submissionId: input.submissionId, helpLevel: input.helpLevel };
 }

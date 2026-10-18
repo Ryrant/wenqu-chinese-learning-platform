@@ -4,6 +4,7 @@ import { prepareMasteryEvidenceInsert } from "./learning-loop-service";
 import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 import { searchPublishedKnowledge } from "./retrieval";
+import { readFamilyWorkSnapshot } from "./family-task";
 
 export type ObjectiveReviewScore = { objectiveId: string; score: number };
 export type DimensionReviewScore = { name: string; score: number };
@@ -34,29 +35,31 @@ export function parseReviewSuggestion(text: string, objectiveIds: string[], dime
 export async function suggestTextReview(db: PlatformDatabase, context: PlatformContext, submissionId: string, config: { openAiKey?: string; model?: string }): Promise<ReviewSuggestion> {
   await assertSubmissionReviewAccess(db, context, submissionId);
   const submission = await db.prepare(`
-    SELECT s.id,s.text_answer AS textAnswer,s.review_status AS reviewStatus,a.title AS assignmentTitle,a.rubric_json AS rubricJson
+    SELECT s.id,s.text_answer AS textAnswer,s.review_status AS reviewStatus,a.title AS assignmentTitle,a.rubric_json AS rubricJson,s.family_snapshot_json AS familySnapshotJson
     FROM submissions s
     JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
     WHERE s.id=? AND s.tenant_id=? AND s.text_answer IS NOT NULL
-  `).bind(submissionId, context.tenantId).first<{ id: string; textAnswer: string; reviewStatus: string; assignmentTitle: string; rubricJson: string }>();
+  `).bind(submissionId, context.tenantId).first<{ id: string; textAnswer: string; reviewStatus: string; assignmentTitle: string; rubricJson: string; familySnapshotJson: string }>();
   if (!submission) throw new Error("submission_not_found");
   if (submission.reviewStatus === "reviewed") throw new Error("submission_already_reviewed");
   const objectives = await db.prepare(`SELECT lo.id,lo.title FROM submissions s
     JOIN assignment_objectives ao ON ao.tenant_id=s.tenant_id AND ao.assignment_id=s.assignment_id
     JOIN learning_objectives lo ON lo.tenant_id=ao.tenant_id AND lo.id=ao.objective_id
     WHERE s.id=? AND s.tenant_id=?`).bind(submissionId, context.tenantId).all<{ id: string; title: string }>();
-  const rubric = JSON.parse(submission.rubricJson || "[]") as Array<{ name: string; weight: number }>;
+  const family = readFamilyWorkSnapshot(submission.familySnapshotJson);
+  const reviewObjectives = family ? [{ id: family.objectiveId, title: family.objectiveTitle }] : objectives.results;
+  const rubric = family?.rubric ?? JSON.parse(submission.rubricJson || "[]") as Array<{ name: string; weight: number }>;
   const chunks = await searchPublishedKnowledge(db, { tenantId: context.tenantId, query: `${submission.assignmentTitle} ${submission.textAnswer}`, limit: 5 });
   const result = await generateGroundedText({
     purpose: "review",
-    prompt: `请按下面的任务目标和评分量规评价学生作品，仅返回 JSON：{"suggestedScore":0到100的数字或null,"comment":"评语及来源编号","weaknessTags":[],"objectiveScores":[{"objectiveId":"目标ID","score":0到100的数字}],"dimensionScores":[{"name":"量规维度名称","score":0到100的数字}]}。没有可靠评分依据时 suggestedScore 为 null，两个评分数组留空；未观察到的目标或维度不要评分。\n任务：${submission.assignmentTitle}\n目标：${JSON.stringify(objectives.results)}\n量规：${JSON.stringify(rubric)}\n学生答案：${submission.textAnswer}`,
+    prompt: `请按下面的任务目标和评分量规评价学生作品，仅返回 JSON：{"suggestedScore":0到100的数字或null,"comment":"评语及来源编号","weaknessTags":[],"objectiveScores":[{"objectiveId":"目标ID","score":0到100的数字}],"dimensionScores":[{"name":"量规维度名称","score":0到100的数字}]}。没有可靠评分依据时 suggestedScore 为 null，两个评分数组留空；未观察到的目标或维度不要评分。\n任务：${family?.title ?? submission.assignmentTitle}${family ? `\n交流要求：${family.detail}\n${family.plan?.template?.work.zh ?? ""}` : ""}\n目标：${JSON.stringify(reviewObjectives)}\n量规：${JSON.stringify(rubric)}\n学生答案：${submission.textAnswer}`,
     role: "teacher",
     contextChunks: chunks,
   }, config);
   let suggestion: Omit<ReviewSuggestion, "submissionId"> = { suggestedScore: null, comment: "未获得可靠的评分建议，请教师依据作品和量规评价。", weaknessTags: [], objectiveScores: [], dimensionScores: [] };
   if (result.status === "completed") {
     try {
-      suggestion = parseReviewSuggestion(result.text, objectives.results.map((item) => item.id), rubric.map((item) => item.name));
+      suggestion = parseReviewSuggestion(result.text, reviewObjectives.map((item) => item.id), rubric.map((item) => item.name));
     } catch (error) {
       console.warn("review_suggestion_invalid", { submissionId, reason: error instanceof SyntaxError ? "invalid_json" : "invalid_review_scores" });
     }
@@ -81,10 +84,10 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
   const score = input.score;
   const comment = input.comment.slice(0, 2000);
   const submission = await db.prepare(`SELECT s.student_user_id AS studentUserId,s.review_status AS reviewStatus,
-      s.family_task_id AS familyTaskId,s.family_confirmed_at AS familyConfirmedAt,a.rubric_json AS rubricJson
+      s.family_task_id AS familyTaskId,s.family_confirmed_at AS familyConfirmedAt,a.rubric_json AS rubricJson,s.family_snapshot_json AS familySnapshotJson
     FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id WHERE s.id=? AND s.tenant_id=?`)
     .bind(input.submissionId, context.tenantId)
-    .first<{ studentUserId: string; reviewStatus: string; familyTaskId: string | null; familyConfirmedAt: string | null; rubricJson: string }>();
+    .first<{ studentUserId: string; reviewStatus: string; familyTaskId: string | null; familyConfirmedAt: string | null; rubricJson: string; familySnapshotJson: string }>();
   if (!submission) throw new Error("submission_not_found");
   if (submission.reviewStatus === "reviewed") throw new Error("submission_already_reviewed");
   if (submission.familyTaskId && !submission.familyConfirmedAt) throw new Error("family_confirmation_required");
@@ -94,9 +97,10 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
     WHERE s.id=? AND s.tenant_id=?`)
     .bind(input.submissionId, context.tenantId)
     .all<{ studentUserId: string; objectiveId: string }>();
-  if (!evidence.results.length) throw new Error("assignment_objective_not_found");
-  const rubric = JSON.parse(submission.rubricJson || "[]") as Array<{ name: string }>;
-  const objectiveScores = scoredItems(input.objectiveScores, "objectiveId", evidence.results.map((item) => item.objectiveId)) as ObjectiveReviewScore[];
+  const family = readFamilyWorkSnapshot(submission.familySnapshotJson);
+  if (!evidence.results.length && !family) throw new Error("assignment_objective_not_found");
+  const rubric = family?.rubric ?? JSON.parse(submission.rubricJson || "[]") as Array<{ name: string }>;
+  const objectiveScores = scoredItems(input.objectiveScores, "objectiveId", family ? [family.objectiveId] : evidence.results.map((item) => item.objectiveId)) as ObjectiveReviewScore[];
   const dimensionScores = scoredItems(input.dimensionScores, "name", rubric.map((item) => item.name)) as DimensionReviewScore[];
   try {
     await db.batch([

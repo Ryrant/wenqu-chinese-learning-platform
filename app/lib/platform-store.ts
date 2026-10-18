@@ -202,6 +202,10 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     "ALTER TABLE assignments ADD COLUMN diagnostic_prompt TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE assignments ADD COLUMN diagnostic_media_id TEXT",
     "ALTER TABLE submissions ADD COLUMN diagnostic_snapshot_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE learning_recommendations ADD COLUMN family_plan_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE submissions ADD COLUMN family_snapshot_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE submissions ADD COLUMN family_confirmed_by TEXT",
+    "ALTER TABLE submissions ADD COLUMN family_confirmation_role TEXT",
   ]) await trySchema(db, statement);
   await db.batch([
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_submission_pending_idx ON submissions (tenant_id,family_task_id) WHERE family_task_id IS NOT NULL AND review_status!='reviewed'"),
@@ -309,7 +313,7 @@ export function platformApiError(error: unknown) {
         ? 404
         : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
-          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "submission_id_conflict", "support_evidence_changed"].includes(message) ? 409
+          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed"].includes(message) ? 409
           : message.startsWith("invalid_") ? 400
       : message === "authentication_config_missing"
           ? 500

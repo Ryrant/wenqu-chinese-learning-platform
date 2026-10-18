@@ -73,6 +73,8 @@ const AUDIT_LABELS: Record<string, string> = {
   "member.status_changed": "更新成员状态",
   "member.created": "创建成员",
   "family_task.created": "创建家庭任务",
+  "family_submission.confirmed": "家长确认交流与帮助",
+  "family_submission.witnessed": "教师见证替代交流与帮助",
   "family_task.updated": "编辑家庭任务",
   "family_task.archived": "归档家庭任务",
   "source.reviewed": "审核内容资料",

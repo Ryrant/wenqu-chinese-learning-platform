@@ -70,12 +70,14 @@ async function fixture(t) {
   ]);
   const text = (familyTaskId) => act(actors.student, "submit_text", { assignmentId: assignment.id, answer: "这道家常菜很好吃，我想介绍它。", familyTaskId }, 201);
   const review = (id, extra = {}) => ({ id, score: 80, comment: "表达完整，下一步练习说明步骤。", ...extra });
-  const upload = async (cookie, { id = crypto.randomUUID(), familyTaskId, assignmentId = assignment.id, bytes = new Uint8Array(512).fill(7) } = {}, status = 201) => {
+  const upload = async (cookie, { id = crypto.randomUUID(), familyTaskId, familyPartner, familyRevision, assignmentId = assignment.id, bytes = new Uint8Array(512).fill(7) } = {}, status = 201) => {
     const form = new FormData();
     form.set("audio", new File([bytes], "recording.wav", { type: "audio/wav" }));
     form.set("assignmentId", assignmentId);
     form.set("submissionId", id);
     if (familyTaskId) form.set("familyTaskId", familyTaskId);
+    if (familyPartner !== undefined) form.set("familyPartner", familyPartner);
+    if (familyRevision !== undefined) form.set("familyRevision", String(familyRevision));
     const response = await api.upload(new Request("http://127.0.0.1/api/v1/speech/submissions", { method: "POST", headers: { cookie }, body: form }));
     const result = await response.json();
     assert.equal(response.status, status, JSON.stringify(result));
@@ -519,16 +521,120 @@ test("support evidence is revalidated on publish and cannot cross roles, student
   await publish({}, 403);
 });
 
+test("family templates retain bilingual guidance and original goals and rubric through parent confirmation, edits and teacher feedback", async (t) => {
+  const f = await fixture(t);
+  const base = { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "原始交流任务", detail: "用自己的中文总结，写下提问与追问。", partner: "family" };
+  await f.act(f.actors.guardian, "create_family_task", { ...base, templateId: "unknown-template" }, 400);
+  await f.act(f.actors.guardian, "create_family_task", { ...base, partner: "unknown-partner" }, 400);
+  const tasks = [];
+  for (const templateId of ["home-dish", "festival-memory", "daily-choice"]) {
+    const task = await f.act(f.actors.guardian, "create_family_task", { ...base, templateId }, 201);
+    const stored = (await f.workspace(f.actors.student)).recommendations.find((item) => item.id === task.id);
+    const plan = JSON.parse(stored.family_plan_json);
+    assert.equal(plan.template.id, templateId); assert.equal(plan.revision, 1);
+    assert.ok(plan.template.steps.length && plan.template.stems.length && plan.template.questions.length);
+    for (const text of [...plan.template.steps, ...plan.template.stems, plan.template.work, ...plan.template.questions.flatMap((item) => [item.ask, item.followUp])]) assert.ok(text.zh && text.en, "guidance must work in both languages");
+    tasks.push({ ...task, plan });
+  }
+  const task = tasks[0];
+  const work = await f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, familyTaskId: task.id, familyPartner: "family", familyRevision: 1, answer: "我问先做什么，又追问为什么先炒鸡蛋。对方说先炒蛋再放番茄，因为鸡蛋更松软。" }, 201);
+  const original = JSON.parse((await f.workspace(f.actors.student)).submissions.find((item) => item.id === work.id).family_snapshot_json);
+  assert.deepEqual(original.plan, task.plan); assert.equal(original.title, base.title); assert.equal(original.objectiveId, base.objectiveId);
+  assert.deepEqual(original.rubric.map((item) => item.name), ["提问切题", "追问与倾听", "复述与表达"]);
+  await f.act(f.actors.guardian, "update_family_task", { ...base, id: task.id, title: "编辑后的任务", detail: "现在改成节日采访。", templateId: "festival-memory", partner: "teacher", revision: 1 });
+  await f.act(f.actors.teacher, "confirm_alternative_exchange", { submissionId: work.id, helpLevel: "independent" }, 409);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id), 409);
+  await f.act(f.actors.guardian, "confirm_family_submission", { submissionId: work.id, helpLevel: "prompted" });
+  let stored = (await f.workspace(f.actors.guardian)).submissions.find((item) => item.id === work.id);
+  assert.equal(stored.family_confirmed_by, f.ids.guardian); assert.equal(stored.family_confirmation_role, "guardian");
+  assert.equal(stored.score, null);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM mastery_snapshots WHERE student_user_id=?").bind(f.ids.student).first()).count, 0);
+  await f.db.prepare("UPDATE assignments SET rubric_json=? WHERE id=?").bind(JSON.stringify([{ name: "后来修改的量规", weight: 100 }]), f.assignment.id).run();
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: f.goals[1], score: 80 }] }), 400);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { dimensionScores: [{ name: "后来修改的量规", score: 80 }] }), 400);
+  const dimensions = [{ name: "提问切题", score: 85 }, { name: "追问与倾听", score: 60 }, { name: "复述与表达", score: 75 }];
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: base.objectiveId, score: 75 }], dimensionScores: dimensions, comment: "问题切题，下一次请围绕做法继续追问，并减少句式提示。" }));
+  for (const actor of ["student", "guardian", "teacher"]) {
+    const data = await f.workspace(f.actors[actor]); stored = data.submissions.find((item) => item.id === work.id);
+    assert.equal(stored.score, 80); assert.match(stored.feedback, /围绕做法继续追问/);
+    assert.deepEqual(JSON.parse(stored.family_snapshot_json), original, "editing the task must not replace the submitted instructions");
+  }
+  assert.equal((await f.workspace(f.actors.student)).recommendations.find((item) => item.id === task.id).status, "completed");
+  const review = await f.db.prepare("SELECT dimension_scores_json FROM submission_reviews WHERE submission_id=? AND status='confirmed'").bind(work.id).first();
+  assert.deepEqual(JSON.parse(review.dimension_scores_json), dimensions);
+});
+
+test("peer and teacher exchanges use scoped teacher witnessing without guardian-created grades", async (t) => {
+  const f = await fixture(t);
+  const another = await f.act(f.actors.otherTeacher, "create_class", { name: "同学生的另一班", level: "A2" }, 201);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: another.id, studentUserIds: [f.ids.student] });
+  for (const partner of ["peer", "teacher"]) {
+    const task = await f.act(f.actors.guardian, "create_family_task", { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "替代交流验证", detail: "与实际对象交流后提交自己的总结。", templateId: "daily-choice", partner }, 201);
+    const work = await f.upload(f.actors.student, { familyTaskId: task.id, familyPartner: partner, familyRevision: 1 });
+    const confirmation = { submissionId: work.id, helpLevel: "independent" };
+    for (const actor of ["student", "guardian", "otherGuardian", "otherTeacher"]) await f.act(f.actors[actor], "confirm_alternative_exchange", confirmation, 403);
+    await f.act(f.actors.otherTenant, "confirm_alternative_exchange", confirmation, 404);
+    await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id), 409);
+    await f.act(f.actors.teacher, "confirm_alternative_exchange", confirmation);
+    let stored = (await f.workspace(f.actors.guardian)).submissions.find((item) => item.id === work.id);
+    assert.equal(stored.family_confirmation_role, "teacher"); assert.equal(stored.family_confirmed_by, f.ids.teacher); assert.equal(stored.familyConfirmedName, "teacher");
+    assert.equal(JSON.parse(stored.family_snapshot_json).partner, partner); assert.equal(stored.score, null);
+    assert.equal((await f.readAudio(f.actors.student, work.id)).status, 200);
+    await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 70 }] }));
+    await f.act(f.actors.teacher, "confirm_alternative_exchange", confirmation, 409);
+    stored = (await f.workspace(f.actors.student)).submissions.find((item) => item.id === work.id);
+    assert.equal(stored.review_status, "reviewed"); assert.equal(stored.score, 80);
+  }
+});
+
+test("family task revisions protect text and audio drafts and cannot change between validation and insertion", async (t) => {
+  const f = await fixture(t);
+  const base = { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "版本一", detail: "家常菜采访。", templateId: "home-dish", partner: "family" };
+  const task = await f.act(f.actors.guardian, "create_family_task", base, 201);
+  await f.act(f.actors.guardian, "update_family_task", { ...base, id: task.id, revision: 1, title: "版本二" });
+  const text = (revision, status) => f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, familyTaskId: task.id, familyPartner: "peer", familyRevision: revision, answer: "我提出问题、追问并用自己的话总结。" }, status);
+  await text(1, 409);
+  await f.upload(f.actors.student, { familyTaskId: task.id, familyPartner: "peer", familyRevision: 1 }, 409);
+  await f.act(f.actors.guardian, "update_family_task", { ...base, id: task.id, revision: 1 }, 409);
+  await text(-1, 400);
+  const prepare = f.db.prepare.bind(f.db);
+  let interleaved = false;
+  f.db.prepare = (sql) => {
+    const statement = prepare(sql); const first = statement.first.bind(statement);
+    statement.first = async (...args) => {
+      const row = await first(...args);
+      if (row?.id === task.id && !interleaved) {
+        interleaved = true;
+        await f.act(f.actors.guardian, "update_family_task", { ...base, id: task.id, revision: 2, title: "版本三", partner: "teacher" });
+      }
+      return row;
+    };
+    return statement;
+  };
+  await text(2, 409); assert.ok(interleaved);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM submissions").first()).count, 0);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='submission.created'").first()).count, 0);
+  const work = await text(3, 201);
+  const snapshot = JSON.parse((await f.workspace(f.actors.student)).submissions.find((item) => item.id === work.id).family_snapshot_json);
+  assert.equal(snapshot.title, "版本三"); assert.equal(snapshot.plan.revision, 3);
+  assert.equal(snapshot.plan.partner, "teacher"); assert.equal(snapshot.partner, "peer", "actual partner is a submission-level fact");
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {
     const files = (await readdir(path.join(root, "drizzle"))).filter((name) => /^\d+.*\.sql$/.test(name)).sort();
-    for (const name of files) db.exec(await readFile(path.join(root, "drizzle", name), "utf8"));
+    for (const name of files) {
+      if (name === "0008_family_exchange.sql") db.exec(`INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,score,review_status) VALUES ('legacy-exchange','legacy-tenant','legacy-assignment','legacy-student',81,'reviewed')`);
+      db.exec(await readFile(path.join(root, "drizzle", name), "utf8"));
+    }
+    assert.deepEqual({ ...db.prepare("SELECT score,family_snapshot_json,family_confirmed_by,family_confirmation_role FROM submissions WHERE id='legacy-exchange'").get() }, { score: 81, family_snapshot_json: "{}", family_confirmed_by: null, family_confirmation_role: null });
     assert.ok(db.prepare("SELECT name FROM pragma_table_info('submission_reviews') WHERE name='objective_scores_json'").get());
     assert.ok(db.prepare("SELECT name FROM pragma_table_info('submissions') WHERE name='family_confirmed_at'").get());
     db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0006_learning_workflow_evidence.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0007_ability_evidence.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0008_family_exchange.sql'").get());
     assert.ok(db.prepare("SELECT name FROM pragma_table_info('submissions') WHERE name='diagnostic_snapshot_json'").get());
   } finally { db.close(); }
   const runtimeDb = new api.NodeSqliteDatabase("file::memory:");

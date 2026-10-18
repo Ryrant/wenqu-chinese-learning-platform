@@ -56,6 +56,7 @@ export const assignments = sqliteTable("assignments", {
 export const submissions = sqliteTable("submissions", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), assignmentId: text("assignment_id").notNull(), studentUserId: text("student_user_id").notNull(), textAnswer: text("text_answer"), assetKey: text("asset_key"), score: real("score"), confidence: real("confidence"), reviewStatus: text("review_status").notNull().default("auto"), feedback: text("feedback"), reviewedAt: text("reviewed_at"), submittedAt: createdAt(),
   familyTaskId: text("family_task_id"), familyHelpLevel: text("family_help_level"), familyConfirmedAt: text("family_confirmed_at"),
+  familySnapshotJson: text("family_snapshot_json").notNull().default("{}"), familyConfirmedBy: text("family_confirmed_by"), familyConfirmationRole: text("family_confirmation_role"),
   diagnosticSnapshotJson: text("diagnostic_snapshot_json").notNull().default("{}"),
 }, (table) => [index("submissions_tenant_idx").on(table.tenantId), index("submissions_assignment_idx").on(table.assignmentId), uniqueIndex("family_submission_pending_idx").on(table.tenantId, table.familyTaskId).where(sql`${table.familyTaskId} IS NOT NULL AND ${table.reviewStatus}!='reviewed'`)]);
 
@@ -154,6 +155,7 @@ export const learningRecommendations = sqliteTable("learning_recommendations", {
   studentUserId: text("student_user_id").notNull(),
   objectiveId: text("objective_id"),
   assignmentId: text("assignment_id"),
+  familyPlanJson: text("family_plan_json").notNull().default("{}"),
   sourceType: text("source_type", { enum: ["diagnostic", "teacher", "family", "system"] }).notNull(),
   sourceId: text("source_id"),
   title: text("title").notNull(),

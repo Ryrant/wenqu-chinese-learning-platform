@@ -3,8 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { StudentDiagnostic, StudentReviewCenter, StudentTodayPlan } from "./learning-loop-views";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
-import { numberValue, stringValue } from "./lib/platform-types";
+import { FAMILY_HELP_LABELS, numberValue, stringValue } from "./lib/platform-types";
 import { AbilityEvidenceProfile, DiagnosticStimulus } from "./diagnostic-evidence";
+import { EXCHANGE_PARTNERS, readFamilyPlan, readFamilyWorkSnapshot, type ExchangePartner } from "./lib/family-task";
+import { FamilyTaskGuide, FamilyWorkEvidence } from "./family-task-guide";
+import familyStyles from "./family-task-guide.module.css";
 
 export function ProgressRing({ value, label }: { value: number; label: string }) {
   return <div className="progress-ring" style={{ "--progress": `${value * 3.6}deg` } as React.CSSProperties}>
@@ -13,7 +16,7 @@ export function ProgressRing({ value, label }: { value: number; label: string })
 }
 
 type Props = { nav: string; data: WorkspaceData; act: Act; refresh: () => Promise<void>; notify: Notify; navigate: (target: string) => void };
-type RecordingDraft = { id: string; blob: Blob; url: string; assignmentId: string; familyTaskId: string | null; title: string };
+type RecordingDraft = { id: string; blob: Blob; url: string; assignmentId: string; familyTaskId: string | null; title: string; familyPartner?: ExchangePartner; familyRevision?: number };
 
 function PageTitle({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
   return <section className="welcome-row"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{detail}</p></div></section>;
@@ -25,18 +28,31 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
   const [busy, setBusy] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState(String(data.assignments.find((item) => item.status === "published")?.id ?? ""));
-  const [textDrafts, setTextDrafts] = useState<Record<string, string>>({});
-  const textAnswer = textDrafts[selectedAssignment] ?? "";
-  const setTextAnswer = (value: string) => setTextDrafts((drafts) => ({ ...drafts, [selectedAssignment]: value }));
+  const [textDrafts, setTextDrafts] = useState<Record<string, { answer: string; familyRevision?: number }>>({});
+  const textAnswer = textDrafts[selectedAssignment]?.answer ?? "";
+  const [partners, setPartners] = useState<Record<string, ExchangePartner>>({});
   const [recording, setRecording] = useState(false);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const [recordingDraft, setRecordingDraft] = useState<RecordingDraft | null>(null);
+  const recordingDraftUrl = recordingDraft?.url;
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const mounted = useRef(true);
   const published = data.assignments.filter((item) => item.status === "published");
   const familyTasks = data.recommendations.filter((item) => item.source_type === "family" && item.status === "pending" && item.assignment_id && (!item.familyReviewStatus || item.familyReviewStatus === "reviewed"));
   const familyTask = familyTasks.find((item) => `family:${item.id}` === selectedAssignment);
+  const familyPlan = readFamilyPlan(familyTask?.family_plan_json);
+  const familyRevision = familyPlan?.revision ?? 0;
+  const familyPartner = partners[selectedAssignment] ?? familyPlan?.partner ?? "family";
+  const setTextAnswer = (value: string) => setTextDrafts((drafts) => {
+    const next = { ...drafts };
+    if (!value) delete next[selectedAssignment];
+    else next[selectedAssignment] = { answer: value, familyRevision: drafts[selectedAssignment]?.familyRevision ?? (familyTask ? familyRevision : undefined) };
+    return next;
+  });
+  const textTaskChanged = !!familyTask && !!textAnswer && textDrafts[selectedAssignment]?.familyRevision !== familyRevision;
+  const recordingTask = recordingDraft?.familyTaskId ? data.recommendations.find((item) => item.id === recordingDraft.familyTaskId) : null;
+  const recordingTaskChanged = !!recordingDraft?.familyTaskId && (!recordingTask || (readFamilyPlan(recordingTask.family_plan_json)?.revision ?? 0) !== recordingDraft.familyRevision);
   const assignmentId = familyTask ? String(familyTask.assignment_id) : selectedAssignment.startsWith("family:") ? "" : selectedAssignment;
   const assignment = published.find((item) => item.id === assignmentId);
   const targetSelector = <label>提交任务<select value={selectedAssignment} onChange={(event) => setSelectedAssignment(event.target.value)} required disabled={recording || recordingBusy || busy}>
@@ -54,7 +70,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       }
     };
   }, []);
-  useEffect(() => () => { if (recordingDraft) URL.revokeObjectURL(recordingDraft.url); }, [recordingDraft]);
+  useEffect(() => () => { if (recordingDraftUrl) URL.revokeObjectURL(recordingDraftUrl); }, [recordingDraftUrl]);
   useEffect(() => { if (recorder.current?.state === "recording") recorder.current.stop(); }, [nav]);
   const masteryAverage = data.mastery.length
     ? Math.round(data.mastery.reduce((sum, row) => sum + numberValue(row.mastery) * 100, 0) / data.mastery.length)
@@ -111,12 +127,16 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     event.preventDefault();
     setBusy(true);
     try {
-      await act("submit_text", { assignmentId, familyTaskId: familyTask?.id ?? null, answer: textAnswer });
+      await act("submit_text", { assignmentId, familyTaskId: familyTask?.id ?? null, answer: textAnswer,
+        ...(familyTask ? { familyPartner, familyRevision: textDrafts[selectedAssignment]?.familyRevision ?? familyRevision } : {}) });
       setTextAnswer("");
       if (familyTask) setSelectedAssignment("");
       notify("作业已提交", "答案已进入教师人工审核队列。没有伪造自动分数。");
     } catch (reason) {
-      notify("提交失败", reason instanceof Error ? reason.message : "请重试", "error");
+      notify("提交失败", reason instanceof Error && reason.message === "family_task_changed" ? "交流任务已更新，请核对新要求后再提交；文字已保留。" : reason instanceof Error ? reason.message : "请重试", "error");
+      if (reason instanceof Error && reason.message === "family_task_changed") {
+        try { await refresh(); } catch (error) { notify("任务刷新失败", error instanceof Error ? error.message : "请刷新页面，文字已保留。", "error"); }
+      }
     } finally {
       setBusy(false);
     }
@@ -134,7 +154,8 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       const mediaRecorder = new MediaRecorder(stream);
       recorder.current = mediaRecorder;
       chunks.current = [];
-      const target = { assignmentId, familyTaskId: familyTask ? String(familyTask.id) : null, title: stringValue(familyTask?.title ?? assignment.title) };
+      const target = { assignmentId, familyTaskId: familyTask ? String(familyTask.id) : null, title: stringValue(familyTask?.title ?? assignment.title),
+        ...(familyTask ? { familyPartner, familyRevision } : {}) };
       mediaRecorder.ondataavailable = (event) => { if (event.data.size) chunks.current.push(event.data); };
       mediaRecorder.onstop = () => {
         mediaRecorder.stream.getTracks().forEach((track) => track.stop());
@@ -165,6 +186,8 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     form.append("submissionId", draft.id);
     form.append("reference", draft.title);
     if (draft.familyTaskId) form.append("familyTaskId", draft.familyTaskId);
+    if (draft.familyPartner) form.append("familyPartner", draft.familyPartner);
+    if (draft.familyRevision !== undefined) form.append("familyRevision", String(draft.familyRevision));
     setRecordingBusy(true);
     try {
       const response = await fetch("/api/v1/speech/submissions", { method: "POST", body: form });
@@ -175,7 +198,10 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       notify("录音已保存", result.message ?? "已转教师复核。");
       try { await refresh(); } catch (reason) { notify("录音已保存", `列表刷新失败：${reason instanceof Error ? reason.message : "请刷新页面"}`, "error"); }
     } catch (reason) {
-      notify("录音提交失败", `${reason instanceof Error ? reason.message : "请重试"}；录音已保留，可再次提交。`, "error");
+      notify("录音提交失败", reason instanceof Error && reason.message === "family_task_changed" ? "交流任务已更新，请核对新要求后重新录音；原录音仍保留供试听。" : `${reason instanceof Error ? reason.message : "请重试"}；录音已保留，可再次提交。`, "error");
+      if (reason instanceof Error && reason.message === "family_task_changed") {
+        try { await refresh(); } catch (error) { notify("任务刷新失败", error instanceof Error ? error.message : "请刷新页面，录音仍保留。", "error"); }
+      }
     } finally { setRecordingBusy(false); }
   }
 
@@ -183,7 +209,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     <div className="hero-actions"><button className="soft-button" type="button" onClick={speak} disabled={!assignment}>听任务标题</button>
       <button className={`soft-button ${recording ? "danger-button" : ""}`} type="button" onClick={toggleRecording} disabled={(!assignment && !recording) || recordingBusy || (!recording && assignment?.diagnostic_mode === "writing")}>{recording ? "停止录音并试听" : recordingDraft ? "重新录音" : "开始录音"}</button></div>
     {assignment?.diagnostic_mode === "writing" && <p>这是短文表达诊断，请在学习任务中提交文字。</p>}
-    {recordingDraft && <div className="recording-preview"><p>提交到：{recordingDraft.title}</p><audio controls src={recordingDraft.url} aria-label="录音试听"/><button className="primary-button" type="button" disabled={recordingBusy} onClick={uploadRecording}>{recordingBusy ? "正在提交…" : "提交录音给老师"}</button></div>}
+    {recordingDraft && <div className="recording-preview"><p>提交到：{recordingDraft.title}{recordingDraft.familyPartner ? ` · 交流对象：${EXCHANGE_PARTNERS[recordingDraft.familyPartner].zh}` : ""}</p><audio controls src={recordingDraft.url} aria-label="录音试听"/>{recordingTaskChanged && <p role="alert">交流要求已更新，请核对后重新录音。</p>}<button className="primary-button" type="button" disabled={recordingBusy || recordingTaskChanged} onClick={uploadRecording}>{recordingBusy ? "正在提交…" : "提交录音给老师"}</button></div>}
   </div>;
 
   if (nav === "AI 课堂") return <section>
@@ -214,6 +240,13 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       <p>{stringValue(item.activity_type)} · 截止 {stringValue(item.due_at)}</p>
     </article>)}</div>
     <section id="student-submission">
+    {familyTask && <article className="panel form-card"><FamilyTaskGuide plan={familyPlan} title={`家庭交流：${stringValue(familyTask.title)}`} detail={stringValue(familyTask.detail, "")} objectiveTitle={stringValue(familyTask.objectiveTitle, "")} expanded/>
+      <label>本次实际交流对象 / Actual partner<select value={familyPartner} disabled={recording || recordingBusy || busy} onChange={(event) => {
+        const partner = event.target.value as ExchangePartner;
+        setPartners({ ...partners, [selectedAssignment]: partner });
+        setRecordingDraft((draft) => draft?.familyTaskId === String(familyTask.id) ? { ...draft, familyPartner: partner } : draft);
+      }}>{Object.entries(EXCHANGE_PARTNERS).map(([value, label]) => <option key={value} value={value}>{label.zh} / {label.en}</option>)}</select></label>
+      <p>提交自己的提问、追问和总结；家长或见证教师记录帮助程度，语言表现由教师评价。 / Submit your own questions, follow-ups and summary. A guardian or witnessing teacher records the help used; a teacher evaluates the language.</p></article>}
     {!!assignment?.diagnostic_mode && <article className="panel diagnostic-task-prompt"><h3>{assignment.diagnostic_mode === "speaking" ? "图片口述诊断" : "短文表达诊断"}：{stringValue(assignment.title)}</h3><p>{stringValue(assignment.diagnostic_prompt)}</p>
       {!!assignment.diagnostic_media_id && <DiagnosticStimulus id={String(assignment.diagnostic_media_id)} kind="image"/>}
       <p>完成后提交{assignment.diagnostic_mode === "speaking" ? "录音" : "文字"}，由教师按学习目标评价。</p></article>}
@@ -221,7 +254,8 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       <h3>提交文字作业</h3>
       {targetSelector}
       <label>我的回答<textarea value={textAnswer} onChange={(event) => setTextAnswer(event.target.value)} disabled={busy || assignment?.diagnostic_mode === "speaking"} placeholder={assignment?.diagnostic_mode === "speaking" ? "图片口述请使用下方录音提交。" : "写下你的完整句子或小故事"} required maxLength={10000}/></label>
-      <button className="primary-button" disabled={busy || !assignment || assignment.diagnostic_mode === "speaking"}>提交给老师审核</button>
+      {textTaskChanged && <p role="alert">交流要求已更新，文字仍保留。<button className="soft-button" type="button" disabled={busy} onClick={() => setTextDrafts({ ...textDrafts, [selectedAssignment]: { answer: textAnswer, familyRevision } })}>已核对新要求，保留这份文字继续</button></p>}
+      <button className="primary-button" disabled={busy || textTaskChanged || !assignment || assignment.diagnostic_mode === "speaking"}>提交给老师审核</button>
     </form>
     <article className="panel form-card"><h3>提交录音作品</h3>{recordingControls}</article>
     </section>
@@ -237,7 +271,12 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     <article className="panel">
       <div className="panel-heading"><div><h3>最近提交</h3><small>只显示教师确认后的评分与反馈</small></div><span>{data.submissions.length} 条</span></div>
       {data.submissions.length ? data.submissions.map((item) => <div className="history-row" key={String(item.id)}>
-        <div><strong>{stringValue(item.assignmentTitle)}</strong><small>{stringValue(item.created_at)}{item.review_status === "reviewed" && item.feedback ? ` · 教师反馈：${stringValue(item.feedback)}` : ""}</small></div>
+        <div className={item.family_task_id ? familyStyles.workHistory : undefined}><strong>{stringValue(readFamilyWorkSnapshot(item.family_snapshot_json)?.title ?? item.familyTaskTitle ?? item.assignmentTitle)}</strong><small>{stringValue(item.created_at)}{item.review_status === "reviewed" && item.feedback ? ` · 教师反馈：${stringValue(item.feedback)}` : ""}</small>
+          {!!item.family_task_id && <details><summary>查看交流作品与原始要求 / View exchange work</summary><FamilyWorkEvidence value={item.family_snapshot_json}/>
+            {item.asset_key ? <audio controls preload="metadata" src={`/api/v1/submissions/${encodeURIComponent(String(item.id))}/audio`} aria-label="我的交流录音"/> : <p className="generated-copy">{stringValue(item.text_answer)}</p>}
+            <p>帮助程度：{FAMILY_HELP_LABELS[stringValue(item.family_help_level, "")] ?? "尚未确认"} · {item.family_confirmation_role === "teacher" ? "本班教师见证" : item.family_confirmed_at ? "交流已确认" : "等待交流确认"}</p>
+          </details>}
+        </div>
         <span className={`status ${item.review_status === "reviewed" ? "published" : "draft"}`}>{item.review_status === "reviewed" ? `${numberValue(item.score)} 分` : "待教师审核"}</span>
       </div>) : <p className="empty-state">完成第一次作业后，记录会显示在这里。</p>}
     </article>
@@ -246,15 +285,15 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const current = assignment;
   return <>
     <PageTitle eyebrow="学习总览 · 数据实时读取" title={`早上好，${data.user.displayName}！`} detail="今天也一起发现中文里的小惊喜。"/>
-    <StudentTodayPlan data={data} act={act} notify={notify} navigate={navigate}/>
+    <StudentTodayPlan data={data} act={act} notify={notify} navigate={navigate} onStartTask={(id) => { setSelectedAssignment(id); navigate("学习任务"); }}/>
     <section className="hero-learning">
       <div className="hero-copy">
         <span className="tag">正在学习 · {stringValue(current?.activity_type, "等待教师发布任务")}</span>
-        <h2>{stringValue(current?.title, "新的学习任务")}</h2>
-        <p>{current?.diagnostic_mode ? "先查看完整诊断要求，再提交作品给教师评价。" : "录音后可以试听和重录，确认后提交给老师。"}</p>
+        <h2>{stringValue(familyTask?.title ?? current?.title, "新的学习任务")}</h2>
+        <p>{familyTask ? "先查看交流步骤和提问卡，完成真实交流后提交自己的作品。" : current?.diagnostic_mode ? "先查看完整诊断要求，再提交作品给教师评价。" : "录音后可以试听和重录，确认后提交给老师。"}</p>
         <div className="lesson-meta"><span>建议 12 分钟</span><i/><span>{data.submissions.length} 次提交</span></div>
         {targetSelector}
-        {current?.diagnostic_mode ? <button className="primary-button" type="button" onClick={() => navigate("学习任务")}>查看诊断要求并作答</button> : recordingControls}
+        {familyTask ? <button className="primary-button" type="button" onClick={() => navigate("学习任务")}>查看交流要求并作答</button> : current?.diagnostic_mode ? <button className="primary-button" type="button" onClick={() => navigate("学习任务")}>查看诊断要求并作答</button> : recordingControls}
       </div>
       <div className="hero-art" aria-label="中秋团圆主题插画"><span className="sun-disc">圆</span><span className="roof roof-back"/><span className="roof roof-front"/><span className="lantern lantern-a">福</span><span className="lantern lantern-b">乐</span><span className="hill hill-a"/><span className="hill hill-b"/><span className="person person-a">小</span><span className="person person-b">语</span></div>
     </section>

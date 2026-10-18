@@ -143,12 +143,13 @@ export async function GET(request: Request) {
       LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
       WHERE a.tenant_id=? AND ${classAccess.sql}${guardianSubmissionFilter ? " AND EXISTS (SELECT 1 FROM enrollments fe WHERE fe.tenant_id=a.tenant_id AND fe.class_id=a.class_id AND fe.student_user_id=? AND fe.status='active')" : ""} GROUP BY a.id ORDER BY a.created_at DESC`)
       .bind(focusStudentId, tenantId, ...classAccess.args, ...guardianSubmissionArgs);
-    const submissionsQuery = db.prepare(`SELECT * FROM (SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName,ft.title AS familyTaskTitle,
+    const submissionsQuery = db.prepare(`SELECT * FROM (SELECT s.*,a.title AS assignmentTitle,u.display_name AS studentName,ft.title AS familyTaskTitle,fc.display_name AS familyConfirmedName,
       ROW_NUMBER() OVER (ORDER BY s.created_at DESC,s.rowid DESC) AS submissionRank,
       group_concat(DISTINCT lo.title) AS objectiveTitles
       FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
       JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
       LEFT JOIN users u ON u.id=s.student_user_id
+      LEFT JOIN users fc ON fc.id=s.family_confirmed_by
       LEFT JOIN learning_recommendations ft ON ft.id=s.family_task_id AND ft.tenant_id=s.tenant_id AND ft.source_type='family'
       LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
       LEFT JOIN learning_objectives lo ON lo.id=ao.objective_id AND lo.tenant_id=ao.tenant_id

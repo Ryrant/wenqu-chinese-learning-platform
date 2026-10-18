@@ -84,3 +84,10 @@ AND EXISTS (SELECT 1 FROM pragma_table_info('assignments') WHERE name='diagnosti
 AND EXISTS (SELECT 1 FROM pragma_table_info('assignments') WHERE name='diagnostic_prompt')
 AND EXISTS (SELECT 1 FROM pragma_table_info('assignments') WHERE name='diagnostic_media_id')
 AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='diagnostic_snapshot_json');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0008_family_exchange.sql'
+WHERE EXISTS (SELECT 1 FROM pragma_table_info('learning_recommendations') WHERE name='family_plan_json')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_snapshot_json')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_confirmed_by')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_confirmation_role');

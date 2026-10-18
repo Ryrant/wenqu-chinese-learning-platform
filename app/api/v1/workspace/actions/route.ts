@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", update_lesson_plan: "teacher", archive_lesson_plan: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
       create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian", confirm_family_submission: "guardian",
-      create_intervention: "teacher", suggest_intervention: "teacher",
+      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher",
       create_invitation: "admin", review_content: "admin", reprocess_content: "admin", archive_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
       submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
     };
@@ -236,7 +236,9 @@ export async function POST(request: Request) {
     if (action === "submit_text") {
       const assignmentId = requireText(body.assignmentId, "assignment_id");
       const answer = requireText(body.answer, "answer", 10000);
-      const result = await createStudentSubmission(db, context, { assignmentId, textAnswer: answer, familyTaskId: text(body.familyTaskId, 120) || null });
+      const result = await createStudentSubmission(db, context, { assignmentId, textAnswer: answer, familyTaskId: text(body.familyTaskId, 120) || null,
+        familyPartner: body.familyPartner === undefined ? undefined : requireText(body.familyPartner, "exchange_partner", 30),
+        familyRevision: body.familyRevision === undefined ? undefined : Number(body.familyRevision) });
       return Response.json(result, { status: 201 });
     }
 
@@ -285,6 +287,8 @@ export async function POST(request: Request) {
         title: requireText(body.title, "family_task_title", 120),
         detail: text(body.detail, 1000),
         dueAt: text(body.dueAt, 40) || null,
+        templateId: body.templateId === undefined ? undefined : text(body.templateId, 80),
+        partner: body.partner === undefined ? undefined : requireText(body.partner, "exchange_partner", 30),
       });
       await audit(db, tenantId, userId, "family_task.created", "learning_recommendation", result.id);
       return Response.json(result, { status: 201 });
@@ -298,6 +302,9 @@ export async function POST(request: Request) {
         title: requireText(body.title, "family_task_title", 120),
         detail: text(body.detail, 1000),
         dueAt: text(body.dueAt, 40) || null,
+        templateId: body.templateId === undefined ? undefined : text(body.templateId, 80),
+        partner: body.partner === undefined ? undefined : requireText(body.partner, "exchange_partner", 30),
+        revision: body.revision === undefined ? undefined : Number(body.revision),
       });
       await audit(db, tenantId, userId, "family_task.updated", "learning_recommendation", result.id);
       return Response.json(result);
@@ -309,12 +316,12 @@ export async function POST(request: Request) {
       return Response.json(result);
     }
 
-    if (action === "confirm_family_submission") {
+    if (action === "confirm_family_submission" || action === "confirm_alternative_exchange") {
       const result = await confirmFamilySubmission(db, context, {
         submissionId: requireText(body.submissionId, "submission_id", 120),
         helpLevel: requireText(body.helpLevel, "family_help_level", 30),
-      });
-      await audit(db, tenantId, userId, "family_submission.confirmed", "submission", result.submissionId, { helpLevel: result.helpLevel });
+      }, action === "confirm_alternative_exchange");
+      await audit(db, tenantId, userId, action === "confirm_alternative_exchange" ? "family_submission.witnessed" : "family_submission.confirmed", "submission", result.submissionId, { helpLevel: result.helpLevel });
       return Response.json(result);
     }
 

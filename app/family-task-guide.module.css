@@ -1,0 +1,3 @@
+.guide{min-width:0;margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--paper);overflow-wrap:anywhere}
+.guide summary{cursor:pointer;color:var(--green);font-weight:700;line-height:1.6}.guide h4,.guide h5{font-size:var(--font-body);margin:16px 0 8px}.guide p,.guide li{line-height:1.7}.guide ol,.guide ul{padding-left:22px}.guide li{margin:10px 0}.english{display:block;font-size:var(--font-caption);line-height:1.6;color:var(--muted);margin-top:4px}.copy{white-space:pre-wrap}.question{padding:8px 0;border-top:1px solid var(--line)}.question p{margin:6px 0}
+.workHistory{min-width:0;overflow-wrap:anywhere}.workHistory audio{display:block;width:100%;max-width:100%;margin:12px 0}
