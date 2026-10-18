@@ -109,12 +109,12 @@ export function StudentDiagnostic({ data, act, notify, onStartAssignment }: Loop
 
 export function StudentTodayPlan({ data, act, notify, navigate, onStartTask }: LoopProps & { navigate: (target: string) => void; onStartTask?: (id: string) => void }) {
   const [busyId, setBusyId] = useState("");
-  const kindLabels: Record<string, string> = { teacher: "教师干预", review: "到期错题", family: "家庭任务", assignment: "学习作业" };
+  const kindLabels: Record<string, string> = { teacher: "教师干预", review: "到期错题", family: "家庭任务", assignment: "学习作业", sequence: "练习与迁移" };
   async function handle(item: Record<string, unknown>) {
     const id = String(item.id);
     const kind = stringValue(item.kind, "");
     if (kind === "review") return navigate("成长档案");
-    if (kind === "assignment" || kind === "family") return onStartTask ? onStartTask(kind === "family" ? `family:${id}` : id) : navigate("学习任务");
+    if (kind === "assignment" || kind === "family" || kind === "sequence") return onStartTask ? onStartTask(kind === "family" ? `family:${id}` : id) : navigate("学习任务");
     setBusyId(id);
     try {
       await act("update_recommendation_status", { id, status: "completed" });
@@ -136,8 +136,8 @@ export function StudentTodayPlan({ data, act, notify, navigate, onStartTask }: L
       <div><strong>{stringValue(item.title)}</strong><small>{kindLabels[stringValue(item.kind, "")] ?? "普通作业"} · {dueLabel(item.dueAt ?? item.due_at)}</small>
         {item.kind === "teacher" && !!item.detail && <details className="support-evidence"><summary>查看练习与选择依据</summary><p className="generated-copy">{String(item.detail)}</p><small>标记完成仅记录练习状态，不生成能力成绩。</small></details>}
       </div>
-      {item.kind === "family" && item.familyReviewStatus && item.familyReviewStatus !== "reviewed" ? <span className="status draft">{item.familyConfirmedAt ? "待教师评价" : "待家长确认"}</span> : <button className="soft-button" type="button" disabled={busyId === String(item.id)} onClick={() => handle(item)}>
-        {stringValue(item.kind, "") === "review" ? "进入复习" : item.kind === "assignment" || item.kind === "family" ? "进入作业" : busyId === String(item.id) ? "更新中…" : "标记完成"}
+      {item.kind === "sequence" && item.waitingReview ? <span className="status draft">待教师评价</span> : item.kind === "family" && item.familyReviewStatus && item.familyReviewStatus !== "reviewed" ? <span className="status draft">{item.familyConfirmedAt ? "待教师评价" : "待家长确认"}</span> : <button className="soft-button" type="button" disabled={busyId === String(item.id)} onClick={() => handle(item)}>
+        {stringValue(item.kind, "") === "review" ? "进入复习" : item.kind === "assignment" || item.kind === "family" || item.kind === "sequence" ? "进入作业" : busyId === String(item.id) ? "更新中…" : "标记完成"}
       </button>}
     </div>) : <p className="empty-state">今天没有待办，完成新作业后会生成下一步计划。</p>}
   </article>;

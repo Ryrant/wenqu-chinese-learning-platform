@@ -2,8 +2,9 @@ import { ensurePlatformRuntime, type PlatformDatabase } from "./platform-runtime
 import type { PlatformContext } from "./platform-store";
 import type { DiagnosticMode, WorkDiagnosticSnapshot } from "./diagnostic-types";
 import { exchangePartner, FAMILY_EXCHANGE_RUBRIC, readFamilyPlan, type FamilyWorkSnapshot } from "./family-task";
+import { assertSequenceTarget } from "./learning-sequence-service";
 
-export type SubmissionTargetInput = { assignmentId: string; familyTaskId?: string | null; familyPartner?: string; familyRevision?: number };
+export type SubmissionTargetInput = { assignmentId: string; familyTaskId?: string | null; familyPartner?: string; familyRevision?: number; sequenceId?: string | null; sequenceStage?: string };
 export async function assertSubmissionTarget(db: PlatformDatabase, context: PlatformContext, input: SubmissionTargetInput) {
   if (typeof input.assignmentId !== "string" || !input.assignmentId.trim()) throw new Error("invalid_assignment_id");
   if (input.familyTaskId != null && typeof input.familyTaskId !== "string") throw new Error("invalid_family_task_id");
@@ -13,6 +14,7 @@ export async function assertSubmissionTarget(db: PlatformDatabase, context: Plat
       AND EXISTS (SELECT 1 FROM enrollments e WHERE e.tenant_id=a.tenant_id AND e.class_id=a.class_id AND e.student_user_id=? AND e.status='active')`)
     .bind(input.assignmentId, context.tenantId, context.userId).first<{ id: string; title: string; diagnosticMode: DiagnosticMode; diagnosticPrompt: string; diagnosticMediaId: string | null; rubricJson: string }>();
   if (!assignment) throw new Error("published_assignment_not_found");
+  const sequenceSnapshot = await assertSequenceTarget(db, context, input);
   let familySnapshot: FamilyWorkSnapshot | null = null;
   let familyPlanJson: string | null = null;
   if (input.familyTaskId) {
@@ -31,7 +33,8 @@ export async function assertSubmissionTarget(db: PlatformDatabase, context: Plat
       rubric: plan?.template ? FAMILY_EXCHANGE_RUBRIC : JSON.parse(assignment.rubricJson) };
     familyPlanJson = task.familyPlanJson;
   }
-  return { ...assignment, familySnapshot, familyPlanJson };
+  return { ...assignment, familySnapshot, familyPlanJson, sequenceSnapshot,
+    diagnosticMode: sequenceSnapshot ? sequenceSnapshot.medium === "audio" ? "speaking" as const : "writing" as const : assignment.diagnosticMode };
 }
 
 export async function createStudentSubmission(db: PlatformDatabase, context: PlatformContext, input: SubmissionTargetInput & {
@@ -51,7 +54,7 @@ export async function createStudentSubmission(db: PlatformDatabase, context: Pla
   }
   const id = input.id ?? crypto.randomUUID();
   let snapshot: WorkDiagnosticSnapshot | null = null;
-  if (assignment.diagnosticMode) {
+  if (assignment.diagnosticMode && !assignment.sequenceSnapshot) {
     const objectives = await db.prepare(`SELECT lo.id,lo.title FROM assignment_objectives ao
       JOIN learning_objectives lo ON lo.id=ao.objective_id AND lo.tenant_id=ao.tenant_id
       WHERE ao.tenant_id=? AND ao.assignment_id=?`).bind(context.tenantId, input.assignmentId).all<{ id: string; title: string }>();
@@ -60,12 +63,13 @@ export async function createStudentSubmission(db: PlatformDatabase, context: Pla
   }
   try {
     const results = await db.batch([
-      db.prepare(`INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,asset_key,family_task_id,diagnostic_snapshot_json,family_snapshot_json,confidence,review_status)
-        SELECT ?,?,?,?,?,?,?,?,?,0,'human_review'
+      db.prepare(`INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,asset_key,family_task_id,diagnostic_snapshot_json,family_snapshot_json,sequence_id,sequence_stage,sequence_snapshot_json,confidence,review_status)
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,0,'human_review'
         WHERE ? IS NULL OR EXISTS (SELECT 1 FROM learning_recommendations lr
           WHERE lr.id=? AND lr.tenant_id=? AND lr.student_user_id=? AND lr.assignment_id=?
             AND lr.source_type='family' AND lr.status='pending' AND lr.archived_at IS NULL AND lr.family_plan_json=?)`)
         .bind(id, context.tenantId, input.assignmentId, context.userId, answer, input.assetKey ?? null, input.familyTaskId || null, snapshot ? JSON.stringify(snapshot) : "{}", assignment.familySnapshot ? JSON.stringify(assignment.familySnapshot) : "{}",
+          assignment.sequenceSnapshot?.sequenceId ?? null, assignment.sequenceSnapshot?.stage ?? null, assignment.sequenceSnapshot ? JSON.stringify(assignment.sequenceSnapshot) : "{}",
           input.familyTaskId || null, input.familyTaskId || null, context.tenantId, context.userId, input.assignmentId, assignment.familyPlanJson),
       db.prepare(`INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json)
         SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM submissions WHERE id=? AND tenant_id=?)`)
@@ -78,6 +82,7 @@ export async function createStudentSubmission(db: PlatformDatabase, context: Pla
     }
   } catch (error) {
     if (input.familyTaskId && error instanceof Error && error.message.includes("submissions.tenant_id, submissions.family_task_id")) throw new Error("family_submission_pending");
+    if (input.sequenceId && error instanceof Error && error.message.includes("submissions.tenant_id, submissions.sequence_id, submissions.sequence_stage")) throw new Error("sequence_submission_pending");
     throw error;
   }
   return { id, reviewStatus: "human_review" };

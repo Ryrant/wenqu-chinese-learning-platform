@@ -1,4 +1,6 @@
 "use client";
+import { TeacherLearningSequences, SequenceReports } from "./learning-sequences";
+import { readSequenceWork } from "./lib/learning-sequence-types";
 
 import { AbilityEvidenceProfile, TeacherAbilityProfiles } from "./diagnostic-evidence";
 
@@ -57,6 +59,7 @@ const TARGET_LABELS: Record<string, string> = {
   diagnostic_attempt: "入学诊断",
   user: "成员账号",
   learning_recommendation: "学习与家庭任务",
+  learning_sequence: "迁移任务组",
   source_document: "内容资料",
   invitation: "成员邀请",
   consent: "监护授权",
@@ -73,6 +76,7 @@ const AUDIT_LABELS: Record<string, string> = {
   "member.status_changed": "更新成员状态",
   "member.created": "创建成员",
   "family_task.created": "创建家庭任务",
+  "learning_sequence.created": "发布练习与迁移任务",
   "family_submission.confirmed": "家长确认交流与帮助",
   "family_submission.witnessed": "教师见证替代交流与帮助",
   "family_task.updated": "编辑家庭任务",
@@ -200,9 +204,10 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
       <PageTitle eyebrow="人工复核与分层支持" title="作业批阅" detail={`${pending.length} 份待审核；教师确认评分后才更新掌握度。`}/>
       <section className="review-top-grid"><TeacherIntervention data={data} act={act} notify={notify}/><article className="panel review-summary"><span className="eyebrow">待处理队列</span><h3>教师确认</h3><p>AI 建议仅供参考，最终成绩和反馈由教师保存。</p><strong>{pending.length} 份待批阅</strong></article></section>
       <section className="review-workspace">
-        <article className="panel review-queue"><div className="panel-heading"><div><span className="eyebrow">待办摘要</span><h3>选择待批阅作品</h3></div><span>{pending.length} 份</span></div>{pending.length ? pending.map((item) => <button type="button" className={String(item.id) === selectedId ? "review-queue-item active" : "review-queue-item"} key={String(item.id)} disabled={reviewBusy} onClick={() => setSelectedSubmissionId(String(item.id))}><span><strong>{stringValue(item.studentName)}</strong><small>{stringValue(item.assignmentTitle)}</small></span><em>{item.asset_key ? "语音" : "文字"}</em></button>) : <p className="empty-state">当前没有待批阅作品。新的学生提交会显示在这里。</p>}</article>
+        <article className="panel review-queue"><div className="panel-heading"><div><span className="eyebrow">待办摘要</span><h3>选择待批阅作品</h3></div><span>{pending.length} 份</span></div>{pending.length ? pending.map((item) => <button type="button" className={String(item.id) === selectedId ? "review-queue-item active" : "review-queue-item"} key={String(item.id)} disabled={reviewBusy} onClick={() => setSelectedSubmissionId(String(item.id))}><span><strong>{stringValue(item.studentName)}</strong><small>{readSequenceWork(item.sequence_snapshot_json)?.title ?? stringValue(item.assignmentTitle)}</small></span><em>{item.asset_key ? "语音" : "文字"}</em></button>) : <p className="empty-state">当前没有待批阅作品。新的学生提交会显示在这里。</p>}</article>
         <article className="panel review-editor">{selectedSubmission ? <SubmissionReview submission={selectedSubmission} review={review} data={data} savedDraft={reviewDrafts[selectedId]} setDraft={(draft) => setReviewDrafts((current) => ({ ...current, [selectedId]: draft }))} busy={reviewBusy} setBusy={setReviewBusy} act={act} notify={notify} onReviewed={() => setSelectedSubmissionId("")}/> : <p className="empty-state">选择左侧作品后，可在这里查看内容、生成建议并完成教师确认。</p>}</article>
       </section>
+      <TeacherLearningSequences data={data} act={act} notify={notify}/>
     </section>;
   }
 
@@ -227,7 +232,8 @@ export function GuardianView({ nav, data, act, notify, selectStudent }: Guardian
     <PageTitle eyebrow="可追溯学情" title="成长报告" detail="周报只使用最近 7 天真实作业、教师确认成绩、最新掌握度和待复习项。" action={childSwitch}/>
     <GuardianWeeklyReport data={data}/>
     <AbilityEvidenceProfile key={data.selectedStudent?.id} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
-    <article className="panel reviewed-work-list"><h3>已审核作品</h3>{reviewed.length ? reviewed.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{stringValue(item.assignmentTitle)}</strong><small>{localDate(item.reviewed_at ?? item.created_at)} · 学习目标：{stringValue(item.objectiveTitles, "未关联目标")}</small><p>教师反馈：{textSummary(item.feedback, "教师暂未填写文字反馈")}</p></div><span className="status published">{numberValue(item.score)} 分</span></div>) : <p className="empty-state">当前孩子最近还没有教师确认的作品。</p>}</article>
+    <SequenceReports sequences={(data.learningSequences ?? []).filter((item) => item.studentUserId === data.selectedStudent?.id)}/>
+    <article className="panel reviewed-work-list"><h3>已审核作品</h3>{reviewed.length ? reviewed.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{readSequenceWork(item.sequence_snapshot_json)?.title ?? stringValue(item.assignmentTitle)}</strong><small>{localDate(item.reviewed_at ?? item.created_at)} · 学习目标：{readSequenceWork(item.sequence_snapshot_json)?.objectiveTitle ?? stringValue(item.objectiveTitles, "未关联目标")}</small><p>教师反馈：{textSummary(item.feedback, "教师暂未填写文字反馈")}</p></div><span className="status published">{numberValue(item.score)} 分</span></div>) : <p className="empty-state">当前孩子最近还没有教师确认的作品。</p>}</article>
   </section>;
 
   if (nav === "家庭任务") return <section><PageTitle eyebrow="家庭陪伴任务" title="家庭任务" detail="孩子提交作品后，家长记录交流与帮助情况，由教师评价完成任务。" action={childSwitch}/><GuardianFamilyTasks key={data.selectedStudent?.id} data={data} act={act} notify={notify}/></section>;

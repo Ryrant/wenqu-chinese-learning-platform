@@ -25,6 +25,7 @@ import { searchPublishedKnowledge } from "../../../../lib/retrieval";
 import { createStudentSubmission } from "../../../../lib/submission-service";
 import { assertDiagnosticMedia } from "../../../../lib/diagnostic-media";
 import { suggestIntervention } from "../../../../lib/intervention-support";
+import { createLearningSequence } from "../../../../lib/learning-sequence-service";
 
 type ActionBody = { action?: string; [key: string]: unknown };
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", update_lesson_plan: "teacher", archive_lesson_plan: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
       create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian", confirm_family_submission: "guardian",
-      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher",
+      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher", create_learning_sequence: "teacher",
       create_invitation: "admin", review_content: "admin", reprocess_content: "admin", archive_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
       submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
     };
@@ -237,6 +238,7 @@ export async function POST(request: Request) {
       const assignmentId = requireText(body.assignmentId, "assignment_id");
       const answer = requireText(body.answer, "answer", 10000);
       const result = await createStudentSubmission(db, context, { assignmentId, textAnswer: answer, familyTaskId: text(body.familyTaskId, 120) || null,
+        sequenceId: text(body.sequenceId, 120) || null, sequenceStage: body.sequenceStage === undefined ? undefined : requireText(body.sequenceStage, "sequence_stage", 30),
         familyPartner: body.familyPartner === undefined ? undefined : requireText(body.familyPartner, "exchange_partner", 30),
         familyRevision: body.familyRevision === undefined ? undefined : Number(body.familyRevision) });
       return Response.json(result, { status: 201 });
@@ -346,11 +348,21 @@ export async function POST(request: Request) {
       return Response.json(result);
     }
 
+    if (action === "create_learning_sequence") {
+      const result = await createLearningSequence(db, context, {
+        id: body.id === undefined ? undefined : requireText(body.id, "sequence_id", 120),
+        baselineSubmissionId: requireText(body.baselineSubmissionId, "baseline_submission_id", 120), objectiveId: requireText(body.objectiveId, "objective_id", 120),
+        title: requireText(body.title, "sequence_title", 120), practicePrompt: requireText(body.practicePrompt, "practice_prompt", 2000),
+        transferPrompt: requireText(body.transferPrompt, "transfer_prompt", 2000), transferContext: requireText(body.transferContext, "transfer_context", 1000),
+      });
+      return Response.json(result, { status: 201 });
+    }
+
     if (action === "review_submission" || action === "confirm_submission_review") {
       const id = requireText(body.id, "submission_id");
       const score = typeof body.score === "number" ? body.score : Number.NaN;
       if (action === "review_submission") await assertSubmissionReviewAccess(db, context, id);
-      const result = await confirmSubmissionReview(db, context, { submissionId: id, score, comment: text(body.comment, 2000), objectiveScores: body.objectiveScores, dimensionScores: body.dimensionScores });
+      const result = await confirmSubmissionReview(db, context, { submissionId: id, score, comment: text(body.comment, 2000), objectiveScores: body.objectiveScores, dimensionScores: body.dimensionScores, helpLevel: body.helpLevel, contextConfirmed: body.contextConfirmed });
       await audit(db, tenantId, userId, "submission.reviewed", "submission", id, { score });
       return Response.json({ ...result, id, reviewStatus: "reviewed" });
     }

@@ -57,8 +57,9 @@ export const submissions = sqliteTable("submissions", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), assignmentId: text("assignment_id").notNull(), studentUserId: text("student_user_id").notNull(), textAnswer: text("text_answer"), assetKey: text("asset_key"), score: real("score"), confidence: real("confidence"), reviewStatus: text("review_status").notNull().default("auto"), feedback: text("feedback"), reviewedAt: text("reviewed_at"), submittedAt: createdAt(),
   familyTaskId: text("family_task_id"), familyHelpLevel: text("family_help_level"), familyConfirmedAt: text("family_confirmed_at"),
   familySnapshotJson: text("family_snapshot_json").notNull().default("{}"), familyConfirmedBy: text("family_confirmed_by"), familyConfirmationRole: text("family_confirmation_role"),
+  sequenceId: text("sequence_id"), sequenceStage: text("sequence_stage"), sequenceSnapshotJson: text("sequence_snapshot_json").notNull().default("{}"),
   diagnosticSnapshotJson: text("diagnostic_snapshot_json").notNull().default("{}"),
-}, (table) => [index("submissions_tenant_idx").on(table.tenantId), index("submissions_assignment_idx").on(table.assignmentId), uniqueIndex("family_submission_pending_idx").on(table.tenantId, table.familyTaskId).where(sql`${table.familyTaskId} IS NOT NULL AND ${table.reviewStatus}!='reviewed'`)]);
+}, (table) => [index("submissions_tenant_idx").on(table.tenantId), index("submissions_assignment_idx").on(table.assignmentId), uniqueIndex("family_submission_pending_idx").on(table.tenantId, table.familyTaskId).where(sql`${table.familyTaskId} IS NOT NULL AND ${table.reviewStatus}!='reviewed'`), uniqueIndex("sequence_submission_pending_idx").on(table.tenantId, table.sequenceId, table.sequenceStage).where(sql`${table.sequenceId} IS NOT NULL AND ${table.reviewStatus}!='reviewed'`)]);
 
 export const submissionReviews = sqliteTable("submission_reviews", {
   id: text("id").primaryKey(),
@@ -72,6 +73,7 @@ export const submissionReviews = sqliteTable("submission_reviews", {
   weaknessTagsJson: text("weakness_tags_json").notNull().default("[]"),
   objectiveScoresJson: text("objective_scores_json").notNull().default("[]"),
   dimensionScoresJson: text("dimension_scores_json").notNull().default("[]"),
+  evidenceJson: text("evidence_json").notNull().default("{}"),
   status: text("status", { enum: ["ai_suggested", "confirmed"] }).notNull(),
   createdAt: createdAt(),
 }, (table) => [
@@ -171,6 +173,14 @@ export const learningRecommendations = sqliteTable("learning_recommendations", {
   index("learning_recommendations_student_idx").on(table.tenantId, table.studentUserId, table.status, table.dueAt),
   uniqueIndex("learning_recommendation_source_idx").on(table.tenantId, table.studentUserId, table.sourceType, table.sourceId),
 ]);
+
+export const learningSequences = sqliteTable("learning_sequences", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), studentUserId: text("student_user_id").notNull(),
+  assignmentId: text("assignment_id").notNull(), objectiveId: text("objective_id").notNull(), objectiveTitle: text("objective_title").notNull(),
+  baselineSubmissionId: text("baseline_submission_id").notNull(), baselineSnapshotJson: text("baseline_snapshot_json").notNull(),
+  title: text("title").notNull(), practicePrompt: text("practice_prompt").notNull(), transferPrompt: text("transfer_prompt").notNull(), transferContext: text("transfer_context").notNull(),
+  rubricJson: text("rubric_json").notNull(), medium: text("medium").notNull(), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+}, (table) => [index("learning_sequences_student_idx").on(table.tenantId, table.studentUserId)]);
 
 export const masterySnapshots = sqliteTable("mastery_snapshots", {
   id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), studentUserId: text("student_user_id").notNull(), objectiveId: text("objective_id").notNull(), mastery: real("mastery").notNull(), evidenceCount: integer("evidence_count").notNull().default(0), measuredAt: createdAt(),

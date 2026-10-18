@@ -182,6 +182,8 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_recommendations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, objective_id TEXT, source_type TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', due_at TEXT, status TEXT NOT NULL DEFAULT 'pending', created_by TEXT NOT NULL, completed_at TEXT, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS learning_recommendations_student_idx ON learning_recommendations (tenant_id,student_user_id,status,due_at)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS learning_recommendation_source_idx ON learning_recommendations (tenant_id,student_user_id,source_type,source_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS learning_sequences (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, assignment_id TEXT NOT NULL, objective_id TEXT NOT NULL, objective_title TEXT NOT NULL, baseline_submission_id TEXT NOT NULL, baseline_snapshot_json TEXT NOT NULL, title TEXT NOT NULL, practice_prompt TEXT NOT NULL, transfer_prompt TEXT NOT NULL, transfer_context TEXT NOT NULL, rubric_json TEXT NOT NULL, medium TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS learning_sequences_student_idx ON learning_sequences (tenant_id,student_user_id)"),
   ]);
   for (const statement of [
     "ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT",
@@ -206,9 +208,14 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     "ALTER TABLE submissions ADD COLUMN family_snapshot_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE submissions ADD COLUMN family_confirmed_by TEXT",
     "ALTER TABLE submissions ADD COLUMN family_confirmation_role TEXT",
+    "ALTER TABLE submissions ADD COLUMN sequence_id TEXT",
+    "ALTER TABLE submissions ADD COLUMN sequence_stage TEXT",
+    "ALTER TABLE submissions ADD COLUMN sequence_snapshot_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE submission_reviews ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'",
   ]) await trySchema(db, statement);
   await db.batch([
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_submission_pending_idx ON submissions (tenant_id,family_task_id) WHERE family_task_id IS NOT NULL AND review_status!='reviewed'"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_submission_pending_idx ON submissions (tenant_id,sequence_id,sequence_stage) WHERE sequence_id IS NOT NULL AND review_status!='reviewed'"),
     db.prepare("UPDATE lesson_plans SET updated_at=created_at WHERE updated_at IS NULL"),
     db.prepare("UPDATE learning_recommendations SET updated_at=created_at WHERE updated_at IS NULL"),
     db.prepare("UPDATE source_documents SET updated_at=created_at WHERE updated_at IS NULL"),
@@ -313,7 +320,7 @@ export function platformApiError(error: unknown) {
         ? 404
         : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
-          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed"].includes(message) ? 409
+          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict"].includes(message) ? 409
           : message.startsWith("invalid_") ? 400
       : message === "authentication_config_missing"
           ? 500

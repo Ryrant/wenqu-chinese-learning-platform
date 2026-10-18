@@ -5,6 +5,8 @@ import type { PlatformDatabase } from "../../../lib/platform-runtime";
 import { loadPlatformSettings, publicPlatformSettings } from "../../../lib/platform-settings";
 import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
 import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
+import { readSequenceWorkspace } from "../../../lib/learning-sequence-service";
+import { SEQUENCE_STAGE_LABELS, sequenceTaskId } from "../../../lib/learning-sequence-types";
 
 export const dynamic = "force-dynamic";
 
@@ -154,7 +156,7 @@ export async function GET(request: Request) {
       LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
       LEFT JOIN learning_objectives lo ON lo.id=ao.objective_id AND lo.tenant_id=ao.tenant_id
       WHERE s.tenant_id=? AND ${submissionAccess.sql}${guardianSubmissionFilter}
-      GROUP BY s.id) WHERE submissionRank<=50 OR (family_task_id IS NOT NULL AND review_status!='reviewed')
+      GROUP BY s.id) WHERE submissionRank<=50 OR ((family_task_id IS NOT NULL OR sequence_id IS NOT NULL) AND review_status!='reviewed')
       ORDER BY created_at DESC,submissionRank`)
       .bind(tenantId, ...submissionAccess.args, ...guardianSubmissionArgs);
     const weeklyStatsQuery = db.prepare(`SELECT
@@ -299,6 +301,14 @@ export async function GET(request: Request) {
         dueAt: typeof item.due_at === "string" ? item.due_at : null,
       })),
     ];
+    const sequenceWorkspace = await readSequenceWorkspace(db, context, admin || teacher ? null : focusStudentId);
+    for (const sequence of sequenceWorkspace.learningSequences.filter((item) => item.studentUserId === focusStudentId)) {
+      const stage = sequence.practice.some((work) => work.reviewed) ? "transfer" : "practice";
+      const works = sequence[stage];
+      if (stage === "transfer" && works.some((work) => work.reviewed)) continue;
+      planCandidates.push({ id: sequenceTaskId(sequence.id, stage), kind: "sequence", title: `${sequence.title} · ${SEQUENCE_STAGE_LABELS[stage]}`,
+        waitingReview: works.some((work) => !work.reviewed), dueAt: null });
+    }
     const settings = await loadPlatformSettings(db);
     return Response.json({
       workspace: { tenantId, name: "华文知行示范学校", region: "sg", sampleData: true },
@@ -314,6 +324,7 @@ export async function GET(request: Request) {
       diagnosticSummary: diagnosticSummary ?? null,
       recommendations: recommendations.results,
       learningPlan: rankLearningPlan(planCandidates),
+      ...sequenceWorkspace,
       availableStudents: availableStudentsResult.results,
       selectedStudent,
       weeklyReport,

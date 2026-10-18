@@ -70,7 +70,7 @@ async function fixture(t) {
   ]);
   const text = (familyTaskId) => act(actors.student, "submit_text", { assignmentId: assignment.id, answer: "这道家常菜很好吃，我想介绍它。", familyTaskId }, 201);
   const review = (id, extra = {}) => ({ id, score: 80, comment: "表达完整，下一步练习说明步骤。", ...extra });
-  const upload = async (cookie, { id = crypto.randomUUID(), familyTaskId, familyPartner, familyRevision, assignmentId = assignment.id, bytes = new Uint8Array(512).fill(7) } = {}, status = 201) => {
+  const upload = async (cookie, { id = crypto.randomUUID(), familyTaskId, familyPartner, familyRevision, sequenceId, sequenceStage, assignmentId = assignment.id, bytes = new Uint8Array(512).fill(7) } = {}, status = 201) => {
     const form = new FormData();
     form.set("audio", new File([bytes], "recording.wav", { type: "audio/wav" }));
     form.set("assignmentId", assignmentId);
@@ -78,6 +78,8 @@ async function fixture(t) {
     if (familyTaskId) form.set("familyTaskId", familyTaskId);
     if (familyPartner !== undefined) form.set("familyPartner", familyPartner);
     if (familyRevision !== undefined) form.set("familyRevision", String(familyRevision));
+    if (sequenceId !== undefined) form.set("sequenceId", sequenceId);
+    if (sequenceStage !== undefined) form.set("sequenceStage", sequenceStage);
     const response = await api.upload(new Request("http://127.0.0.1/api/v1/speech/submissions", { method: "POST", headers: { cookie }, body: form }));
     const result = await response.json();
     assert.equal(response.status, status, JSON.stringify(result));
@@ -620,6 +622,114 @@ test("family task revisions protect text and audio drafts and cannot change betw
   assert.equal(snapshot.plan.partner, "teacher"); assert.equal(snapshot.partner, "peer", "actual partner is a submission-level fact");
 });
 
+test("learning sequences connect a reviewed baseline, practice and transfer with frozen criteria and measured evidence", async (t) => {
+  const f = await fixture(t);
+  const baseline = await f.text();
+  const input = { id: crypto.randomUUID(), baselineSubmissionId: baseline.id, objectiveId: f.goals[0], title: "推荐家常菜的迁移验证", practicePrompt: "练习用先、再说明做法，并解释推荐理由。", transferPrompt: "向同伴推荐另一道菜，回答一个新问题。", transferContext: "从向家人介绍喜欢的菜，改为向同伴推荐另一道菜。" };
+  await f.act(f.actors.teacher, "create_learning_sequence", input, 404);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(baseline.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 35 }], dimensionScores: [{ name: "语言表达", score: 30 }], helpLevel: "prompted" }));
+  await f.act(f.actors.teacher, "create_learning_sequence", { ...input, objectiveId: f.goals[1] }, 400);
+  await f.act(f.actors.teacher, "create_learning_sequence", { ...input, transferPrompt: input.practicePrompt }, 400);
+  const sequence = await f.act(f.actors.teacher, "create_learning_sequence", input, 201);
+  assert.equal((await f.act(f.actors.teacher, "create_learning_sequence", input, 201)).id, sequence.id);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='learning_sequence.created' AND target_id=?").bind(sequence.id).first()).count, 1);
+  await f.act(f.actors.teacher, "create_learning_sequence", { ...input, title: "重试不得覆盖原任务" }, 409);
+  const submit = (stage, extra = {}, status = 201) => f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, sequenceId: sequence.id, sequenceStage: stage, answer: `${stage}：先介绍食材，再说明理由。`, ...extra }, status);
+  await submit("transfer", {}, 409);
+  await submit("invalid-stage", {}, 400);
+  const practice = await submit("practice");
+  await submit("practice", {}, 409);
+  assert.equal((await f.workspace(f.actors.student)).learningPlan.find((item) => item.kind === "sequence").waitingReview, true);
+  assert.equal((await f.db.prepare("SELECT score FROM submissions WHERE id=?").bind(practice.id).first()).score, null);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(practice.id), 400);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(practice.id, { helpLevel: "invented" }), 400);
+  await f.db.prepare("UPDATE assignments SET title='课程标题已修改',rubric_json=? WHERE id=?").bind(JSON.stringify([{ name: "新维度", weight: 100 }]), f.assignment.id).run();
+  await f.db.prepare("DELETE FROM assignment_objectives WHERE assignment_id=? AND objective_id=?").bind(f.assignment.id, f.goals[0]).run();
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(practice.id, { helpLevel: "prompted", objectiveScores: [{ objectiveId: f.goals[1], score: 80 }] }), 400);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(practice.id, { helpLevel: "prompted", objectiveScores: [{ objectiveId: f.goals[0], score: 55 }], dimensionScores: [{ name: "语言表达", score: 50 }] }));
+  const plan = (await f.workspace(f.actors.student)).learningPlan.find((item) => item.kind === "sequence");
+  assert.equal(plan.id, `sequence:${sequence.id}:transfer`); assert.equal(plan.waitingReview, false);
+  const transfer = await submit("transfer");
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(transfer.id, { helpLevel: "independent", contextConfirmed: "yes" }), 400);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(transfer.id, { helpLevel: "independent", contextConfirmed: true, objectiveScores: [{ objectiveId: f.goals[0], score: 75 }], dimensionScores: [{ name: "语言表达", score: 70 }] }));
+  for (const actor of ["student", "teacher", "guardian", "admin"]) {
+    const stored = (await f.workspace(f.actors[actor])).learningSequences.find((item) => item.id === sequence.id);
+    assert.equal(stored.baseline.id, baseline.id); assert.equal(stored.practice[0].id, practice.id); assert.equal(stored.transfer[0].id, transfer.id);
+    assert.equal(stored.baseline.objectives[0].score, 35); assert.equal(stored.transfer[0].objectives[0].score, 75);
+    assert.equal(stored.baseline.title, "介绍一道家常菜"); assert.equal(stored.practicePrompt, input.practicePrompt);
+    assert.deepEqual(stored.rubric, rubric); assert.deepEqual(stored.transfer[0].rubric, rubric);
+    assert.deepEqual(stored.baseline.dimensions, [{ name: "语言表达", score: 30 }]);
+    assert.deepEqual(stored.transfer[0].dimensions, [{ name: "语言表达", score: 70 }]);
+    assert.equal(stored.baseline.helpLevel, "prompted"); assert.equal(stored.transfer[0].helpLevel, "independent"); assert.equal(stored.transfer[0].contextConfirmed, true);
+    assert.match(stored.transfer[0].textAnswer, /transfer/);
+  }
+  assert.ok(!(await f.workspace(f.actors.student)).learningPlan.some((item) => item.kind === "sequence"));
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM mastery_snapshots WHERE student_user_id=? AND objective_id=?").bind(f.ids.student, f.goals[0]).first()).count, 3);
+});
+
+test("sequence audio, permissions and retries preserve the original stage and cannot cross students, classes or tenants", async (t) => {
+  const f = await fixture(t);
+  const baseline = await f.upload(f.actors.student);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(baseline.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 50 }], helpLevel: "unknown" }));
+  const input = { baselineSubmissionId: baseline.id, objectiveId: f.goals[0], title: "录音迁移", practicePrompt: "口述并练习解释理由。", transferPrompt: "向不同同伴推荐另一道菜并回答新问题。", transferContext: "交流对象与菜品改变。" };
+  for (const actor of ["student", "guardian"]) await f.act(f.actors[actor], "create_learning_sequence", input, 403);
+  const otherClass = await f.act(f.actors.otherTeacher, "create_class", { name: "另一教师的班级", level: "A2" }, 201);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: otherClass.id, studentUserIds: [f.ids.student] });
+  for (const actor of ["otherTeacher", "otherTenant"]) await f.act(f.actors[actor], "create_learning_sequence", input, 403);
+  const sequence = await f.act(f.actors.teacher, "create_learning_sequence", input, 201);
+  const target = { sequenceId: sequence.id, sequenceStage: "practice" };
+  await f.upload(f.actors.stranger, target, 404); await f.upload(f.actors.student, { ...target, sequenceStage: "transfer" }, 409);
+  await f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, ...target, answer: "录音任务不能用文字代替。" }, 400);
+  const id = crypto.randomUUID(); const practice = await f.upload(f.actors.student, { id, ...target });
+  await f.upload(f.actors.student, { id, ...target }, 200);
+  await f.upload(f.actors.student, { id, ...target, sequenceStage: "transfer" }, 409);
+  await f.upload(f.actors.student, target, 409);
+  for (const actor of ["stranger", "otherTeacher", "otherGuardian", "otherTenant"]) {
+    const data = await f.workspace(f.actors[actor]);
+    assert.ok(!data.learningSequences.some((item) => item.id === sequence.id));
+    assert.ok(!data.sequenceSources.some((item) => item.work.id === baseline.id));
+    assert.equal((await f.readAudio(f.actors[actor], practice.id)).status, 404);
+  }
+  for (const actor of ["student", "guardian"]) assert.equal((await f.workspace(f.actors[actor])).sequenceSources.length, 0);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "跨角色教师", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  await f.act(f.actors.otherTeacher, "create_learning_sequence", input, 403);
+  assert.ok(!(await f.workspace(f.actors.otherTeacher)).sequenceSources.some((item) => item.work.id === baseline.id));
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(practice.id, { helpLevel: "assisted" }));
+  const transfer = await f.upload(f.actors.student, { ...target, sequenceStage: "transfer" });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(transfer.id, { helpLevel: "prompted", contextConfirmed: false }));
+  const stored = (await f.workspace(f.actors.student)).learningSequences.find((item) => item.id === sequence.id);
+  assert.equal(stored.transfer[0].helpLevel, "prompted"); assert.equal(stored.transfer[0].contextConfirmed, false);
+  assert.deepEqual(stored.transfer[0].objectives, []); assert.deepEqual(stored.transfer[0].dimensions, []);
+  assert.equal((await f.readAudio(f.actors.guardian, transfer.id)).status, 200);
+});
+
+test("legacy baseline criteria remain unknown and sequence evidence is not truncated with recent submission history", async (t) => {
+  const f = await fixture(t);
+  const baseline = await f.text();
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(baseline.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 50 }] }));
+  await f.db.prepare("UPDATE submission_reviews SET evidence_json='{}' WHERE submission_id=?").bind(baseline.id).run();
+  const input = { baselineSubmissionId: baseline.id, objectiveId: f.goals[0], title: "旧作品迁移", practicePrompt: "针对初次困难练习。", transferPrompt: "在新的情境中独立表达。", transferContext: "从家庭交流改为课堂推荐。" };
+  const sequence = await f.act(f.actors.teacher, "create_learning_sequence", input, 201);
+  const practice = await f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, sequenceId: sequence.id, sequenceStage: "practice", answer: "先练习。" }, 201);
+  for (let index = 0; index < 52; index++) await f.db.prepare("INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,review_status,score) VALUES (?,?,?,?,?,'reviewed',50)").bind(`later-${index}`, f.tenantId, f.assignment.id, f.ids.student, "后续普通记录").run();
+  const teacher = await f.workspace(f.actors.teacher);
+  assert.ok(teacher.submissions.some((item) => item.id === practice.id));
+  assert.ok(teacher.sequenceSources.some((item) => item.work.id === baseline.id));
+  const stored = (await f.workspace(f.actors.guardian)).learningSequences.find((item) => item.id === sequence.id);
+  assert.equal(stored.baseline.rubric, null); assert.equal(stored.baseline.helpLevel, "unknown");
+  assert.equal(stored.practice[0].reviewed, false); assert.equal(stored.practice[0].score, null); assert.deepEqual(stored.practice[0].dimensions, []);
+  await f.db.prepare("UPDATE assignments SET rubric_json=? WHERE id=?").bind(JSON.stringify([{ name: "替换量规", weight: 100 }]), f.assignment.id).run();
+  assert.deepEqual((await f.workspace(f.actors.student)).learningSequences.find((item) => item.id === sequence.id).rubric, rubric);
+  const diagnostic = await f.act(f.actors.teacher, "create_assignment", { classId: f.classroom.id, title: "原始量规已保留的短文", activityType: "表达", objectiveIds: [f.goals[0]], rubric, diagnosticMode: "writing", diagnosticPrompt: "写下推荐理由。" }, 201);
+  await f.act(f.actors.teacher, "publish_assignment", { id: diagnostic.id });
+  const writing = await f.act(f.actors.student, "submit_text", { assignmentId: diagnostic.id, answer: "因为简单又好吃。" }, 201);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(writing.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 60 }] }));
+  await f.db.prepare("UPDATE submission_reviews SET evidence_json='{}' WHERE submission_id=?").bind(writing.id).run();
+  const known = (await f.workspace(f.actors.teacher)).sequenceSources.find((item) => item.work.id === writing.id);
+  assert.deepEqual(known.work.rubric, rubric, "existing diagnostic criteria are historical evidence, not reconstructed metadata");
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {
@@ -635,6 +745,8 @@ test("additive migration upgrades existing data and runtime initialization is re
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0006_learning_workflow_evidence.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0007_ability_evidence.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0008_family_exchange.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0009_learning_sequences.sql'").get());
+    assert.deepEqual({ ...db.prepare("SELECT score,sequence_id,sequence_stage,sequence_snapshot_json FROM submissions WHERE id='legacy-exchange'").get() }, { score: 81, sequence_id: null, sequence_stage: null, sequence_snapshot_json: "{}" });
     assert.ok(db.prepare("SELECT name FROM pragma_table_info('submissions') WHERE name='diagnostic_snapshot_json'").get());
   } finally { db.close(); }
   const runtimeDb = new api.NodeSqliteDatabase("file::memory:");

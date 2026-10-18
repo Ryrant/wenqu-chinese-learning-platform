@@ -91,3 +91,12 @@ WHERE EXISTS (SELECT 1 FROM pragma_table_info('learning_recommendations') WHERE 
 AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_snapshot_json')
 AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_confirmed_by')
 AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='family_confirmation_role');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0009_learning_sequences.sql'
+WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='learning_sequences')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='sequence_id')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='sequence_stage')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='sequence_snapshot_json')
+AND EXISTS (SELECT 1 FROM pragma_table_info('submission_reviews') WHERE name='evidence_json')
+AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='sequence_submission_pending_idx');
