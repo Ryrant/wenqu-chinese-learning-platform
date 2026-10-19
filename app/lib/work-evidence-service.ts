@@ -6,10 +6,10 @@ import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 
 export type WorkRow = {
-  id: string; assignment_id: string; student_user_id: string; studentName: string; className: string; assignmentTitle: string; assignmentStatus: string;
+  id: string; assignment_id: string; student_user_id: string; studentName: string; classId: string; className: string; assignmentTitle: string; assignmentStatus: string;
   text_answer: string | null; asset_key: string | null; score: number | null; feedback: string | null;
   created_at: string; reviewed_at: string | null; review_status: string; rubricJson: string; objectiveTitlesJson: string;
-  diagnostic_snapshot_json: string; family_snapshot_json: string; family_help_level: string | null;
+  diagnostic_snapshot_json: string; family_task_id: string | null; family_snapshot_json: string; family_help_level: string | null;
   family_confirmed_at: string | null; family_confirmation_role: string | null; familyConfirmedName: string | null;
   sequence_id: string | null; sequence_stage: string | null; sequence_snapshot_json: string;
   evidenceJson: string | null; objectiveScoresJson: string | null; dimensionScoresJson: string | null;
@@ -19,7 +19,7 @@ export type WorkRow = {
 export async function readWorkRows(db: PlatformDatabase, context: PlatformContext, filter: string, args: unknown[] = []) {
   const access = submissionAccessClause(context);
   return (await db.prepare(`SELECT s.*,a.title AS assignmentTitle,a.status AS assignmentStatus,a.rubric_json AS rubricJson,
-    u.display_name AS studentName,c.name AS className,fc.display_name AS familyConfirmedName,
+    u.display_name AS studentName,a.class_id AS classId,c.name AS className,fc.display_name AS familyConfirmedName,
     sr.evidence_json AS evidenceJson,sr.objective_scores_json AS objectiveScoresJson,sr.dimension_scores_json AS dimensionScoresJson,
     (SELECT json_group_array(json_object('id',lo.id,'title',lo.title)) FROM assignment_objectives ao
       JOIN learning_objectives lo ON lo.tenant_id=ao.tenant_id AND lo.id=ao.objective_id

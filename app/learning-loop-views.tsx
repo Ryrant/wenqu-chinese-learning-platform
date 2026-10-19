@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { FollowupAction } from "./lib/teaching-followup-types";
 import { isRecommendationDue } from "./lib/learning-loop";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { numberValue, stringValue } from "./lib/platform-types";
@@ -199,10 +200,11 @@ export function StudentReviewCenter({ data, act, notify }: LoopProps) {
   </article>;
 }
 
-export function TeacherAssignmentCreator({ data, act, notify }: LoopProps) {
+export function TeacherAssignmentCreator({ data, act, notify, focus }: LoopProps & { focus?: Extract<FollowupAction, { kind: "assignment" }> }) {
   const [title, setTitle] = useState("");
-  const [classId, setClassId] = useState(String(data.classes[0]?.id ?? ""));
-  const [objectiveId, setObjectiveId] = useState(String(data.learningObjectives.find((item) => item.status !== "inactive")?.id ?? ""));
+  const [classId, setClassId] = useState(focus?.classId ?? String(data.classes[0]?.id ?? ""));
+  const [objectiveId, setObjectiveId] = useState(focus?.objectiveId ?? String(data.learningObjectives.find((item) => item.status !== "inactive")?.id ?? ""));
+  useEffect(() => { if (focus) document.getElementById(`teaching-assignment-${focus.assignmentId}`)?.scrollIntoView({ block: "center" }); }, [focus]);
   const [dueAt, setDueAt] = useState("");
   const [busy, setBusy] = useState(false);
   const [diagnosticMode, setDiagnosticMode] = useState("");
@@ -243,8 +245,8 @@ export function TeacherAssignmentCreator({ data, act, notify }: LoopProps) {
     <div><span className="eyebrow">目标对齐 · 三维量规</span><h3>目标与评分量规任务</h3></div>
     <fieldset className="diagnostic-form-fields" disabled={busy || uploading}>
     <label>任务名称<input value={title} onChange={(event) => setTitle(event.target.value)} required/></label>
-    <label>班级<select value={classId} onChange={(event) => setClassId(event.target.value)} required>{data.classes.map((item) => <option key={String(item.id)} value={String(item.id)}>{stringValue(item.name)}</option>)}</select></label>
-    <label>学习目标<select value={objectiveId} onChange={(event) => setObjectiveId(event.target.value)} required>{data.learningObjectives.filter((item) => item.status !== "inactive").map((item) => <option key={String(item.id)} value={String(item.id)}>{stringValue(item.code)} · {stringValue(item.title)}</option>)}</select></label>
+    <label>班级<select value={classId} onChange={(event) => setClassId(event.target.value)} required>{classId && !data.classes.some((item) => item.id === classId) && <option value={classId} disabled>指定班级已不可用，请重新选择</option>}{data.classes.map((item) => <option key={String(item.id)} value={String(item.id)}>{stringValue(item.name)}</option>)}</select></label>
+    <label>学习目标<select value={objectiveId} onChange={(event) => setObjectiveId(event.target.value)} required>{objectiveId && !data.learningObjectives.some((item) => item.id === objectiveId && item.status !== "inactive") && <option value={objectiveId} disabled>指定目标已不可用，请重新选择</option>}{data.learningObjectives.filter((item) => item.status !== "inactive").map((item) => <option key={String(item.id)} value={String(item.id)}>{stringValue(item.code)} · {stringValue(item.title)}</option>)}</select></label>
     <label>任务用途<select value={diagnosticMode} disabled={busy || uploading} onChange={(event) => { setDiagnosticMode(event.target.value); setDiagnosticMediaId(""); }}><option value="">普通学习任务</option><option value="speaking">图片口述诊断</option><option value="writing">短文表达诊断</option></select></label>
     {diagnosticMode && <><label>诊断要求<textarea value={diagnosticPrompt} disabled={busy} onChange={(event) => setDiagnosticPrompt(event.target.value)} required maxLength={2000} placeholder="说明观察什么、需要完成什么，以及可以使用的帮助。"/></label>
       <DiagnosticMediaInput kind="image" value={diagnosticMediaId} onChange={setDiagnosticMediaId} uploading={uploading} setUploading={setUploading} notify={notify} disabled={busy}/>
@@ -253,8 +255,8 @@ export function TeacherAssignmentCreator({ data, act, notify }: LoopProps) {
     <div className="rubric-list">{rubric.map((item) => <span key={item.name}><b>{item.name}</b>{item.weight}%</span>)}</div>
     <small>固定 3 个维度，权重合计 100%。</small>
     </fieldset>
-    <button className="primary-button" disabled={busy || uploading || !classId || !objectiveId || (diagnosticMode === "speaking" && !diagnosticMediaId)}>{busy ? "保存中…" : "保存任务草稿"}</button>
-  </form><article className="panel"><h3>本班任务与发布</h3>{data.assignments.filter((item) => item.class_id === classId).map((item) => <div className="assignment-publish-row" key={String(item.id)}>
+    <button className="primary-button" disabled={busy || uploading || !data.classes.some((item) => item.id === classId) || !data.learningObjectives.some((item) => item.id === objectiveId && item.status !== "inactive") || (diagnosticMode === "speaking" && !diagnosticMediaId)}>{busy ? "保存中…" : "保存任务草稿"}</button>
+  </form><article className="panel"><h3>本班任务与发布</h3>{focus && !data.assignments.some((item) => item.id === focus.assignmentId) && <p role="alert">指定任务已不在当前任教范围，请返回待办刷新。</p>}{data.assignments.filter((item) => item.class_id === classId).map((item) => <div className="assignment-publish-row" id={`teaching-assignment-${item.id}`} key={String(item.id)}>
     <strong>{stringValue(item.title)}</strong>{!!item.diagnostic_prompt && <p>{String(item.diagnostic_prompt)}</p>}
     {!!item.diagnostic_media_id && <DiagnosticStimulus id={String(item.diagnostic_media_id)} kind="image"/>}
     {item.status === "published" ? <span className="status published">已发布</span> : item.status === "draft" || item.status === "review" ? <button className="soft-button" type="button" disabled={!!publishingId} onClick={async () => {

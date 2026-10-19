@@ -156,7 +156,7 @@ export async function GET(request: Request) {
       LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
       LEFT JOIN learning_objectives lo ON lo.id=ao.objective_id AND lo.tenant_id=ao.tenant_id
       WHERE s.tenant_id=? AND ${submissionAccess.sql}${guardianSubmissionFilter}
-      GROUP BY s.id) WHERE submissionRank<=50 OR ((family_task_id IS NOT NULL OR sequence_id IS NOT NULL) AND review_status!='reviewed')
+      GROUP BY s.id) WHERE submissionRank<=50 OR review_status!='reviewed'
       ORDER BY created_at DESC,submissionRank`)
       .bind(tenantId, ...submissionAccess.args, ...guardianSubmissionArgs);
     const weeklyStatsQuery = db.prepare(`SELECT

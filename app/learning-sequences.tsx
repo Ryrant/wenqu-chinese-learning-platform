@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { FollowupAction } from "./lib/teaching-followup-types";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { HELP_LEVEL_LABELS, TEACHING_DECISION_LABELS, sameRubric, SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, nextSequenceStage, sequencePrompt, sequenceTime, evidenceStatus, type LearningSequence, type SequenceEvidence, type SequenceSource } from "./lib/learning-sequence-types";
 import { DiagnosticStimulus } from "./diagnostic-evidence";
@@ -115,8 +116,8 @@ export function SequenceReports({ sequences, onStartTask, scheduling, trialEntri
   </section>;
 }
 
-function SequenceCreator({ source, act, notify, onSaved }: { source: SequenceSource; act: Act; notify: Notify; onSaved: () => void }) {
-  const [objectiveId, setObjectiveId] = useState(source.work.objectives[0]?.id ?? "");
+function SequenceCreator({ source, act, notify, onSaved, initialObjectiveId }: { source: SequenceSource; act: Act; notify: Notify; onSaved: () => void; initialObjectiveId?: string }) {
+  const [objectiveId, setObjectiveId] = useState(initialObjectiveId ?? source.work.objectives[0]?.id ?? "");
   const [title, setTitle] = useState(`${source.work.title}的迁移验证`.slice(0, 120));
   const [practicePrompt, setPracticePrompt] = useState("");
   const [transferPrompt, setTransferPrompt] = useState("");
@@ -131,7 +132,7 @@ function SequenceCreator({ source, act, notify, onSaved }: { source: SequenceSou
     } catch (reason) { notify("发布失败", reason instanceof Error ? reason.message : "请重试，输入已保留。", "error"); }
     finally { setBusy(false); }
   }}><fieldset className={styles.fields} disabled={busy}>
-    <label>学习目标<select required value={objectiveId} onChange={(event) => setObjectiveId(event.target.value)}>{source.work.objectives.map((item) => <option key={item.id} value={item.id}>{item.title} · 初次 {item.score}/100</option>)}</select></label>
+    <label>学习目标<select required value={objectiveId} onChange={(event) => setObjectiveId(event.target.value)}>{objectiveId && !source.work.objectives.some((item) => item.id === objectiveId) && <option value={objectiveId} disabled>所选目标已不可用，请重新选择</option>}{source.work.objectives.map((item) => <option key={item.id} value={item.id}>{item.title} · 初次 {item.score}/100</option>)}</select></label>
     <label>任务组名称<input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)}/></label>
     <label>针对性练习要求<textarea required maxLength={2000} value={practicePrompt} onChange={(event) => setPracticePrompt(event.target.value)} placeholder="结合初次作品的困难，说明练什么、可以使用哪些支持。"/></label>
     <label>迁移任务要求<textarea required maxLength={2000} value={transferPrompt} onChange={(event) => setTransferPrompt(event.target.value)} placeholder="安排不同对象或新情境中的任务，避免原题重做。"/></label>
@@ -139,26 +140,32 @@ function SequenceCreator({ source, act, notify, onSaved }: { source: SequenceSou
     <p>沿用同一目标及以下量规；后续作品与初次保持相同提交方式（{source.work.hasAudio ? "录音" : "文字"}）。</p>
     <ul>{source.referenceRubric.map((item) => <li key={item.name}>{item.name} · {item.weight}%</li>)}</ul>
     {!source.work.rubric && <p>初次作品未保留历史量规。后续任务固定当前所列量规，报告不会推算初次与迁移的分数差。</p>}
-    <button className="primary-button" disabled={busy}>{busy ? "发布中…" : "发布练习与迁移任务"}</button>
+    <button className="primary-button" disabled={busy || !source.work.objectives.some((item) => item.id === objectiveId)}>{busy ? "发布中…" : "发布练习与迁移任务"}</button>
   </fieldset></form>;
 }
 
-function TeacherSequenceSources({ studentUserId, data, act, notify }: { studentUserId: string; data: WorkspaceData; act: Act; notify: Notify }) {
-  const [sourceId, setSourceId] = useState("");
+function TeacherSequenceSources({ studentUserId, data, act, notify, focus }: { studentUserId: string; data: WorkspaceData; act: Act; notify: Notify; focus?: Extract<FollowupAction, { kind: "source" }> }) {
+  const [sourceId, setSourceId] = useState(focus?.studentId === studentUserId ? focus.sourceId : "");
   const sources = (data.sequenceSources ?? []).filter((item) => item.studentUserId === studentUserId);
   const source = sources.find((item) => item.work.id === sourceId);
-  return <><label className={styles.selector}>初次作品<select value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">请选择已评价目标的作品</option>{sources.map((item) => <option key={item.work.id} value={item.work.id}>{item.work.title} · {item.work.submittedAt} · {item.work.id.slice(0, 8)}</option>)}</select></label>
+  return <><label className={styles.selector}>初次作品<select value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">请选择已评价目标的作品</option>{sourceId && !source && <option value={sourceId}>指定作品已不可用，请重新选择</option>}{sources.map((item) => <option key={item.work.id} value={item.work.id}>{item.work.title} · {item.work.submittedAt} · {item.work.id.slice(0, 8)}</option>)}</select></label>
     {!sources.length && <p>当前学生还没有可关联的作品。先在原批阅面板确认至少一个目标的评价。</p>}
-    {source && <SequenceCreator key={sourceId} source={source} act={act} notify={notify} onSaved={() => setSourceId((current) => current === source.work.id ? "" : current)}/>}
+    {source && <SequenceCreator key={sourceId} source={source} initialObjectiveId={focus?.sourceId === sourceId ? focus.objectiveId : undefined} act={act} notify={notify} onSaved={() => setSourceId((current) => current === source.work.id ? "" : current)}/>}
   </>;
 }
 
-export function TeacherLearningSequences({ data, act, notify }: { data: WorkspaceData; act: Act; notify: Notify }) {
+export function TeacherLearningSequences({ data, act, notify, focus }: { data: WorkspaceData; act: Act; notify: Notify; focus?: Extract<FollowupAction, { kind: "source" | "sequence" }> }) {
   const students = [...new Map([...data.enrollments.filter((item) => item.status === "active").map((item) => [String(item.studentUserId), String(item.studentName)] as const), ...(data.learningSequences ?? []).filter((item) => item.canPlanNext).map((item) => [item.studentUserId, item.studentName] as const)]).entries()];
-  const [studentId, setStudentId] = useState(students[0]?.[0] ?? "");
-  const [creating, setCreating] = useState(false);
-  return <section className={styles.section}><article className="panel"><div className="panel-heading"><h3>关联初次、练习与迁移</h3><button className="soft-button" type="button" onClick={() => setCreating(!creating)}>{creating ? "关闭创建" : "新增练习与迁移任务"}</button></div>
-    <label className={styles.selector}>查看学生<select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">请选择学生</option>{students.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-    {creating && studentId && <TeacherSequenceSources key={studentId} studentUserId={studentId} data={data} act={act} notify={notify}/>}
+  const [studentId, setStudentId] = useState(focus?.studentId ?? students[0]?.[0] ?? "");
+  const [creating, setCreating] = useState(focus?.kind === "source");
+  const sequenceId = focus?.kind === "sequence" ? focus.sequenceId : "";
+  useEffect(() => {
+    if (sequenceId) { openSequenceReport(sequenceId); document.getElementById(`learning-sequence-${sequenceId}`)?.scrollIntoView({ block: "start" }); }
+    else if (focus?.kind === "source") document.getElementById("teacher-sequence-creator")?.scrollIntoView({ block: "start" });
+  }, [sequenceId, focus?.kind]);
+  return <section className={styles.section}><article className={`panel ${styles.creator}`} id="teacher-sequence-creator"><div className="panel-heading"><h3>关联初次、练习与迁移</h3><button className="soft-button" type="button" onClick={() => setCreating(!creating)}>{creating ? "关闭创建" : "新增练习与迁移任务"}</button></div>
+    {sequenceId && !data.learningSequences.some((item) => item.id === sequenceId) && <p role="alert">指定任务组已不在当前任教范围，请返回待办刷新。</p>}
+    <label className={styles.selector}>查看学生<select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">请选择学生</option>{studentId && !students.some(([id]) => id === studentId) && <option value={studentId}>指定学生已不可用</option>}{students.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+    {creating && studentId && <TeacherSequenceSources key={studentId} studentUserId={studentId} data={data} act={act} notify={notify} focus={focus?.kind === "source" ? focus : undefined}/>}
   </article><SequenceReports sequences={(data.learningSequences ?? []).filter((item) => item.studentUserId === studentId)} scheduling={{ act, notify }} trialEntries={data.trialEntries}/></section>;
 }

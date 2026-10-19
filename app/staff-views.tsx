@@ -3,11 +3,13 @@ import { TeacherLearningSequences, SequenceReports } from "./learning-sequences"
 import { TrialOverview } from "./trial-records";
 import { UnitReportIndex } from "./unit-report-links";
 import { FamilyPortfolio } from "./family-portfolio";
+import { TeachingFollowups, initialFollowupView } from "./teaching-followups";
+import type { FollowupAction } from "./lib/teaching-followup-types";
 import { readSequenceWork } from "./lib/learning-sequence-types";
 
 import { AbilityEvidenceProfile, TeacherAbilityProfiles } from "./diagnostic-evidence";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AdminEnrollmentEditor,
   AdminObjectiveLibrary,
@@ -128,7 +130,30 @@ function MetricGrid({ items }: { items: Array<[string, string | number, string, 
   return <section className="metric-grid">{items.map(([label, value, note, tone]) => <article className={`metric-card ${tone}`} key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}</section>;
 }
 
-export function TeacherView({ nav, data, act, notify }: BaseProps) {
+export function TeacherView({ nav, data: workspace, act, notify, refresh, navigate }: BaseProps & { refresh: () => Promise<void>; navigate: (nav: string) => void }) {
+  const classes = workspace.classes.filter((item) => workspace.user.roles.includes("admin") || item.teacher_user_id === workspace.user.id);
+  const classIds = new Set(classes.map((item) => String(item.id)));
+  const assignments = workspace.assignments.filter((item) => classIds.has(String(item.class_id)));
+  const assignmentIds = new Set(assignments.map((item) => String(item.id)));
+  const data = { ...workspace, classes, assignments, submissions: workspace.submissions.filter((item) => assignmentIds.has(String(item.assignment_id))),
+    enrollments: workspace.enrollments.filter((item) => classIds.has(String(item.classId))),
+    learningSequences: workspace.learningSequences.filter((item) => assignmentIds.has(item.assignmentId)),
+    sequenceSources: workspace.sequenceSources.filter((item) => assignmentIds.has(item.assignmentId)) };
+  const [followupView, setFollowupView] = useState(initialFollowupView);
+  const [followupFocus, setFollowupFocus] = useState<FollowupAction | null>(null);
+  const [focusVersion, setFocusVersion] = useState(0);
+  const navigationIntent = useRef({ value: 0 });
+  useEffect(() => { const intent = navigationIntent.current; intent.value++; return () => { intent.value++; }; }, [nav]);
+  useEffect(() => { if (nav === "教学总览" && followupFocus) document.getElementById("teacher-followups")?.scrollIntoView({ block: "start" }); }, [nav, followupFocus]);
+  async function openFollowup(action: FollowupAction) {
+    const intent = navigationIntent.current.value;
+    await refresh();
+    if (navigationIntent.current.value !== intent) return;
+    setFollowupFocus(action);
+    setFocusVersion((value) => value + 1);
+    setSelectedSubmissionId(action.kind === "review" ? action.submissionId : "");
+    navigate(action.kind === "assignment" ? "班级管理" : "作业批阅");
+  }
   const [busy, setBusy] = useState(false);
   const [topic, setTopic] = useState("中秋节与团圆");
   const [lessonTitle, setLessonTitle] = useState("");
@@ -144,7 +169,8 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, ReviewDraft>>({});
   const [reviewBusy, setReviewBusy] = useState(false);
   const pending = data.submissions.filter((item) => item.review_status !== "reviewed");
-  const selectedSubmission = data.submissions.find((item) => String(item.id) === selectedSubmissionId) ?? pending[0] ?? null;
+  const selectedSubmission = selectedSubmissionId ? pending.find((item) => String(item.id) === selectedSubmissionId) ?? null
+    : followupFocus?.kind === "source" || followupFocus?.kind === "sequence" ? null : pending[0] ?? null;
   const latestReviewBySubmission = data.submissionReviews.reduce((reviews, item) => {
     const submissionId = String(item.submission_id);
     if (!reviews.has(submissionId)) reviews.set(submissionId, item);
@@ -192,6 +218,7 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
   if (nav === "教学总览") return <section>
     <PageTitle eyebrow="最新学习证据 · 班级范围" title="教学总览" detail="按学生与目标读取最新掌握度，避免历史快照重复计入。"/>
     <MetricGrid items={[["班级", data.classes.length, "当前教师可访问", "green"], ["已发布任务", published.length, "目标与量规可追溯", "blue"], ["待批阅", pending.length, "等待教师确认", "orange"], ["平均掌握度", `${mastery}%`, "仅最新快照", "purple"]]}/>
+    <TeachingFollowups revision={data.generatedAt} view={followupView} onView={(view) => { navigationIntent.current.value++; setFollowupView(view); }} onOpen={openFollowup}/>
     <TeacherMasteryHeatmap data={data}/>
     <TeacherAbilityProfiles data={data}/>
     <FamilyPortfolio revision={data.generatedAt}/>
@@ -199,9 +226,10 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
 
   if (nav === "班级管理") return <section>
     <PageTitle eyebrow="班级、目标与任务闭环" title="班级管理" detail="每个任务必须关联学习目标，并使用三维评分量规。"/>
+    {followupFocus?.kind === "assignment" && <p><button type="button" className="soft-button" onClick={() => navigate("教学总览")}>返回班级证据待办</button></p>}
     <section className="teacher-class-grid">
       <form className="panel form-card compact-form" onSubmit={createClass}><h3>新建班级</h3><p>先建立教学班，再在右侧配置目标任务。</p><label>班级名称<input value={className} onChange={(event) => setClassName(event.target.value)} placeholder="例如：五年级甲班" required/></label><label>级别<select value={classLevel} onChange={(event) => setClassLevel(event.target.value)}><option>A1</option><option>A2</option><option>B1</option></select></label><button className="primary-button" disabled={busy}>创建班级</button></form>
-      <TeacherAssignmentCreator data={data} act={act} notify={notify}/>
+      <TeacherAssignmentCreator key={focusVersion} data={data} act={act} notify={notify} focus={followupFocus?.kind === "assignment" ? followupFocus : undefined}/>
     </section>
     <article className="panel assignment-table"><h3>班级列表</h3><div className="table-wrap"><table><thead><tr><th>班级</th><th>级别</th><th>学年</th><th>学生数</th></tr></thead><tbody>{data.classes.map((item) => <tr key={String(item.id)}><td>{stringValue(item.name)}</td><td>{stringValue(item.level)}</td><td>{stringValue(item.academic_year)}</td><td>{numberValue(item.studentCount)}</td></tr>)}</tbody></table></div></article>
   </section>;
@@ -211,12 +239,13 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
     const review = selectedId ? latestReviewBySubmission.get(selectedId) : undefined;
     return <section>
       <PageTitle eyebrow="人工复核与分层支持" title="作业批阅" detail={`${pending.length} 份待审核；教师确认评分后才更新掌握度。`}/>
+      {followupFocus && <p><button type="button" className="soft-button" disabled={reviewBusy} onClick={() => navigate("教学总览")}>返回班级证据待办</button></p>}
       <section className="review-top-grid"><TeacherIntervention data={data} act={act} notify={notify}/><article className="panel review-summary"><span className="eyebrow">待处理队列</span><h3>教师确认</h3><p>AI 建议仅供参考，最终成绩和反馈由教师保存。</p><strong>{pending.length} 份待批阅</strong></article></section>
       <section className="review-workspace">
         <article className="panel review-queue"><div className="panel-heading"><div><span className="eyebrow">待办摘要</span><h3>选择待批阅作品</h3></div><span>{pending.length} 份</span></div>{pending.length ? pending.map((item) => <button type="button" className={String(item.id) === selectedId ? "review-queue-item active" : "review-queue-item"} key={String(item.id)} disabled={reviewBusy} onClick={() => setSelectedSubmissionId(String(item.id))}><span><strong>{stringValue(item.studentName)}</strong><small>{readSequenceWork(item.sequence_snapshot_json)?.title ?? stringValue(item.assignmentTitle)}</small></span><em>{item.asset_key ? "语音" : "文字"}</em></button>) : <p className="empty-state">当前没有待批阅作品。新的学生提交会显示在这里。</p>}</article>
-        <article className="panel review-editor">{selectedSubmission ? <SubmissionReview submission={selectedSubmission} review={review} data={data} savedDraft={reviewDrafts[selectedId]} setDraft={(draft) => setReviewDrafts((current) => ({ ...current, [selectedId]: draft }))} busy={reviewBusy} setBusy={setReviewBusy} act={act} notify={notify} onReviewed={() => setSelectedSubmissionId("")}/> : <p className="empty-state">选择左侧作品后，可在这里查看内容、生成建议并完成教师确认。</p>}</article>
+        <article className="panel review-editor">{selectedSubmission ? <SubmissionReview submission={selectedSubmission} review={review} data={data} savedDraft={reviewDrafts[selectedId]} setDraft={(draft) => setReviewDrafts((current) => ({ ...current, [selectedId]: draft }))} busy={reviewBusy} setBusy={setReviewBusy} act={act} notify={notify} onReviewed={() => { setSelectedSubmissionId(""); if (followupFocus?.kind === "review") navigate("教学总览"); }}/> : <p className="empty-state">{selectedSubmissionId ? "指定作品已处理或不在当前任教范围，请返回待办刷新，或从左侧重新选择。" : "选择左侧作品后，可在这里查看内容、生成建议并完成教师确认。"}</p>}</article>
       </section>
-      <TeacherLearningSequences data={data} act={act} notify={notify}/>
+      <TeacherLearningSequences key={focusVersion} data={data} act={act} notify={notify} focus={followupFocus?.kind === "source" || followupFocus?.kind === "sequence" ? followupFocus : undefined}/>
     </section>;
   }
 

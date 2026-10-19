@@ -27,6 +27,7 @@ const bundle = await build({
     export { GET as unitReport } from './app/api/v1/learning-sequences/[id]/report/route';
     export { GET as internalReport } from './app/api/v1/trial-records/report/route';
     export { GET as portfolio } from './app/api/v1/family-portfolio/route';
+    export { GET as followups } from './app/api/v1/teaching-followups/route';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
@@ -118,7 +119,11 @@ async function fixture(t) {
     const response = await api.portfolio(new Request(`http://127.0.0.1/api/v1/family-portfolio${studentId === undefined ? "" : `?studentId=${encodeURIComponent(studentId)}`}`, { headers: cookie ? { cookie } : {} }));
     const data = await response.json(); assert.equal(response.status, status, JSON.stringify(data)); return { response, data };
   };
-  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio };
+  const followups = async (cookie = actors.teacher, status = 200) => {
+    const response = await api.followups(new Request("http://127.0.0.1/api/v1/teaching-followups", { headers: cookie ? { cookie } : {} }));
+    const data = await response.json(); assert.equal(response.status, status, JSON.stringify(data)); return { response, data };
+  };
+  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups };
 }
 
 test("unconfigured and invalid AI suggestions leave grades and mastery unset; structured REST output is validated", async (t) => {
@@ -1363,6 +1368,116 @@ test("family portfolios include reviewed history beyond recent submissions and p
   assert.equal(legacy.work.score, 84); assert.equal(legacy.confirmedAt, null); assert.equal(legacy.confirmationRole, null); assert.equal(legacy.familyHelpLevel, "unknown");
   assert.deepEqual(legacy.work.objectives, []); assert.deepEqual(legacy.sequences, []);
   assert.ok(!JSON.stringify(legacy).includes("不能当作旧要求"));
+});
+
+test("teaching followups distinguish missing target evidence from measured zero and keep all ordinary pending work actionable beyond recent history", async (t) => {
+  const f = await fixture(t);
+  const emptyClass = await f.act(f.actors.teacher, "create_class", { name: "空班也可筛选", level: "A2" }, 201);
+  let { data, response } = await f.followups();
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(data.items.length, 6); assert.ok(data.items.every((item) => item.kind === "initial" && item.work === null));
+  assert.ok(data.classes.some((item) => item.id === emptyClass.id));
+  assert.deepEqual(data.students.map((item) => item.id).sort(), [f.ids.student, f.ids.stranger].sort());
+  assert.deepEqual(data.objectives.map((item) => item.id).sort(), f.goals.slice().sort());
+  const work = await f.text();
+  assert.equal((await f.followups()).data.items.filter((item) => item.studentId === f.ids.student).length, 1, "one pending work can cover several goals without duplicate grading tasks");
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 0 }] }));
+  data = (await f.followups()).data;
+  const measured = data.items.find((item) => item.studentId === f.ids.student && item.goals.some((goal) => goal.id === f.goals[0]));
+  assert.equal(measured.kind, "transfer_setup"); assert.equal(measured.work.objectives[0].score, 0);
+  assert.deepEqual(measured.action, { kind: "source", studentId: f.ids.student, sourceId: work.id, objectiveId: f.goals[0] });
+  const unmeasured = data.items.find((item) => item.studentId === f.ids.student && item.goals.some((goal) => goal.id === f.goals[1]));
+  assert.equal(unmeasured.kind, "initial"); assert.equal(unmeasured.work.score, 80); assert.equal(unmeasured.work.objectives.length, 1);
+  const pending = await f.text();
+  await f.db.prepare("UPDATE submissions SET created_at='2000-01-01 00:00:00' WHERE id=?").bind(pending.id).run();
+  await f.db.prepare(`WITH RECURSIVE copies(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM copies WHERE n<55)
+    INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,score,review_status)
+    SELECT 'backlog-history-'||n,tenant_id,assignment_id,student_user_id,'较新的已阅作品',81,'reviewed' FROM submissions,copies WHERE id=?`).bind(work.id).run();
+  const gradesBefore = (await f.db.prepare("SELECT COUNT(*) AS n FROM mastery_snapshots").first()).n;
+  data = (await f.followups()).data;
+  assert.ok(data.items.some((item) => item.action.submissionId === pending.id));
+  assert.ok((await f.workspace(f.actors.teacher)).submissions.some((item) => item.id === pending.id), "the grading destination must also include ordinary pending work beyond its recent page");
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM mastery_snapshots").first()).n, gradesBefore);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(pending.id));
+  assert.ok(!(await f.followups()).data.items.some((item) => item.action.submissionId === pending.id));
+  await f.db.prepare("UPDATE assignments SET status='archived' WHERE id=?").bind(f.assignment.id).run();
+  assert.equal((await f.followups()).data.items.length, 0, "archived tasks do not demand fresh submissions");
+});
+
+test("teaching followups keep family confirmation separate and enforce original class authority for mixed roles and former students", async (t) => {
+  const f = await fixture(t);
+  const task = await f.act(f.actors.guardian, "create_family_task", { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "原家庭目标", detail: "先交流再提交自己的口述。" }, 201);
+  const work = await f.upload(f.actors.student, { familyTaskId: task.id });
+  await f.db.prepare("DELETE FROM assignment_objectives WHERE assignment_id=? AND objective_id=?").bind(f.assignment.id, f.goals[0]).run();
+  let item = (await f.followups()).data.items.find((item) => item.work?.id === work.id);
+  assert.equal(item.kind, "confirmation"); assert.equal(item.work.hasAudio, true); assert.deepEqual(item.goals.map((goal) => goal.id), [f.goals[0]]);
+  await f.act(f.actors.guardian, "confirm_family_submission", { submissionId: work.id, helpLevel: "prompted" });
+  item = (await f.followups()).data.items.find((item) => item.work?.id === work.id);
+  assert.equal(item.kind, "review"); assert.equal(item.work.score, null); assert.equal(item.work.helpLevel, "prompted");
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: f.classroom.id, studentUserIds: [f.ids.stranger] });
+  await f.db.prepare("UPDATE assignments SET status='archived' WHERE id=?").bind(f.assignment.id).run();
+  assert.ok((await f.followups()).data.students.some((student) => student.id === f.ids.student), "former students with pending original-class work remain actionable");
+  for (const actor of ["student", "guardian", "otherGuardian"]) await f.followups(f.actors[actor], 403);
+  await f.followups(null, 401);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "复合角色", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  for (const actor of ["otherTeacher", "otherTenant"]) {
+    const { data } = await f.followups(f.actors[actor]);
+    assert.deepEqual(data.items, []); assert.deepEqual(data.students, []); assert.deepEqual(data.classes, []);
+  }
+  assert.equal((await f.readAudio(f.actors.teacher, work.id)).status, 200);
+  await f.db.prepare("UPDATE classes SET teacher_user_id=? WHERE id=?").bind(f.ids.otherTeacher, f.classroom.id).run();
+  assert.deepEqual((await f.followups()).data.items, []);
+  assert.ok((await f.followups(f.actors.otherTeacher)).data.items.some((item) => item.work?.id === work.id));
+  await f.db.prepare("UPDATE users SET must_change_password=1 WHERE id=?").bind(f.ids.otherTeacher).run();
+  assert.equal((await f.followups(f.actors.otherTeacher, 403)).data.error, "password_change_required");
+  assert.ok((await f.followups(f.actors.admin)).data.items.some((item) => item.work?.id === work.id));
+});
+
+test("teaching followups advance through practice, transfer and evidence-based next arrangements without reusing older graded work", async (t) => {
+  const f = await fixture(t);
+  const baseline = await f.text();
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(baseline.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 30 }] }));
+  const group = await f.act(f.actors.teacher, "create_learning_sequence", { baselineSubmissionId: baseline.id, objectiveId: f.goals[0], title: "待办阶段验证", practicePrompt: "练习说明理由。", transferPrompt: "向新同学解释另一道菜。", transferContext: "更换菜品和对象。" }, 201);
+  const related = async () => (await f.followups()).data.items.filter((item) => item.action.sequenceId === group.id || (practice && item.work?.id === practice.id) || (transfer && item.work?.id === transfer.id));
+  let practice, transfer;
+  assert.equal((await related())[0].kind, "practice");
+  practice = await f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, sequenceId: group.id, sequenceStage: "practice", answer: "理由练习作品。" }, 201);
+  assert.deepEqual((await related()).map((item) => item.kind), ["review"]);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(practice.id, { helpLevel: "prompted", objectiveScores: [{ objectiveId: f.goals[0], score: 60 }] }));
+  assert.equal((await related()).find((item) => item.action.sequenceId === group.id).kind, "transfer");
+  transfer = await f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, sequenceId: group.id, sequenceStage: "transfer", answer: "换对象的迁移作品。" }, 201);
+  assert.deepEqual((await related()).map((item) => item.kind), ["review"]);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(transfer.id, { helpLevel: "unknown", contextConfirmed: false }));
+  const gap = (await related()).find((item) => item.kind === "evidence");
+  assert.equal(gap.work.id, transfer.id); assert.deepEqual(gap.work.objectives, []);
+  const newer = await f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, sequenceId: group.id, sequenceStage: "transfer", answer: "新的迁移作品尚未评价。" }, 201);
+  assert.ok(!(await related()).some((item) => item.kind === "evidence"), "latest pending evidence must not silently fall back to an older reviewed work");
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(newer.id, { helpLevel: "prompted", contextConfirmed: true, promptCount: 2, objectiveScores: [{ objectiveId: f.goals[0], score: 0 }] }));
+  assert.equal((await related()).find((item) => item.kind === "evidence").work.promptCount, 2);
+  const next = await f.act(f.actors.teacher, "publish_teaching_next_step", { id: crypto.randomUUID(), sequenceId: group.id, referenceSubmissionId: newer.id, kind: "collect_evidence", rationale: "在减少提示后补充独立作品。", remaining: "独立表达尚待验证。", title: "下一轮补证据", practicePrompt: "减少关键词练习。", transferPrompt: "向另一对象推荐新菜。", transferContext: "对象与菜品改变。" }, 201);
+  assert.ok(!(await related()).some((item) => item.kind === "evidence"));
+  assert.ok((await f.followups()).data.items.some((item) => item.action.sequenceId === next.nextSequenceId && item.kind === "practice"));
+});
+
+test("teaching followups show retests only when due and remove reviewed independent evidence even when its target score is zero", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f, true);
+  const groupItems = async () => (await f.followups()).data.items.filter((item) => item.action.sequenceId === flow.sequence.id);
+  assert.deepEqual(await groupItems(), [], "complete evidence does not force an endless next round");
+  const availableAt = new Date(Date.now() + 60_000).toISOString();
+  await f.act(f.actors.teacher, "schedule_delayed_retest", { sequenceId: flow.sequence.id, referenceSubmissionId: flow.transfer.id, prompt: "延后向新邻居介绍另一道菜。", context: "间隔时间并更换对象。", availableAt }, 201);
+  assert.deepEqual(await groupItems(), []);
+  t.mock.method(Date, "now", () => Date.parse(availableAt));
+  const due = (await groupItems())[0];
+  assert.equal(due.kind, "retest"); assert.equal(due.time, availableAt); assert.equal(due.work.id, flow.transfer.id);
+  const work = await flow.submit("retest");
+  assert.deepEqual(await groupItems(), []);
+  assert.equal((await f.followups()).data.items.find((item) => item.work?.id === work.id).kind, "review");
+  await flow.assess(work.id, 0);
+  assert.deepEqual(await groupItems(), []);
+  await f.db.prepare("UPDATE learning_objectives SET status='inactive' WHERE id=?").bind(f.goals[0]).run();
+  assert.ok(!(await f.followups()).data.items.some((item) => item.kind !== "review" && item.goals.some((goal) => goal.id === f.goals[0])));
 });
 
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {

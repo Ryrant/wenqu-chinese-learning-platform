@@ -254,7 +254,7 @@ export function Dashboard() {
       </header>
       <div className="content"><div className="truth-banner"><strong>✓ 已连接 D1 + R2</strong><span>所有数字来自当前租户数据；未配置的模型能力会明确标注，不展示伪造分数。</span></div>
         {role === "student" && <StudentView nav={activeNav} data={data} receivedAt={workspaceReceivedAt} act={act} refresh={refresh} notify={notify} navigate={setActiveNav}/>}
-        {role === "teacher" && <TeacherView nav={activeNav} data={data} act={act} notify={notify}/>}
+        {role === "teacher" && <TeacherView nav={activeNav} data={data} act={act} notify={notify} refresh={refresh} navigate={setActiveNav}/>}
         {role === "guardian" && <GuardianView nav={activeNav} data={data} act={act} notify={notify} selectStudent={async (studentId) => refresh(studentId)}/>}
         {role === "admin" && <AdminView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify}/>}
       </div>
