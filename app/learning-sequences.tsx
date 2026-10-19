@@ -15,13 +15,13 @@ function openSequenceReport(id: string) {
   if (report instanceof HTMLDetailsElement) report.open = true;
 }
 
-export function WorkEvidence({ work, objectiveId }: { work: SequenceEvidence; objectiveId: string }) {
+export function WorkEvidence({ work, objectiveId }: { work: SequenceEvidence; objectiveId?: string }) {
   const goal = work.objectives.find((item) => item.id === objectiveId);
   return <div className={styles.work}><strong>{work.title}</strong><p>提交：{sequenceTime(work.submittedAt)} · {work.reviewed ? `评价：${work.reviewedAt ? sequenceTime(work.reviewedAt) : "时间未记录"}` : "待教师评价"}</p>
     {work.prompt && <p className={styles.copy}>要求：{work.prompt}</p>}
     {work.mediaId && <DiagnosticStimulus id={work.mediaId} kind="image"/>}
     {work.hasAudio ? <audio controls preload="metadata" src={`/api/v1/submissions/${encodeURIComponent(work.id)}/audio`} aria-label={`${work.title}原始录音`}/> : <p className={styles.copy}>{work.textAnswer}</p>}
-    <p>目标评价：{goal ? `${goal.score}/100` : "未评价"} · 总分：{work.score === null ? "未评价" : work.score}</p>
+    {objectiveId ? <p>目标评价：{goal ? `${goal.score}/100` : "未评价"} · 总分：{work.score === null ? "未评价" : work.score}</p> : <><p>已有目标分项：{work.objectives.length ? work.objectives.map((item) => `${item.title} ${item.score}/100`).join("；") : "未评价"}</p><p>总分：{work.score === null ? "未评价" : work.score}</p></>}
     <ul>{(work.rubric ?? work.dimensions).map((item) => <li key={item.name}>{item.name}：{work.dimensions.find((dimension) => dimension.name === item.name)?.score ?? "未评价"}</li>)}</ul>
     <p>帮助程度：{HELP_LEVEL_LABELS[work.helpLevel]} · 提示次数：{work.promptCount ?? "未记录"}</p>{work.feedback && <p className={styles.copy}>教师反馈：{work.feedback}</p>}
     {!work.rubric && <small>历史量规未保留，不使用当前任务补造评价依据。</small>}

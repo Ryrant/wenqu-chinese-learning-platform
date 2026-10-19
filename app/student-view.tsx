@@ -3,10 +3,11 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { StudentDiagnostic, StudentReviewCenter, StudentTodayPlan } from "./learning-loop-views";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
-import { FAMILY_HELP_LABELS, numberValue, stringValue } from "./lib/platform-types";
+import { numberValue, stringValue } from "./lib/platform-types";
 import { AbilityEvidenceProfile, DiagnosticStimulus } from "./diagnostic-evidence";
 import { EXCHANGE_PARTNERS, readFamilyPlan, readFamilyWorkSnapshot, type ExchangePartner } from "./lib/family-task";
-import { FamilyTaskGuide, FamilyWorkEvidence } from "./family-task-guide";
+import { FamilyTaskGuide } from "./family-task-guide";
+import { FamilyPortfolio } from "./family-portfolio";
 import familyStyles from "./family-task-guide.module.css";
 import { SequenceReports } from "./learning-sequences";
 import { SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, sequencePrompt, sequenceTime, readSequenceWork, type SequenceStage } from "./lib/learning-sequence-types";
@@ -301,6 +302,7 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
     <PageTitle eyebrow="来自掌握度快照与作业记录" title="成长档案" detail="每一项都能追溯到真实学习证据。"/>
     {retestRefreshNotice}
     <AbilityEvidenceProfile studentId={data.user.id} revision={data.generatedAt}/>
+    <FamilyPortfolio studentId={data.user.id} revision={data.generatedAt}/>
     <SequenceReports sequences={sequences} onStartTask={(id) => { if (recording || recordingBusy || busy) return; setSelectedAssignment(id); navigate("学习任务"); }}/>
     <StudentReviewCenter data={data} act={act} notify={notify}/>
     <section className="metric-grid">{data.mastery.map((item) => <article className="metric-card" key={String(item.objectiveId ?? item.skill)}>
@@ -310,10 +312,6 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
       <div className="panel-heading"><div><h3>最近提交</h3><small>只显示教师确认后的评分与反馈</small></div><span>{data.submissions.length} 条</span></div>
       {data.submissions.length ? data.submissions.map((item) => <div className="history-row" key={String(item.id)}>
         <div className={item.family_task_id ? familyStyles.workHistory : undefined}><strong>{stringValue(readSequenceWork(item.sequence_snapshot_json)?.title ?? readFamilyWorkSnapshot(item.family_snapshot_json)?.title ?? item.familyTaskTitle ?? item.assignmentTitle)}</strong><small>{stringValue(item.created_at)}{item.review_status === "reviewed" && item.feedback ? ` · 教师反馈：${stringValue(item.feedback)}` : ""}</small>
-          {!!item.family_task_id && <details><summary>查看交流作品与原始要求 / View exchange work</summary><FamilyWorkEvidence value={item.family_snapshot_json}/>
-            {item.asset_key ? <audio controls preload="metadata" src={`/api/v1/submissions/${encodeURIComponent(String(item.id))}/audio`} aria-label="我的交流录音"/> : <p className="generated-copy">{stringValue(item.text_answer)}</p>}
-            <p>帮助程度：{FAMILY_HELP_LABELS[stringValue(item.family_help_level, "")] ?? "尚未确认"} · {item.family_confirmation_role === "teacher" ? "本班教师见证" : item.family_confirmed_at ? "交流已确认" : "等待交流确认"}</p>
-          </details>}
         </div>
         <span className={`status ${item.review_status === "reviewed" ? "published" : "draft"}`}>{item.review_status === "reviewed" ? `${numberValue(item.score)} 分` : "待教师审核"}</span>
       </div>) : <p className="empty-state">完成第一次作业后，记录会显示在这里。</p>}

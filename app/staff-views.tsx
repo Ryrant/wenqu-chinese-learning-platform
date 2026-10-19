@@ -2,6 +2,7 @@
 import { TeacherLearningSequences, SequenceReports } from "./learning-sequences";
 import { TrialOverview } from "./trial-records";
 import { UnitReportIndex } from "./unit-report-links";
+import { FamilyPortfolio } from "./family-portfolio";
 import { readSequenceWork } from "./lib/learning-sequence-types";
 
 import { AbilityEvidenceProfile, TeacherAbilityProfiles } from "./diagnostic-evidence";
@@ -193,6 +194,7 @@ export function TeacherView({ nav, data, act, notify }: BaseProps) {
     <MetricGrid items={[["班级", data.classes.length, "当前教师可访问", "green"], ["已发布任务", published.length, "目标与量规可追溯", "blue"], ["待批阅", pending.length, "等待教师确认", "orange"], ["平均掌握度", `${mastery}%`, "仅最新快照", "purple"]]}/>
     <TeacherMasteryHeatmap data={data}/>
     <TeacherAbilityProfiles data={data}/>
+    <FamilyPortfolio revision={data.generatedAt}/>
   </section>;
 
   if (nav === "班级管理") return <section>
@@ -239,6 +241,7 @@ export function GuardianView({ nav, data, act, notify, selectStudent }: Guardian
     <PageTitle eyebrow="可追溯学情" title="成长报告" detail="周报只使用最近 7 天真实作业、教师确认成绩、最新掌握度和待复习项。" action={childSwitch}/>
     <GuardianWeeklyReport data={data}/>
     <AbilityEvidenceProfile key={data.selectedStudent?.id} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
+    <FamilyPortfolio key={data.selectedStudent?.id} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
     <SequenceReports sequences={(data.learningSequences ?? []).filter((item) => item.studentUserId === data.selectedStudent?.id)}/>
     <article className="panel reviewed-work-list"><h3>已审核作品</h3>{reviewed.length ? reviewed.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{readSequenceWork(item.sequence_snapshot_json)?.title ?? stringValue(item.assignmentTitle)}</strong><small>{localDate(item.reviewed_at ?? item.created_at)} · 学习目标：{readSequenceWork(item.sequence_snapshot_json)?.objectiveTitle ?? stringValue(item.objectiveTitles, "未关联目标")}</small><p>教师反馈：{textSummary(item.feedback, "教师暂未填写文字反馈")}</p></div><span className="status published">{numberValue(item.score)} 分</span></div>) : <p className="empty-state">当前孩子最近还没有教师确认的作品。</p>}</article>
   </section>;
@@ -261,7 +264,7 @@ export function AdminView(props: AdminProps) {
   const { nav, data, act, notify } = props;
   if (nav === "内容中心") return <><LegacyAdminView {...props}/><AdminObjectiveLibrary data={data} act={act} notify={notify}/></>;
   if (nav === "成员管理") return <><LegacyAdminView {...props}/><section className="loop-section enrollment-section"><AdminEnrollmentEditor data={data} act={act} notify={notify}/></section></>;
-  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/><UnitReportIndex sequences={data.learningSequences ?? []}/></article></>;
+  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/><UnitReportIndex sequences={data.learningSequences ?? []}/></article><FamilyPortfolio revision={data.generatedAt}/></>;
   return <LegacyAdminView {...props}/>;
 }
 
