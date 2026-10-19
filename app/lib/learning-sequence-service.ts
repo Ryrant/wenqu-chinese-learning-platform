@@ -185,21 +185,22 @@ export async function assertSequenceTarget(db: PlatformDatabase, context: Platfo
     objectiveId: row.objective_id, objectiveTitle: row.objective_title, rubric: JSON.parse(row.rubric_json), medium: row.medium };
 }
 
-export async function readSequenceWorkspace(db: PlatformDatabase, context: PlatformContext, focusedStudentId: string | null, onlySequenceId?: string) {
+export async function readSequenceWorkspace(db: PlatformDatabase, context: PlatformContext, focusedStudentId: string | null, onlySequenceId?: string, selectedSequenceIds?: string[]) {
   const access = submissionAccessClause(context);
   const filter = (focusedStudentId ? " AND ls.student_user_id=?" : "")
-    + (onlySequenceId ? " AND (ls.id=? OR ls.id IN (SELECT d.sequence_id FROM learning_sequence_decisions d WHERE d.tenant_id=ls.tenant_id AND d.next_sequence_id=?))" : "");
+    + (onlySequenceId ? " AND (ls.id=? OR ls.id IN (SELECT d.sequence_id FROM learning_sequence_decisions d WHERE d.tenant_id=ls.tenant_id AND d.next_sequence_id=?))" : "")
+    + (selectedSequenceIds ? " AND ls.id IN (SELECT value FROM json_each(?))" : "");
   const rows = (await db.prepare(`SELECT ls.*,u.display_name AS studentName,c.teacher_user_id AS teacherUserId FROM learning_sequences ls
     JOIN submissions s ON s.id=ls.baseline_submission_id AND s.tenant_id=ls.tenant_id
     JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
     JOIN users u ON u.id=ls.student_user_id WHERE ls.tenant_id=? AND ${access.sql}${filter} ORDER BY ls.created_at DESC,ls.rowid DESC`)
-    .bind(context.tenantId, ...access.args, ...(focusedStudentId ? [focusedStudentId] : []), ...(onlySequenceId ? [onlySequenceId, onlySequenceId] : [])).all<SequenceRow & { teacherUserId: string }>()).results;
+    .bind(context.tenantId, ...access.args, ...(focusedStudentId ? [focusedStudentId] : []), ...(onlySequenceId ? [onlySequenceId, onlySequenceId] : []), ...(selectedSequenceIds ? [JSON.stringify(selectedSequenceIds)] : [])).all<SequenceRow & { teacherUserId: string }>()).results;
   const ids = rows.map((item) => item.id);
-  const works = ids.length ? await workRows(db, context, `s.sequence_id IN (${ids.map(() => "?").join(",")})`, ids) : [];
+  const works = ids.length ? await workRows(db, context, "s.sequence_id IN (SELECT value FROM json_each(?))", [JSON.stringify(ids)]) : [];
   const decisions = ids.length ? (await db.prepare(`SELECT d.*,ls.title AS nextTitle,u.display_name AS teacherName FROM learning_sequence_decisions d
     JOIN learning_sequences ls ON ls.id=d.next_sequence_id AND ls.tenant_id=d.tenant_id JOIN users u ON u.id=d.created_by
-    WHERE d.tenant_id=? AND d.sequence_id IN (${ids.map(() => "?").join(",")}) ORDER BY d.created_at DESC,d.rowid DESC`)
-    .bind(context.tenantId, ...ids).all<DecisionRow>()).results : [];
+    WHERE d.tenant_id=? AND d.sequence_id IN (SELECT value FROM json_each(?)) ORDER BY d.created_at DESC,d.rowid DESC`)
+    .bind(context.tenantId, JSON.stringify(ids)).all<DecisionRow>()).results : [];
   const learningSequences: LearningSequence[] = rows.map((row) => ({
     id: row.id, studentUserId: row.student_user_id, studentName: row.studentName, assignmentId: row.assignment_id,
     objectiveId: row.objective_id, objectiveTitle: row.objective_title, title: row.title, practicePrompt: row.practice_prompt,
@@ -216,7 +217,7 @@ export async function readSequenceWorkspace(db: PlatformDatabase, context: Platf
     transfer: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "transfer").map(evidence),
     retest: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "retest").map(evidence),
   }));
-  const sequenceSources = !onlySequenceId && context.roles.some((role) => role === "admin" || role === "teacher")
+  const sequenceSources = !onlySequenceId && !selectedSequenceIds && context.roles.some((role) => role === "admin" || role === "teacher")
     ? (await workRows(db, context, "s.review_status='reviewed' AND a.status='published' AND (?=1 OR c.teacher_user_id=?)", [context.roles.includes("admin") ? 1 : 0, context.userId])).map(source).filter((item) => item.work.objectives.length)
     : [];
   return { learningSequences, sequenceSources };

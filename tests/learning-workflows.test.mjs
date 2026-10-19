@@ -29,6 +29,10 @@ const bundle = await build({
     export { GET as portfolio } from './app/api/v1/family-portfolio/route';
     export { GET as followups } from './app/api/v1/teaching-followups/route';
     export { GET as familyFeedback, POST as familyFeedbackAction } from './app/api/v1/family-feedback/route';
+    export { GET as batchCatalog, POST as batchAction } from './app/api/v1/trial-batches/route';
+    export { GET as batchDetail } from './app/api/v1/trial-batches/[id]/route';
+    export { GET as batchReport } from './app/api/v1/trial-batches/[id]/report/route';
+    export { batchSummary } from './app/lib/trial-batch-types';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
@@ -132,7 +136,16 @@ async function fixture(t) {
     const response = await api.familyFeedbackAction(new Request("http://127.0.0.1/api/v1/family-feedback", { method: "POST", headers: { ...(cookie ? { cookie } : {}), "content-type": "application/json" }, body: JSON.stringify(body) }));
     const data = await response.json(); assert.equal(response.status, status, JSON.stringify(data)); return data;
   };
-  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups, feedback, feedbackAction };
+  const batches = async (cookie = actors.teacher, id, expectedStatus = 200, print = false) => {
+    const request = new Request(`http://127.0.0.1/api/v1/trial-batches${id ? `/${id}${print ? "/report" : ""}` : ""}`, { headers: cookie ? { cookie } : {} });
+    const response = id ? await (print ? api.batchReport : api.batchDetail)(request, { params: Promise.resolve({ id }) }) : await api.batchCatalog(request);
+    const data = print ? await response.text() : await response.json(); assert.equal(response.status, expectedStatus, JSON.stringify(data).slice(0, 1000)); return { response, data };
+  };
+  const batchAction = async (cookie, body, expectedStatus = body.action === "create" ? 201 : 200) => {
+    const response = await api.batchAction(new Request("http://127.0.0.1/api/v1/trial-batches", { method: "POST", headers: { ...(cookie ? { cookie } : {}), "content-type": "application/json" }, body: JSON.stringify(body) }));
+    const data = await response.json(); assert.equal(response.status, expectedStatus, JSON.stringify(data)); return data;
+  };
+  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups, feedback, feedbackAction, batches, batchAction };
 }
 
 test("unconfigured and invalid AI suggestions leave grades and mastery unset; structured REST output is validated", async (t) => {
@@ -1601,6 +1614,179 @@ test("family usability history includes all task candidates, keeps archived non-
   const malformed = await api.familyFeedbackAction(new Request("http://127.0.0.1/api/v1/family-feedback", { method: "POST", headers: { cookie: f.actors.guardian }, body: "{" })); assert.equal(malformed.status, 400);
 });
 
+async function batchInput(f, extra = {}, actor = f.actors.teacher) {
+  const classroom = (await f.batches(actor)).data.classes.find((item) => item.id === f.classroom.id);
+  return { action: "create", id: crypto.randomUUID(), title: "家常菜单元试用 <script>unsafe()</script>", classId: classroom.id, objectiveId: f.goals[0],
+    participantIds: classroom.participants.map((person) => person.id), sequenceIds: [], familyTasks: [], catalogVersion: classroom.version,
+    startDate: "2000-01-01", endDate: "2099-12-31", workScope: "相同单元、目标及量规；按实际备课和批阅范围核对两种方式，不预设节省时间。", ...extra };
+}
+
+test("trial batches freeze the cohort and scope, explicitly append links, recover concurrent retries and never change language evidence", async (t) => {
+  const f = await fixture(t); const flow = await reviewedTransfer(f, true); const task = await feedbackTask(f);
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id));
+  const grades = await f.db.prepare("SELECT id,score,review_status FROM submissions ORDER BY id").all();
+  const input = await batchInput(f); await Promise.all([f.batchAction(f.actors.teacher, input), f.batchAction(f.actors.teacher, input)]);
+  await f.batchAction(f.actors.teacher, { ...input, workScope: "相同 ID 不能换范围。" }, 409);
+  const before = (await f.batches(f.actors.teacher, input.id)).data;
+  assert.equal(before.participants.length, 2); assert.ok(before.participants.every((person) => person.groups.length === 0));
+  const catalog = (await f.batches()).data.classes.find((item) => item.id === f.classroom.id);
+  const link = { action: "link", id: input.id, revision: 1, catalogVersion: catalog.version, sequenceIds: [flow.sequence.id], familyTasks: [{ id: task.id, revision: 1 }] };
+  await Promise.all([f.batchAction(f.actors.teacher, link), f.batchAction(f.actors.teacher, link)]);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='trial_batch.linked'").first()).n, 1);
+  await f.db.prepare("UPDATE users SET display_name='改名后的学生' WHERE id=?").bind(f.ids.student).run();
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: f.classroom.id, studentUserIds: [] });
+  await f.batchAction(f.actors.teacher, input); await f.batchAction(f.actors.teacher, link);
+  const report = (await f.batches(f.actors.teacher, input.id)).data;
+  assert.equal(report.batch.revision, 2); assert.equal(report.batch.scope.sequences.length, 1);
+  const person = report.participants.find((person) => person.id === f.ids.student);
+  assert.equal(person.name, "student"); assert.notEqual(person.currentStatus, "active"); assert.equal(person.groups[0].source.medium, "audio");
+  assert.equal(report.feedback.length, 1); assert.equal(api.batchSummary(report).withoutGroups, 1);
+  assert.deepEqual(await f.db.prepare("SELECT id,score,review_status FROM submissions ORDER BY id").all(), grades);
+  const printed = await f.batches(f.actors.teacher, input.id, 200, true);
+  assert.ok(printed.data.includes("&lt;script&gt;unsafe()&lt;/script&gt;")); assert.ok(!printed.data.includes("<script>unsafe()"));
+  assert.match(printed.response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+  assert.equal(printed.response.headers.get("cache-control"), "private, no-store");
+  assert.ok(printed.data.includes(flow.sequence.id) && printed.data.includes("未关联任务组"));
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='trial_batch.created'").first()).n, 1);
+});
+
+test("trial batch reports retain zero scores and prompts, use the observation window and frozen family versions, and keep withdrawals separate", async (t) => {
+  const f = await fixture(t); const flow = await reviewedTransfer(f); const task = await feedbackTask(f);
+  const zero = await flow.submit("transfer");
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(zero.id, { score: 0, helpLevel: "independent", promptCount: 0, contextConfirmed: true, objectiveScores: [{ objectiveId: f.goals[0], score: 0 }], dimensionScores: [] }));
+  await f.db.prepare("UPDATE learning_sequences SET baseline_snapshot_json=json_set(baseline_snapshot_json,'$.submittedAt','2001-02-01 01:00:00','$.reviewedAt','2001-02-01 02:00:00') WHERE id=?").bind(flow.sequence.id).run();
+  await f.db.prepare("UPDATE submissions SET created_at='2001-02-02 16:00:00',reviewed_at='2001-02-02 16:00:00' WHERE id=?").bind(zero.id).run();
+  const input = await batchInput(f, { startDate: "2001-02-03", endDate: "2001-02-03", sequenceIds: [flow.sequence.id], familyTasks: [{ id: task.id, revision: 1 }] });
+  await f.batchAction(f.actors.teacher, input);
+  const record = { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "review", method: "platform", minutes: 0, note: "本次实际没有额外批阅用时。" };
+  await f.act(f.actors.teacher, "create_trial_record", record, 201);
+  const withdrawn = { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "withdrawn", note: "家长说明观察周期内无法继续参与。" };
+  await f.act(f.actors.teacher, "create_trial_record", withdrawn, 201);
+  await f.db.prepare("UPDATE learning_trial_records SET created_at='2001-02-03 02:00:00'").run();
+  const firstFeedback = familyFeedbackInput(task.id); await f.feedbackAction(f.actors.guardian, firstFeedback);
+  await f.db.prepare("UPDATE family_usability_feedback SET created_at='2001-02-02 16:00:00' WHERE id=?").bind(firstFeedback.id).run();
+  await f.act(f.actors.guardian, "update_family_task", { id: task.id, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "版本二交流", detail: "当前新要求", partner: "teacher", revision: 1 });
+  const secondFeedback = familyFeedbackInput(task.id, { revision: 2 }); await f.feedbackAction(f.actors.guardian, secondFeedback);
+  await f.db.prepare("UPDATE family_usability_feedback SET created_at='2001-02-03 03:00:00' WHERE id=?").bind(secondFeedback.id).run();
+  const report = (await f.batches(f.actors.teacher, input.id)).data;
+  const group = report.participants.find((person) => person.id === f.ids.student).groups[0];
+  assert.equal(group.baseline.inPeriod, false); assert.equal(group.baseline.goalScore, 40);
+  assert.equal(group.transfer.length, 1); assert.equal(group.transfer[0].goalScore, 0); assert.equal(group.transfer[0].promptCount, 0);
+  assert.equal(api.batchSummary(report).independentTransfer, 1); assert.equal(api.batchSummary(report).missingTransfer, 1);
+  assert.deepEqual(report.feedback.map((entry) => entry.id), [firstFeedback.id]);
+  const summary = api.trialSummary(report.entries, []);
+  assert.equal(summary.workload.find((item) => item.kind === "review" && item.method === "platform").minutes, 0);
+  assert.equal(summary.workload.find((item) => item.kind === "review" && item.method === "previous").minutes, null);
+  assert.equal(summary.observations.find((item) => item.kind === "withdrawn").count, 1);
+  await f.db.prepare("UPDATE submissions SET reviewed_at='2001-02-03 16:00:00' WHERE id=?").bind(zero.id).run();
+  const bounded = (await f.batches(f.actors.teacher, input.id)).data;
+  const boundedWork = bounded.participants.find((person) => person.id === f.ids.student).groups[0].transfer[0];
+  assert.equal(boundedWork.reviewed, false); assert.equal(boundedWork.goalScore, null); assert.equal(api.batchSummary(bounded).independentTransfer, 0);
+  await f.db.prepare("UPDATE submissions SET created_at='2001-02-03 16:00:00' WHERE id=?").bind(zero.id).run();
+  assert.equal((await f.batches(f.actors.teacher, input.id)).data.participants.find((person) => person.id === f.ids.student).groups[0].transfer.length, 0, "Beijing end date is inclusive but the next midnight is excluded");
+  const currentCatalog = (await f.batches()).data.classes.find((item) => item.id === f.classroom.id);
+  await f.batchAction(f.actors.teacher, { action: "link", id: input.id, revision: 1, catalogVersion: currentCatalog.version, sequenceIds: [], familyTasks: [{ id: task.id, revision: 2 }] });
+  assert.equal((await f.batches(f.actors.teacher, input.id)).data.feedback.length, 2, "the new task version enters only after an explicit append");
+  await f.feedbackAction(f.actors.guardian, { action: "void", id: firstFeedback.id, reason: "误记的本次反馈。" }, 200);
+  const voided = (await f.batches(f.actors.teacher, input.id)).data;
+  assert.equal(voided.feedback.length, 2); assert.ok(voided.feedback.find((entry) => entry.id === firstFeedback.id).voidedAt); assert.equal(api.batchSummary(voided).familyRecords, 1); assert.equal(api.batchSummary(voided).missingFamilyTasks, 1);
+});
+
+test("trial batches can retrospectively associate actual historical family versions after a task moves to a new class", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const feedback = familyFeedbackInput(task.id);
+  await f.feedbackAction(f.actors.guardian, feedback);
+  const otherClass = await f.act(f.actors.otherTeacher, "create_class", { name: "家庭任务新班", level: "A2" }, 201);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: otherClass.id, studentUserIds: [f.ids.student] });
+  const assignment = await f.act(f.actors.otherTeacher, "create_assignment", { classId: otherClass.id, title: "新班交流", activityType: "文字", objectiveIds: f.goals, rubric }, 201);
+  await f.act(f.actors.otherTeacher, "publish_assignment", { id: assignment.id });
+  await f.act(f.actors.guardian, "update_family_task", { id: task.id, assignmentId: assignment.id, objectiveId: f.goals[0], title: "新班版本二", detail: "新版要求", partner: "teacher", revision: 1 });
+  const original = (await f.batches()).data.classes.find((item) => item.id === f.classroom.id);
+  assert.equal(original.familyTasks.length, 1); assert.equal(original.familyTasks[0].revision, 1); assert.equal(original.familyTasks[0].historical, true);
+  assert.equal((await f.batches(f.actors.otherTeacher)).data.classes[0].familyTasks.some((item) => item.revision === 1), false);
+  const input = await batchInput(f, { familyTasks: [{ id: task.id, revision: 1 }] }); await f.batchAction(f.actors.teacher, input);
+  const report = (await f.batches(f.actors.teacher, input.id)).data;
+  assert.deepEqual(report.feedback.map((entry) => entry.id), [feedback.id]); assert.equal(report.batch.scope.familyTasks[0].title, "家庭使用反馈验证任务");
+  const append = await batchInput(f); await f.batchAction(f.actors.teacher, append);
+  await f.batchAction(f.actors.teacher, { action: "link", id: append.id, revision: 1, catalogVersion: original.version, sequenceIds: [], familyTasks: [{ id: task.id, revision: 1 }] });
+  assert.equal((await f.batches(f.actors.teacher, append.id)).data.feedback.length, 1);
+});
+
+test("trial batches enforce staff and original-class access, personal workload privacy, composite roles and password gates", async (t) => {
+  const f = await fixture(t); const flow = await reviewedTransfer(f); const input = await batchInput(f, { sequenceIds: [flow.sequence.id] });
+  await f.batchAction(f.actors.teacher, input);
+  for (const actor of ["student", "guardian"]) {
+    await f.batches(f.actors[actor], undefined, 403); await f.batches(f.actors[actor], input.id, 403); await f.batches(f.actors[actor], input.id, 403, true);
+    await f.batchAction(f.actors[actor], input, 403);
+  }
+  await f.batches(null, undefined, 401);
+  await f.batches(f.actors.otherTenant, input.id, 404); await f.batches(f.actors.otherTeacher, input.id, 404);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "复合教师", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  assert.equal((await f.batches(f.actors.otherTeacher)).data.batches.length, 0); await f.batches(f.actors.otherTeacher, input.id, 404);
+  const save = (actor, kind, minutes) => f.act(f.actors[actor], "create_trial_record", { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind, ...(minutes === undefined ? {} : { method: "platform", minutes }), note: `${actor} 的实际记录` }, 201);
+  await save("teacher", "review", 3); await save("admin", "review", 17); await save("teacher", "no_improvement");
+  assert.equal((await f.batches(f.actors.teacher, input.id)).data.entries.length, 2);
+  assert.equal((await f.batches(f.actors.admin, input.id)).data.entries.length, 3);
+  await f.db.prepare("UPDATE classes SET teacher_user_id=? WHERE id=?").bind(f.ids.otherTeacher, f.classroom.id).run();
+  await f.batches(f.actors.teacher, input.id, 404); await f.batchAction(f.actors.teacher, input, 404);
+  const nextTeacher = (await f.batches(f.actors.otherTeacher, input.id)).data;
+  assert.equal(nextTeacher.entries.length, 1); assert.equal(nextTeacher.entries[0].kind, "no_improvement"); assert.equal(nextTeacher.batch.canVoid, false);
+  await f.batchAction(f.actors.otherTeacher, { action: "void", id: input.id, reason: "非本人批次" }, 403);
+  await f.db.prepare("UPDATE users SET must_change_password=1 WHERE id=?").bind(f.ids.otherTeacher).run();
+  await f.batches(f.actors.otherTeacher, input.id, 403); await f.batches(f.actors.otherTeacher, input.id, 403, true);
+  await f.batchAction(f.actors.otherTeacher, { action: "void", id: input.id, reason: "改密前" }, 403);
+  await f.batches(f.actors.admin, input.id);
+});
+
+test("trial batch saves reject invalid or stale scope and roll back failed audits; withdrawing a batch preserves all records", async (t) => {
+  const f = await fixture(t); const flow = await reviewedTransfer(f); const base = await batchInput(f, { sequenceIds: [flow.sequence.id] });
+  for (const extra of [{ startDate: "2001-02-30" }, { endDate: "1999-12-31" }, { participantIds: [] }, { participantIds: [f.ids.guardian] }, { objectiveId: f.goals[1] }, { workScope: "" }]) await f.batchAction(f.actors.teacher, { ...base, ...extra }, 400);
+  const originalBatch = f.db.batch.bind(f.db);
+  const race = t.mock.method(f.db, "batch", async (statements) => { await f.db.prepare("UPDATE enrollments SET status='inactive' WHERE class_id=? AND student_user_id=?").bind(f.classroom.id, f.ids.student).run(); return originalBatch(statements); });
+  await f.batchAction(f.actors.teacher, base, 409); race.mock.restore();
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM learning_trial_batches").first()).n, 0);
+  await f.batchAction(f.actors.teacher, base, 409);
+  const current = await batchInput(f);
+  await f.db.prepare("CREATE TRIGGER batch_audit_failure BEFORE INSERT ON audit_logs WHEN NEW.action IN ('trial_batch.created','trial_batch.linked') BEGIN SELECT RAISE(ABORT,'fixture_batch_audit_failed'); END").run();
+  await f.batchAction(f.actors.teacher, current, 500);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM learning_trial_batches").first()).n, 0);
+  await f.db.prepare("DROP TRIGGER batch_audit_failure").run(); await f.batchAction(f.actors.teacher, current);
+  await f.db.prepare("CREATE TRIGGER batch_link_failure BEFORE INSERT ON audit_logs WHEN NEW.action='trial_batch.linked' BEGIN SELECT RAISE(ABORT,'fixture_batch_link_failed'); END").run();
+  const link = { action: "link", id: current.id, revision: 1, catalogVersion: current.catalogVersion, sequenceIds: [flow.sequence.id], familyTasks: [] };
+  await f.batchAction(f.actors.teacher, link, 500);
+  assert.equal((await f.batches(f.actors.teacher, current.id)).data.batch.scope.sequences.length, 0);
+  await f.db.prepare("DROP TRIGGER batch_link_failure").run(); await f.batchAction(f.actors.teacher, link);
+  const reason = { action: "void", id: current.id, reason: "误建的范围，保留本批次历史。" };
+  await f.batchAction(f.actors.teacher, { ...reason, reason: "" }, 400);
+  await Promise.all([f.batchAction(f.actors.teacher, reason), f.batchAction(f.actors.teacher, reason)]);
+  await f.batchAction(f.actors.teacher, { ...reason, reason: "不能覆盖原原因" }, 409);
+  await f.batchAction(f.actors.teacher, current, 409); await f.batchAction(f.actors.teacher, link, 409);
+  const report = (await f.batches(f.actors.teacher, current.id)).data;
+  assert.ok(report.batch.voidedAt); assert.equal(report.batch.voidReason, reason.reason); assert.equal(report.batch.scope.sequences.length, 1);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='trial_batch.voided'").first()).n, 1);
+  const bad = await api.batchAction(new Request("http://127.0.0.1/api/v1/trial-batches", { method: "POST", headers: { cookie: f.actors.teacher }, body: "{" })); assert.equal(bad.status, 400);
+  for (const body of [null, [], "bad"]) {
+    const response = await api.batchAction(new Request("http://127.0.0.1/api/v1/trial-batches", { method: "POST", headers: { cookie: f.actors.teacher }, body: JSON.stringify(body) })); assert.equal(response.status, 400);
+  }
+});
+
+test("trial batch catalogs and linked evidence cover more than a browsing page without exceeding D1 parameter limits", async (t) => {
+  const f = await fixture(t); const flow = await reviewedTransfer(f);
+  await f.db.prepare(`WITH RECURSIVE copies(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM copies WHERE n<120)
+    INSERT INTO learning_sequences (id,tenant_id,student_user_id,assignment_id,objective_id,objective_title,baseline_submission_id,baseline_snapshot_json,title,practice_prompt,transfer_prompt,transfer_context,rubric_json,medium,created_by)
+    SELECT 'batch-group-'||n,tenant_id,student_user_id,assignment_id,objective_id,objective_title,baseline_submission_id,baseline_snapshot_json,'任务组 '||n,practice_prompt,transfer_prompt,transfer_context,rubric_json,medium,created_by FROM learning_sequences,copies WHERE id=?`).bind(flow.sequence.id).run();
+  const prepared = f.db.prepare.bind(f.db); let largest = 0;
+  t.mock.method(f.db, "prepare", (sql) => { const statement = prepared(sql); const bind = statement.bind.bind(statement); statement.bind = (...args) => { largest = Math.max(largest, args.length); assert.ok(args.length <= 100, "D1 binding limit must hold for complete selections"); return bind(...args); }; return statement; });
+  const catalog = (await f.batches()).data.classes.find((item) => item.id === f.classroom.id);
+  assert.equal(catalog.sequences.length, 121);
+  const input = await batchInput(f, { sequenceIds: catalog.sequences.map((item) => item.id) }); await f.batchAction(f.actors.teacher, input);
+  const report = (await f.batches(f.actors.teacher, input.id)).data;
+  assert.equal(report.participants.find((person) => person.id === f.ids.student).groups.length, 121); assert.ok(largest < 100);
+  await f.db.prepare("UPDATE assignments SET class_id='unreadable-class' WHERE id=?").bind(f.assignment.id).run();
+  const missing = (await f.batches(f.actors.teacher, input.id)).data;
+  assert.equal(api.batchSummary(missing).unavailableGroups, 121); assert.equal(missing.entries.length, 0);
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {
@@ -1622,6 +1808,8 @@ test("additive migration upgrades existing data and runtime initialization is re
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0011_teaching_next_steps.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0012_trial_records.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0014_trial_batches.sql'").get());
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_trial_batches").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM family_usability_feedback").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_trial_records").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_sequence_decisions").get().count, 0);
@@ -1637,6 +1825,9 @@ test("additive migration upgrades existing data and runtime initialization is re
     db.exec("ALTER TABLE family_usability_feedback RENAME COLUMN operation_help TO incomplete_operation_help; DELETE FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'");
     db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
     assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'").get(), undefined);
+    db.exec("ALTER TABLE learning_trial_batches RENAME COLUMN scope_json TO incomplete_scope_json; DELETE FROM d1_migrations WHERE name='0014_trial_batches.sql'");
+    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
+    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0014_trial_batches.sql'").get(), undefined);
   } finally { db.close(); }
   const runtimeDb = new api.NodeSqliteDatabase("file::memory:");
   try { await api.ensurePlatformSchema(runtimeDb); await api.ensurePlatformSchema(runtimeDb); } finally { runtimeDb.close(); }

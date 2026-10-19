@@ -191,6 +191,8 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare("CREATE INDEX IF NOT EXISTS trial_records_sequence_idx ON learning_trial_records (tenant_id,sequence_id,created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS family_usability_feedback (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, family_task_id TEXT NOT NULL, student_user_id TEXT NOT NULL, assignment_id TEXT, class_id TEXT, task_revision INTEGER NOT NULL, task_snapshot_json TEXT NOT NULL, participation TEXT NOT NULL, instructions TEXT NOT NULL, operation_help TEXT NOT NULL, alternative TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS family_feedback_task_idx ON family_usability_feedback (tenant_id,family_task_id,created_at)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS learning_trial_batches (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, title TEXT NOT NULL, scope_json TEXT NOT NULL, request_json TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS trial_batches_class_idx ON learning_trial_batches (tenant_id,class_id,created_at)"),
   ]);
   for (const statement of [
     "ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT",
@@ -323,7 +325,7 @@ ORDER BY rm.created_at ASC`).bind(email).all<{ tenantId: string; role: string }>
 
 export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
-  const status = ["family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
+  const status = ["trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
     ? 401
     : message === "forbidden"
       ? 403
