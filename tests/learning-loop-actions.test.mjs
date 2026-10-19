@@ -66,7 +66,6 @@ test("workspace read model selects a bound child and returns latest mastery only
   assert.match(workspace, /assertGuardianStudentAccess/);
   assert.match(workspace, /ROW_NUMBER\(\) OVER/);
   assert.match(workspace, /rn=1/);
-  assert.match(workspace, /isRecommendationDue/);
   assert.match(workspace, /weeklyStatsQuery/);
   assert.match(workspace, /PARTITION BY cr\.student_user_id,cr\.scope/);
   assert.match(workspace, /submittedByFocus/);

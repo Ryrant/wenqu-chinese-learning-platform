@@ -197,6 +197,19 @@ test("learning plan prioritizes teacher intervention review family and assignmen
   assert.deepEqual(ranked.map((item) => item.id), ["teacher", "review", "family"]);
 });
 
+test("daily plan gives actionable teacher and due review tasks priority before matching support, without waiting work blocking them", async () => {
+  const { rankLearningPlan } = await importTypeScript("app/lib/learning-loop.ts");
+  const ranked = rankLearningPlan([
+    { id: "waiting-teacher", kind: "sequence", waitingReview: true },
+    { id: "waiting-family", kind: "family", waitingReview: true },
+    { id: "family", kind: "family" },
+    { id: "support", kind: "assignment", supportMatch: true },
+    { id: "review", kind: "review" },
+    { id: "teacher", kind: "teacher" },
+  ]);
+  assert.deepEqual(ranked.map((item) => item.id), ["teacher", "review", "support"]);
+});
+
 test("review items become answerable only when their due time arrives", async () => {
   const { isRecommendationDue } = await importTypeScript("app/lib/learning-loop.ts");
   const now = new Date("2026-08-01T00:00:00.000Z");

@@ -4,6 +4,10 @@ export const SEQUENCE_STAGE_LABELS = { practice: "针对性练习", transfer: "�
 export type SequenceStage = keyof typeof SEQUENCE_STAGE_LABELS;
 export type HelpLevel = "unknown" | "independent" | "prompted" | "assisted";
 export const HELP_LEVEL_LABELS: Record<HelpLevel, string> = { unknown: "未记录", independent: "独立完成", prompted: "提供了提示", assisted: "共同完成或较多帮助" };
+export function submissionHelpLevel(familyHelp: string | null, reviewHelp?: HelpLevel): HelpLevel {
+  return familyHelp === "prompted" || familyHelp === "assisted" ? familyHelp
+    : reviewHelp ?? (familyHelp === "independent" ? "independent" : "unknown");
+}
 export const TEACHING_DECISION_LABELS = { practice: "继续练习", fade_support: "减少提示", challenge: "进阶挑战", collect_evidence: "补充证据" } as const;
 export type TeachingDecisionKind = keyof typeof TEACHING_DECISION_LABELS;
 export type ReviewEvidence = { version: 1; rubric: RubricDimension[]; objectives: Array<{ id: string; title: string }>; helpLevel: HelpLevel; contextConfirmed: boolean; promptCount?: number | null };

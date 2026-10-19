@@ -1,5 +1,6 @@
 import type { LearningSequence, SequenceSource } from "./learning-sequence-types";
 import type { TrialEntry } from "./trial-types";
+import type { EvidencePlanItem } from "./learning-plan-types";
 
 export type Role = "student" | "teacher" | "guardian" | "admin";
 export type Row = Record<string, unknown>;
@@ -32,7 +33,7 @@ export type WorkspaceData = {
   user: { id: string; email: string; displayName: string; roles: Role[]; mustChangePassword?: boolean };
   classes: Row[]; assignments: Row[]; submissions: Row[]; submissionReviews: Row[]; mastery: Row[]; documents: Row[];
   lessonPlans: Row[]; notifications: Row[]; consents: Row[]; audits: Row[]; invitations: Row[]; members: MemberRow[]; guardianLinks: GuardianLinkRow[];
-  learningObjectives: Row[]; diagnosticItems: Row[]; diagnosticSummary: Row | null; recommendations: Row[]; learningPlan: Row[];
+  learningObjectives: Row[]; diagnosticItems: Row[]; diagnosticSummary: Row | null; recommendations: Row[]; learningPlan: EvidencePlanItem[];
   learningSequences: LearningSequence[]; sequenceSources: SequenceSource[];
   trialEntries: TrialEntry[];
   availableStudents: Array<{ id: string; displayName: string }>; selectedStudent: { id: string; displayName: string } | null;

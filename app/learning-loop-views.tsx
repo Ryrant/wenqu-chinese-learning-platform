@@ -8,6 +8,10 @@ import { DiagnosticMediaInput, DiagnosticStimulus } from "./diagnostic-evidence"
 import type { InterventionSuggestion } from "./lib/diagnostic-types";
 import { createFamilyPlan, EXCHANGE_PARTNERS, FAMILY_TASK_TEMPLATES, readFamilyPlan, type ExchangePartner } from "./lib/family-task";
 import { FamilyExchangeConfirmation, FamilyTaskGuide, FamilyWorkEvidence } from "./family-task-guide";
+import { ABILITY_LABELS } from "./lib/diagnostic-types";
+import { HELP_LEVEL_LABELS, sequenceTime } from "./lib/learning-sequence-types";
+import { UnitReportLink } from "./unit-report-links";
+import planStyles from "./learning-plan.module.css";
 
 type LoopProps = { data: WorkspaceData; act: Act; notify: Notify };
 
@@ -127,19 +131,30 @@ export function StudentTodayPlan({ data, act, notify, navigate, onStartTask }: L
   }
   return <article className="panel loop-panel">
     <div className="panel-heading">
-      <div><span className="eyebrow">固定规则 · 可解释排序</span><h3>今日学习计划</h3></div>
+      <div><span className="eyebrow">依据作品 · 教师安排优先</span><h3>今日学习计划</h3></div>
       <span>{data.learningPlan.length}/3</span>
     </div>
-    <p>最多显示 3 项，优先处理教师干预、到期错题和家庭任务。</p>
-    {data.learningPlan.length ? data.learningPlan.map((item, index) => <div className="plan-row" key={String(item.id)}>
+    <p>最多显示 3 项。先安排可操作的教师任务和到期复习，再优先匹配已有支持需求的任务；待确认或待评价事项排在后面。</p>
+    {data.learningPlan.length ? data.learningPlan.map((item, index) => <div className={`plan-row ${planStyles.row}`} key={String(item.id)}>
       <span className="plan-order">{index + 1}</span>
       <div><strong>{stringValue(item.title)}</strong><small>{kindLabels[stringValue(item.kind, "")] ?? "普通作业"} · {dueLabel(item.dueAt ?? item.due_at)}</small>
-        {item.kind === "teacher" && !!item.detail && <details className="support-evidence"><summary>查看练习与选择依据</summary><p className="generated-copy">{String(item.detail)}</p><small>标记完成仅记录练习状态，不生成能力成绩。</small></details>}
+        <p className={planStyles.reason}>{item.selectionReason}</p>
+        <details className={planStyles.basis}><summary>为什么安排这一项</summary>
+          {item.basis.length ? item.basis.map((basis) => <section key={basis.objectiveId}><h4>{basis.title}</h4><p>{basis.note}</p>
+            {basis.records.length ? <ul>{basis.records.map((record) => <li key={record.id}><strong>{record.ability ? `${ABILITY_LABELS[record.ability]} · ` : ""}{record.title} · {record.id.slice(0, 8)}</strong>
+              <span>评价：{record.measuredAt ? sequenceTime(record.measuredAt) : "时间未记录"} · {record.score === null ? "目标未评价" : record.kind === "choice" ? `正确率 ${record.score}%` : `目标评分 ${record.score}/100`}</span>
+              {record.kind === "work" && <span>帮助程度：{HELP_LEVEL_LABELS[record.helpLevel ?? "unknown"]}{record.promptCount !== undefined ? ` · 提示次数：${record.promptCount ?? "未记录"}` : ""}</span>}
+            </li>)}</ul> : <p>当前没有可用于本次排序的目标评价记录。</p>}
+          </section>) : <p>本项按已发布安排执行，没有关联目标证据时不补造依据。</p>}
+          <p>{item.sequenceId ? "本项依据教师已发布的安排；缺少目标评分或帮助记录时保留未知，不据此判断独立迁移。" : "诊断排序沿用分层支持规则：同一目标至少两个分项各有两次评分，最近两次均值相差至少 20 分时提示支持方向。已记录有提示或共同完成的作品不参与该比较，未记录帮助程度不代表独立完成。"}</p>
+          {item.sequenceId ? <UnitReportLink sequenceId={item.sequenceId}>查看任务组原始作品与教师安排</UnitReportLink> : item.basis.some((basis) => basis.records.length) && <button className="soft-button" type="button" onClick={() => navigate("成长档案")}>查看能力画像与原始作品</button>}
+        </details>
+        {item.kind === "teacher" && !!item.detail && <details className="support-evidence"><summary>教师发布时的练习与选择依据</summary><p className="generated-copy">{String(item.detail)}</p><small>标记完成仅记录练习状态，不生成能力成绩。</small></details>}
       </div>
       {item.kind === "sequence" && item.waitingReview ? <span className="status draft">待教师评价</span> : item.kind === "family" && item.familyReviewStatus && item.familyReviewStatus !== "reviewed" ? <span className="status draft">{item.familyConfirmedAt ? "待教师评价" : "待家长确认"}</span> : <button className="soft-button" type="button" disabled={busyId === String(item.id)} onClick={() => handle(item)}>
         {stringValue(item.kind, "") === "review" ? "进入复习" : item.kind === "assignment" || item.kind === "family" || item.kind === "sequence" ? "进入作业" : busyId === String(item.id) ? "更新中…" : "标记完成"}
       </button>}
-    </div>) : <p className="empty-state">今天没有待办，完成新作业后会生成下一步计划。</p>}
+    </div>) : <p className="empty-state">当前没有可安排的任务；教师发布任务或复测开放后可在这里查看。</p>}
   </article>;
 }
 

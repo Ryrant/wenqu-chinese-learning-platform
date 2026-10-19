@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminView, GuardianView, TeacherView } from "./staff-views";
 import { StudentView } from "./student-view";
 import type { Notify, Role, WorkspaceData } from "./lib/platform-types";
@@ -47,6 +47,8 @@ export function Dashboard() {
   const [noticesOpen, setNoticesOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const workspaceRequest = useRef(0);
+  const workspaceSelection = useRef<{ requested?: string; committed?: string }>({});
 
   const notify: Notify = (title, detail, tone = "success") => {
     setToast({ title, detail, tone });
@@ -64,20 +66,31 @@ export function Dashboard() {
   }
 
   const refresh = useCallback(async (studentId?: string) => {
+    const requestId = ++workspaceRequest.current;
     setError("");
-    const selectedStudentId = studentId ?? data?.selectedStudent?.id;
+    // 写入完成后的刷新也使用最新选择，不能从旧表单闭包带回先前的孩子。
+    const selectedStudentId = studentId ?? workspaceSelection.current.requested;
+    workspaceSelection.current.requested = selectedStudentId;
     const workspaceUrl = selectedStudentId ? `/api/v1/workspace?studentId=${encodeURIComponent(selectedStudentId)}` : "/api/v1/workspace";
-    const response = await fetch(workspaceUrl, { cache: "no-store" });
-    const payload = await readJson<WorkspaceData | { error?: string }>(response);
-    if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
-    const next = payload as WorkspaceData;
-    setWorkspaceReceivedAt(performance.now());
-    setData(next);
-    if (!next.user.roles.includes(role)) {
-      const first = next.user.roles[0] ?? "student";
-      setRole(first); setActiveNav(navigation[first][0]);
+    try {
+      const response = await fetch(workspaceUrl, { cache: "no-store" });
+      const payload = await readJson<WorkspaceData | { error?: string }>(response);
+      if (requestId !== workspaceRequest.current) return;
+      if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
+      const next = payload as WorkspaceData;
+      workspaceSelection.current = { requested: next.selectedStudent?.id, committed: next.selectedStudent?.id };
+      setWorkspaceReceivedAt(performance.now());
+      setData(next);
+      if (!next.user.roles.includes(role)) {
+        const first = next.user.roles[0] ?? "student";
+        setRole(first); setActiveNav(navigation[first][0]);
+      }
+    } catch (reason) {
+      if (requestId !== workspaceRequest.current) return;
+      workspaceSelection.current.requested = workspaceSelection.current.committed;
+      throw reason;
     }
-  }, [data, role]);
+  }, [role]);
 
   useEffect(() => {
     let active = true;
@@ -89,6 +102,7 @@ export function Dashboard() {
       })
       .then((next) => {
         if (active) {
+          workspaceSelection.current = { requested: next.selectedStudent?.id, committed: next.selectedStudent?.id };
           setWorkspaceReceivedAt(performance.now());
           setData(next);
           void loadAuthMode().catch(() => null);
@@ -164,6 +178,8 @@ export function Dashboard() {
     try {
       const response = await fetch("/api/v1/auth/logout", { method: "POST" });
       if (!response.ok) throw new Error("退出登录失败");
+      workspaceRequest.current++;
+      workspaceSelection.current = {};
       setData(null);
       setMustChangePassword(false);
       setAuthMode("standard");
@@ -204,7 +220,16 @@ export function Dashboard() {
   if ((error || !data) && authMode === "standard") return <main className="center-state"><form className="login-card" onSubmit={login}><span className="eyebrow">标准 Cloudflare 登录</span><h1>进入华文知行工作区</h1><p>使用初始化时创建的管理员账号，或成员管理中创建的账号登录。</p><label>邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" required /></label><label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "登录中…" : "登录"}</button></form></main>;
   if (error || !data) return <main className="center-state"><h1>暂时无法进入工作区</h1><p>{error || "未知错误"}</p><button className="primary-button" onClick={() => { setLoading(true); refresh().catch((reason: Error) => setError(reason.message)).finally(() => setLoading(false)); }}>重新加载</button></main>;
 
-  function switchRole(next: Role) { setRole(next); setActiveNav(navigation[next][0]); }
+  async function switchRole(next: Role) {
+    if (next === "student" && role !== "student") {
+      // 家长所选孩子与登录学生本人是两个范围，先读回本人数据再显示学生操作。
+      setLoading(true);
+      try { await refresh(data!.user.id); }
+      catch (reason) { notify("切换失败", reason instanceof Error ? reason.message : "请重试，当前工作区已保留。", "error"); return; }
+      finally { setLoading(false); }
+    }
+    setRole(next); setActiveNav(navigation[next][0]);
+  }
   async function sendFeedback(event: React.FormEvent) {
     event.preventDefault();
     if (!feedback.trim()) return;

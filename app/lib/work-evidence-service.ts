@@ -1,7 +1,7 @@
 import { submissionAccessClause } from "./access-control";
 import type { WorkDiagnosticSnapshot } from "./diagnostic-types";
 import { readFamilyWorkSnapshot } from "./family-task";
-import { jsonValue, readPromptCount, readReviewEvidence, readSequenceWork, type SequenceEvidence } from "./learning-sequence-types";
+import { jsonValue, readPromptCount, readReviewEvidence, readSequenceWork, submissionHelpLevel, type SequenceEvidence } from "./learning-sequence-types";
 import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 
@@ -50,8 +50,7 @@ export function workEvidence(row: WorkRow): SequenceEvidence {
     dimensions: row.review_status === "reviewed" ? jsonValue(row.dimensionScoresJson, []) : [],
     // 旧普通作品没有保存量规时，不能用当前作业补造历史评价依据。
     rubric: review?.rubric ?? task?.rubric ?? family?.rubric ?? (diagnostic.version === 1 ? diagnostic.rubric ?? null : null),
-    helpLevel: row.family_help_level === "prompted" || row.family_help_level === "assisted" ? row.family_help_level
-      : review?.helpLevel ?? (row.family_help_level === "independent" ? "independent" : "unknown"),
+    helpLevel: submissionHelpLevel(row.family_help_level, review?.helpLevel),
     contextConfirmed: review?.contextConfirmed ?? false, promptCount: readPromptCount(review?.promptCount),
   };
 }

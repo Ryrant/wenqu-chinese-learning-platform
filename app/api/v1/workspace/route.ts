@@ -1,13 +1,12 @@
 import { classAccessClause, submissionAccessClause } from "../../../lib/access-control";
-import { isRecommendationDue, rankLearningPlan, type LearningPlanItem } from "../../../lib/learning-loop";
 import { assertGuardianStudentAccess } from "../../../lib/learning-loop-service";
+import { readLearningPlan } from "../../../lib/learning-plan-service";
 import type { PlatformDatabase } from "../../../lib/platform-runtime";
 import { loadPlatformSettings, publicPlatformSettings } from "../../../lib/platform-settings";
 import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
 import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
 import { readSequenceWorkspace } from "../../../lib/learning-sequence-service";
 import { readTrialEntries } from "../../../lib/trial-service";
-import { SEQUENCE_STAGE_LABELS, sequenceTaskId, nextSequenceStage } from "../../../lib/learning-sequence-types";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +121,7 @@ export async function GET(request: Request) {
     const requestedStudentId = new URL(request.url).searchParams.get("studentId")?.trim() ?? "";
     let selectedStudentId: string | null = student ? userId : null;
     if (guardian && requestedStudentId) {
-      await assertGuardianStudentAccess(db, context, requestedStudentId);
+      if (!student || requestedStudentId !== userId) await assertGuardianStudentAccess(db, context, requestedStudentId);
       selectedStudentId = requestedStudentId;
     } else if (guardian && !selectedStudentId) {
       selectedStudentId = availableStudentsResult.results[0]?.id ?? null;
@@ -281,35 +280,8 @@ export async function GET(request: Request) {
       masteryAverage,
       pendingRecommendations: recommendations.results.filter((item) => item.status === "pending").length,
     };
-    const now = new Date();
-    const planCandidates: Array<LearningPlanItem & Row> = [
-      ...recommendations.results.filter((item) =>
-        item.status === "pending"
-        && (item.source_type !== "diagnostic"
-          || isRecommendationDue(typeof item.due_at === "string" ? item.due_at : null, now))
-      ).map((item) => ({
-        ...item,
-        id: String(item.id),
-        kind: item.source_type === "teacher" ? "teacher" as const
-          : item.source_type === "family" ? "family" as const
-            : "review" as const,
-        dueAt: typeof item.due_at === "string" ? item.due_at : null,
-      })),
-      ...assignments.results.filter((item) => item.status === "published" && Number(item.submittedByFocus ?? 0) === 0).map((item) => ({
-        ...item,
-        id: String(item.id),
-        kind: "assignment" as const,
-        dueAt: typeof item.due_at === "string" ? item.due_at : null,
-      })),
-    ];
     const sequenceWorkspace = await readSequenceWorkspace(db, context, admin || teacher ? null : focusStudentId);
-    for (const sequence of sequenceWorkspace.learningSequences.filter((item) => item.studentUserId === focusStudentId)) {
-      const stage = nextSequenceStage(sequence);
-      if (!stage) continue;
-      const works = sequence[stage];
-      planCandidates.push({ id: sequenceTaskId(sequence.id, stage), kind: "sequence", title: `${sequence.title} · ${SEQUENCE_STAGE_LABELS[stage]}`,
-        waitingReview: works.some((work) => !work.reviewed), dueAt: null });
-    }
+    const learningPlan = await readLearningPlan(context, selectedStudent?.id ?? null, sequenceWorkspace.learningSequences, learningObjectives.results);
     const settings = await loadPlatformSettings(db);
     return Response.json({
       workspace: { tenantId, name: "华文知行示范学校", region: "sg", sampleData: true },
@@ -324,7 +296,7 @@ export async function GET(request: Request) {
       diagnosticItems: diagnosticItems.results,
       diagnosticSummary: diagnosticSummary ?? null,
       recommendations: recommendations.results,
-      learningPlan: rankLearningPlan(planCandidates),
+      learningPlan,
       ...sequenceWorkspace,
       trialEntries: await readTrialEntries(db, context),
       availableStudents: availableStudentsResult.results,

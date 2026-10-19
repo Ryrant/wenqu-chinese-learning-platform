@@ -1,6 +1,7 @@
 import { studentAccessClause, submissionAccessClause } from "./access-control";
 import type { AbilityEvidence, AbilityProfile, ChoiceSnapshot, WorkDiagnosticSnapshot } from "./diagnostic-types";
 import type { PlatformContext } from "./platform-store";
+import { readReviewEvidence, submissionHelpLevel } from "./learning-sequence-types";
 
 export async function readAbilityProfile(context: PlatformContext, studentId: string): Promise<AbilityProfile> {
   const { db, tenantId } = context;
@@ -19,7 +20,7 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
       .bind(tenantId, studentId).all<{ snapshot: string; selectedOption: number; isCorrect: number; attemptId: string; level: string; completedAt: string; sequence: number }>(),
     db.prepare(`SELECT s.id,s.text_answer AS textAnswer,s.asset_key AS assetKey,s.review_status AS reviewStatus,
         s.created_at AS submittedAt,s.reviewed_at AS reviewedAt,s.feedback,s.family_help_level AS familyHelp,
-        s.diagnostic_snapshot_json AS snapshot,sr.objective_scores_json AS objectiveScores,sr.dimension_scores_json AS dimensions,
+        s.diagnostic_snapshot_json AS snapshot,sr.objective_scores_json AS objectiveScores,sr.dimension_scores_json AS dimensions,sr.evidence_json AS reviewEvidence,
         u.display_name AS reviewer,COALESCE(sr.rowid,s.rowid) AS sequence
       FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id
       JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
@@ -27,7 +28,7 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
       LEFT JOIN users u ON u.id=sr.reviewer_user_id
       WHERE s.tenant_id=? AND s.student_user_id=? AND s.diagnostic_snapshot_json!='{}' AND ${submissions.sql}
       ORDER BY s.created_at DESC,s.rowid DESC`)
-      .bind(tenantId, studentId, ...submissions.args).all<{ id: string; textAnswer: string | null; assetKey: string | null; reviewStatus: string; submittedAt: string; reviewedAt: string | null; feedback: string | null; familyHelp: string | null; snapshot: string; objectiveScores: string | null; dimensions: string | null; reviewer: string | null; sequence: number }>(),
+      .bind(tenantId, studentId, ...submissions.args).all<{ id: string; textAnswer: string | null; assetKey: string | null; reviewStatus: string; submittedAt: string; reviewedAt: string | null; feedback: string | null; familyHelp: string | null; snapshot: string; objectiveScores: string | null; dimensions: string | null; reviewEvidence: string | null; reviewer: string | null; sequence: number }>(),
   ]);
   const grouped = new Map<string, { evidence: AbilityEvidence; results: Map<string, { title: string; correct: number; count: number }> }>();
   let legacyAnswerCount = 0;
@@ -64,6 +65,7 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
       measuredAt: row.reviewedAt, status, sequence: row.sequence, evidenceCount: status === "assessed" ? 1 : 0, scores, answers: [],
       submissionId: row.id, textAnswer: row.textAnswer, hasAudio: !!row.assetKey, prompt: snapshot.prompt, mediaId: snapshot.mediaId,
       reviewer: row.reviewer, feedback: row.feedback, dimensions: JSON.parse(row.dimensions ?? "[]"), familyHelp: row.familyHelp,
+      helpLevel: submissionHelpLevel(row.familyHelp, readReviewEvidence(row.reviewEvidence)?.helpLevel),
     });
   }
   evidence.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || a.id.localeCompare(b.id));

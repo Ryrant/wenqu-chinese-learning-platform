@@ -90,8 +90,8 @@ async function fixture(t) {
     return result;
   };
   const readAudio = (cookie, id, range) => api.audio(new Request(`http://127.0.0.1/api/v1/submissions/${id}/audio`, { headers: { ...(cookie ? { cookie } : {}), ...(range ? { range } : {}) } }), { params: Promise.resolve({ id }) });
-  const workspace = async (cookie) => {
-    const response = await api.workspace(new Request("http://127.0.0.1/api/v1/workspace", { headers: { cookie } }));
+  const workspace = async (cookie, studentId) => {
+    const response = await api.workspace(new Request(`http://127.0.0.1/api/v1/workspace${studentId ? `?studentId=${encodeURIComponent(studentId)}` : ""}`, { headers: { cookie } }));
     const result = await response.json(); assert.equal(response.status, 200, JSON.stringify(result)); return result;
   };
   const profile = async (cookie, studentId = ids.student, expectedStatus = 200) => {
@@ -472,6 +472,137 @@ test("equal totals produce different teacher-confirmed support tasks from the sa
   assert.equal((await f.workspace(f.actors.student)).learningPlan.some((item) => item.id === taskA.id), false);
   assert.equal(await count("mastery_snapshots"), masteryBefore, "practice completion must not manufacture a grade");
   assert.equal((await publish(f.ids.student, a)).status, "completed", "retry must not reopen completed work");
+});
+
+test("daily plans select different published tasks for equal totals, explain scoped evidence, and retain teacher priority", async (t) => {
+  const f = await fixture(t);
+  const s = await supportEvidence(f);
+  for (const actor of ["student", "stranger"]) {
+    const data = await f.workspace(f.actors[actor]);
+    for (const item of data.recommendations.filter((item) => item.source_type === "diagnostic" && item.status === "pending")) {
+      if (actor === "student") {
+        const deferred = await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 1 });
+        assert.equal(deferred.correct, false);
+        assert.ok(!(await f.workspace(f.actors[actor])).learningPlan.some((plan) => plan.id === item.id), "next-day review must not be selected before it opens");
+        await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 0 }, 409);
+      } else await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 0 });
+    }
+    await f.act(f.actors[actor], "submit_text", { assignmentId: f.assignment.id, answer: "已完成基础作品，下一步按计划练习。" }, 201);
+  }
+  const reading = await f.act(f.actors.teacher, "create_assignment", { classId: f.classroom.id, title: "字词与短句匹配", activityType: "阅读练习", objectiveIds: [s.objectiveId], rubric }, 201);
+  await f.act(f.actors.teacher, "publish_assignment", { id: reading.id });
+  const speaking = await diagnosticTask(f, "speaking", s.objectiveId);
+  const general = await f.act(f.actors.teacher, "create_assignment", { classId: f.classroom.id, title: "其他目标的书面任务", activityType: "文字", objectiveIds: [f.goals[2]], rubric }, 201);
+  await f.act(f.actors.teacher, "publish_assignment", { id: general.id });
+  const family = await f.act(f.actors.guardian, "create_family_task", { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "交流一道菜", detail: "记录自己的提问与追问。" }, 201);
+  const masteryBefore = (await f.db.prepare("SELECT COUNT(*) AS count FROM mastery_snapshots").first()).count;
+  const a = await f.workspace(f.actors.student);
+  const b = await f.workspace(f.actors.stranger);
+  assert.equal(a.learningPlan.length, 3);
+  assert.equal(a.learningPlan[0].id, reading.id);
+  assert.equal(b.learningPlan[0].id, speaking.id);
+  assert.equal(a.learningPlan[0].supportMatch, true); assert.equal(b.learningPlan[0].supportMatch, true);
+  assert.ok(a.learningPlan.find((item) => item.id === family.id));
+  assert.ok(a.learningPlan[0].id !== general.id, "a matching support task must outrank unrelated self-directed work");
+  const refs = (data) => data.learningPlan.flatMap((item) => item.basis.flatMap((basis) => basis.records));
+  assert.ok(refs(a).some((item) => item.ability === "reading" && item.score === 0));
+  const foreign = new Set((await f.profile(f.actors.teacher, f.ids.stranger)).evidence.map((item) => item.id));
+  assert.ok(refs(a).every((item) => !foreign.has(item.id)), "another student's evidence must not become the explanation");
+  assert.ok(a.learningPlan.every((item) => item.studentUserId === f.ids.student && item.selectionReason));
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.guardian, studentUserIds: [f.ids.student, f.ids.stranger] });
+  for (const [id, expected] of [[f.ids.student, reading.id], [f.ids.stranger, speaking.id]]) {
+    const parent = await f.workspace(f.actors.guardian, id);
+    assert.equal(parent.learningPlan[0].id, expected);
+    assert.ok(parent.learningPlan.every((item) => item.studentUserId === id));
+  }
+  await f.db.prepare("INSERT INTO role_memberships (tenant_id,user_id,role) VALUES (?,?,'guardian')").bind(f.tenantId, f.ids.student).run();
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.student, studentUserIds: [f.ids.stranger] });
+  assert.equal((await f.workspace(f.actors.student, f.ids.stranger)).learningPlan[0].id, speaking.id);
+  assert.equal((await f.workspace(f.actors.student, f.ids.student)).learningPlan[0].id, reading.id, "a student returning to their own scope must not require a self-guardian link");
+  const denied = await api.workspace(new Request(`http://127.0.0.1/api/v1/workspace?studentId=${f.ids.otherGuardian}`, { headers: { cookie: f.actors.student } }));
+  assert.equal(denied.status, 403, "the self-read exception must not authorize unrelated students");
+  const teacher = await f.act(f.actors.teacher, "create_intervention", { studentUserId: f.ids.student, objectiveId: f.goals[0], title: "教师确认先练习追问", detail: "保留三个关键词提示。" }, 201);
+  assert.equal((await f.workspace(f.actors.student)).learningPlan[0].id, teacher.id);
+  await f.act(f.actors.student, "update_recommendation_status", { id: teacher.id, status: "completed" });
+  assert.equal((await f.workspace(f.actors.student)).learningPlan[0].id, reading.id);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM mastery_snapshots").first()).count, masteryBefore, "reading or completing a plan cannot manufacture language scores");
+});
+
+test("daily plan support remains unassessed for pending, total-only and teacher-helped work and reads evidence beyond recent submissions", async (t) => {
+  const f = await fixture(t);
+  const objectiveId = f.goals[1];
+  const question = await f.act(f.actors.admin, "upsert_diagnostic_item", { objectiveId, level: "B1", prompt: "读短句选择意思", options: ["甲", "乙", "丙", "丁"], correctOption: 0 }, 201);
+  const oldSpeaking = await diagnosticTask(f, "speaking", objectiveId);
+  const helped = [];
+  for (let index = 0; index < 2; index++) {
+    await f.act(f.actors.student, "submit_diagnostic", { level: "B1", answers: [{ itemId: question.id, selectedOption: 0, revision: 1 }] }, 201);
+    const work = await f.upload(f.actors.student, { assignmentId: oldSpeaking.id }); helped.push(work.id);
+    await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { helpLevel: "prompted", objectiveScores: [{ objectiveId, score: 0 }] }));
+  }
+  const pending = await f.upload(f.actors.student, { assignmentId: oldSpeaking.id });
+  const totalOnly = await f.upload(f.actors.student, { assignmentId: oldSpeaking.id });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(totalOnly.id, { helpLevel: "independent", score: 0 }));
+  const nextSpeaking = await diagnosticTask(f, "speaking", objectiveId);
+  let data = await f.workspace(f.actors.student);
+  let plan = data.learningPlan.find((item) => item.id === nextSpeaking.id);
+  assert.equal(plan.supportMatch, false); assert.match(plan.basis[0].note, /证据不足/);
+  assert.ok(plan.basis[0].records.every((item) => ![...helped, pending.id, totalOnly.id].includes(item.id)));
+  assert.equal((await f.act(f.actors.teacher, "suggest_intervention", { studentUserId: f.ids.student, objectiveId })).suggestion.ready, false, "teacher drafts must use the same exclusion rule");
+  const independent = [];
+  for (let index = 0; index < 2; index++) {
+    const work = await f.upload(f.actors.student, { assignmentId: oldSpeaking.id }); independent.push(work.id);
+    await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { helpLevel: "independent", objectiveScores: [{ objectiveId, score: 0 }] }));
+  }
+  // 普通历史作品占满最近提交页，不能截断排序所需的诊断证据。
+  await f.db.prepare(`WITH RECURSIVE copies(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM copies WHERE n<55)
+    INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,score,review_status,created_at,reviewed_at)
+    SELECT 'plan-history-'||n,?,?,?,'其他历史作品',80,'reviewed','2099-01-01 00:00:00','2099-01-01 00:00:00' FROM copies`)
+    .bind(f.tenantId, f.assignment.id, f.ids.student).run();
+  data = await f.workspace(f.actors.student); plan = data.learningPlan[0];
+  assert.equal(plan.id, nextSpeaking.id); assert.equal(plan.supportMatch, true);
+  assert.ok(!data.submissions.some((item) => independent.includes(item.id)));
+  assert.deepEqual(plan.basis[0].records.filter((item) => item.ability === "speaking").map((item) => item.id).sort(), independent.sort());
+  assert.ok(plan.basis[0].records.filter((item) => item.ability === "speaking").every((item) => item.score === 0 && item.helpLevel === "independent"));
+});
+
+test("daily plans keep available tasks ahead of waiting work and exclude locked, archived and unenrolled targets", async (t) => {
+  const f = await fixture(t);
+  const baseline = await f.text();
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(baseline.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 40 }], helpLevel: "prompted" }));
+  const waiting = [];
+  for (let index = 0; index < 4; index++) {
+    const sequence = await f.act(f.actors.teacher, "create_learning_sequence", { baselineSubmissionId: baseline.id, objectiveId: f.goals[0], title: `等候评价 ${index}`, practicePrompt: "练习说明理由", transferPrompt: "向同伴推荐另一道菜", transferContext: "交流对象与菜品改变" }, 201);
+    const available = (await f.workspace(f.actors.student)).learningPlan.find((item) => item.id === `sequence:${sequence.id}:practice`);
+    assert.equal(available.basis[0].records[0].id, baseline.id); assert.equal(available.basis[0].records[0].score, 40);
+    const submission = await f.act(f.actors.student, "submit_text", { assignmentId: f.assignment.id, sequenceId: sequence.id, sequenceStage: "practice", answer: "练习作品，等待教师评价。" }, 201);
+    waiting.push({ sequence, submission });
+  }
+  const tasks = [];
+  for (let index = 0; index < 2; index++) {
+    const task = await f.act(f.actors.teacher, "create_assignment", { classId: f.classroom.id, title: `可操作课程任务 ${index}`, activityType: "文字", objectiveIds: [f.goals[2]], rubric }, 201);
+    await f.act(f.actors.teacher, "publish_assignment", { id: task.id }); tasks.push(task.id);
+  }
+  const family = await f.act(f.actors.guardian, "create_family_task", { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "待完成的交流", detail: "采访家人并提交自己的作品。" }, 201);
+  let data = await f.workspace(f.actors.student);
+  assert.deepEqual(data.learningPlan.map((item) => item.id).sort(), [...tasks, family.id].sort());
+  assert.ok(data.learningPlan.every((item) => !item.waitingReview));
+  const reviewed = waiting[0];
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(reviewed.submission.id, { helpLevel: "prompted", objectiveScores: [{ objectiveId: f.goals[0], score: 0 }], promptCount: 2 }));
+  const transfer = (await f.workspace(f.actors.student)).learningPlan[0];
+  assert.equal(transfer.id, `sequence:${reviewed.sequence.id}:transfer`);
+  assert.equal(transfer.basis[0].records[0].id, reviewed.submission.id);
+  assert.equal(transfer.basis[0].records[0].score, 0); assert.equal(transfer.basis[0].records[0].promptCount, 2);
+  assert.ok(!data.learningPlan.some((item) => item.id.endsWith(":retest") || item.id.endsWith(":transfer")), "unopened stages must not be presented as actionable");
+  assert.ok(!(await f.workspace(f.actors.stranger)).learningPlan.some((item) => item.kind === "sequence" || item.id === family.id));
+  await f.db.prepare("UPDATE assignments SET status='archived' WHERE id=?").bind(tasks[0]).run();
+  assert.ok(!(await f.workspace(f.actors.student)).learningPlan.some((item) => item.id === tasks[0]));
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: f.classroom.id, studentUserIds: [f.ids.stranger] });
+  data = await f.workspace(f.actors.student);
+  assert.deepEqual(data.learningPlan, []); assert.equal(data.learningSequences.length, 4, "history remains readable after leaving the class");
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.guardian, studentUserIds: [] });
+  assert.deepEqual((await f.workspace(f.actors.guardian)).learningPlan, []);
+  const denied = await api.workspace(new Request(`http://127.0.0.1/api/v1/workspace?studentId=${f.ids.student}`, { headers: { cookie: f.actors.guardian } }));
+  assert.equal(denied.status, 403);
 });
 
 test("support drafts remain unassessed for missing, single, ungraded and helped evidence", async (t) => {

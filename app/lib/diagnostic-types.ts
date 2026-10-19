@@ -1,3 +1,5 @@
+import type { HelpLevel } from "./learning-sequence-types";
+
 export const ABILITY_LABELS = { listening: "听力", speaking: "口语", reading: "阅读", writing: "书面表达" } as const;
 export type Ability = keyof typeof ABILITY_LABELS;
 export type DiagnosticMode = "" | "speaking" | "writing";
@@ -10,7 +12,7 @@ export type AbilityEvidence = {
   status: "assessed" | "pending" | "unassessed"; sequence: number; evidenceCount: number; scores: EvidenceScore[];
   answers: ChoiceEvidenceAnswer[]; submissionId: string | null; textAnswer: string | null; hasAudio: boolean;
   prompt: string; mediaId: string | null; reviewer: string | null; feedback: string | null;
-  dimensions: Array<{ name: string; score: number }>; familyHelp: string | null;
+  dimensions: Array<{ name: string; score: number }>; familyHelp: string | null; helpLevel?: HelpLevel;
 };
 export type AbilityProfile = {
   student: { id: string; displayName: string }; legacyAnswerCount: number; evidence: AbilityEvidence[];
