@@ -269,7 +269,7 @@ export function TeacherView({ nav, data: workspace, act, notify, refresh, naviga
 
 export function GuardianView({ nav, data, act, notify, selectStudent }: GuardianProps) {
   const average = data.mastery.length ? Math.round(data.mastery.reduce((sum, item) => sum + numberValue(item.mastery) * 100, 0) / data.mastery.length) : null;
-  const reviewed = data.submissions.filter((item) => item.review_status === "reviewed");
+  const reviewed = data.submissions.filter((item) => item.student_user_id === data.selectedStudent?.id && item.review_status === "reviewed");
   const childSwitch = <GuardianStudentSwitcher data={data} selectStudent={selectStudent}/>;
 
   if (nav === "成长报告") return <section>

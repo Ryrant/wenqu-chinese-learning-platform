@@ -56,7 +56,7 @@ export async function suggestTextReview(db: PlatformDatabase, context: PlatformC
   const chunks = await searchPublishedKnowledge(db, { tenantId: context.tenantId, query: `${submission.assignmentTitle} ${submission.textAnswer}`, limit: 5 });
   const result = await generateGroundedText({
     purpose: "review",
-    prompt: `请按下面的任务目标和评分量规评价学生作品，仅返回 JSON：{"suggestedScore":0到100的数字或null,"comment":"评语及来源编号","weaknessTags":[],"objectiveScores":[{"objectiveId":"目标ID","score":0到100的数字}],"dimensionScores":[{"name":"量规维度名称","score":0到100的数字}]}。没有可靠评分依据时 suggestedScore 为 null，两个评分数组留空；未观察到的目标或维度不要评分。\n任务：${sequence?.title ?? family?.title ?? submission.assignmentTitle}${sequence ? `\n要求：${sequence.prompt}\n迁移情境：${sequence.context}` : family ? `\n交流要求：${family.detail}\n${family.plan?.template?.work.zh ?? ""}` : ""}\n目标：${JSON.stringify(reviewObjectives)}\n量规：${JSON.stringify(rubric)}\n学生答案：${submission.textAnswer}`,
+    prompt: `请按下面的任务目标和评分量规评价学生作品，仅返回 JSON：{"suggestedScore":0到100的数字或null,"comment":"评语及来源编号","weaknessTags":[],"objectiveScores":[{"objectiveId":"目标ID","score":0到100的数字}],"dimensionScores":[{"name":"量规维度名称","score":0到100的数字}]}。没有可靠评分依据时 suggestedScore 为 null，两个评分数组留空；未观察到的目标或维度不要评分。\n任务：${sequence?.title ?? family?.title ?? diagnostic.title ?? submission.assignmentTitle}${sequence ? `\n要求：${sequence.prompt}\n迁移情境：${sequence.context}` : family ? `\n交流要求：${family.detail}\n${family.plan?.template?.work.zh ?? ""}` : diagnostic.prompt ? `\n要求：${diagnostic.prompt}` : ""}\n目标：${JSON.stringify(reviewObjectives)}\n量规：${JSON.stringify(rubric)}\n学生答案：${submission.textAnswer}`,
     role: "teacher",
     contextChunks: chunks,
   }, config);
@@ -139,6 +139,9 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
       ...(submission.familyTaskId ? [db.prepare(`UPDATE learning_recommendations SET status='completed',completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND tenant_id=? AND student_user_id=? AND source_type='family'`)
         .bind(submission.familyTaskId, context.tenantId, submission.studentUserId)] : []),
+      // 成绩、证据、家庭任务状态与审计一起提交，失败时不能留下已生效的评分。
+      db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,'submission.reviewed','submission',?,?)")
+        .bind(crypto.randomUUID(), context.tenantId, context.userId, input.submissionId, JSON.stringify({ score })),
     ]);
   } catch (error) {
     const existing = await db.prepare(`SELECT id FROM submission_review_confirmations

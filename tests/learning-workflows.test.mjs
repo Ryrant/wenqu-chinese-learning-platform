@@ -156,6 +156,90 @@ async function fixture(t) {
   return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups, feedback, feedbackAction, batches, batchAction, studentCase };
 }
 
+test("diagnostic writes roll back together and response-loss retries preserve one scored attempt", async (t) => {
+  const f = await fixture(t);
+  const itemInput = { objectiveId: f.goals[1], level: "RETRY", prompt: "选择正确的食材", options: ["鸡蛋", "米饭", "面条", "苹果"], correctOption: 0 };
+  const item = await f.act(f.actors.admin, "upsert_diagnostic_item", itemInput, 201);
+  const input = { attemptId: crypto.randomUUID(), level: "RETRY", answers: [{ itemId: item.id, selectedOption: 1, revision: 1 }] };
+  for (const target of ["mastery_snapshots", "learning_recommendations", "audit_logs"]) {
+    const condition = target === "audit_logs" ? "WHEN NEW.action='diagnostic.completed'" : "";
+    await f.db.prepare(`CREATE TRIGGER diagnostic_failure BEFORE INSERT ON ${target} ${condition} BEGIN SELECT RAISE(ABORT,'diagnostic_write_failed'); END`).run();
+    await f.act(f.actors.student, "submit_diagnostic", input, 500);
+    for (const table of ["diagnostic_attempts", "diagnostic_answers", "mastery_snapshots", "learning_recommendations"]) {
+      const filter = table === "diagnostic_answers" ? "attempt_id" : "student_user_id";
+      assert.equal((await f.db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${filter}=?`).bind(table === "diagnostic_answers" ? input.attemptId : f.ids.student).first()).count, 0, `${target} failure must roll back ${table}`);
+    }
+    assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='diagnostic.completed'").first()).count, 0);
+    await f.db.prepare("DROP TRIGGER diagnostic_failure").run();
+  }
+  const saved = await f.act(f.actors.student, "submit_diagnostic", input, 201);
+  assert.equal(saved.attemptId, input.attemptId);
+  const retries = await Promise.all(Array.from({ length: 3 }, () => f.act(f.actors.student, "submit_diagnostic", input, 201)));
+  assert.ok(retries.every((result) => JSON.stringify(result) === JSON.stringify(saved)));
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM diagnostic_attempts").first()).count, 1);
+  assert.equal((await f.db.prepare("SELECT evidence_count FROM mastery_snapshots WHERE student_user_id=?").bind(f.ids.student).first()).evidence_count, 1);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='diagnostic.completed'").first()).count, 1);
+  await f.act(f.actors.student, "submit_diagnostic", { ...input, answers: [{ ...input.answers[0], selectedOption: 0 }] }, 409);
+  await f.act(f.actors.student, "submit_diagnostic", { ...input, level: "OTHER" }, 409);
+  await f.act(f.actors.stranger, "submit_diagnostic", input, 409);
+  await f.act(f.actors.student, "submit_diagnostic", { ...input, attemptId: "invalid" }, 400);
+  await f.act(f.actors.admin, "upsert_diagnostic_item", { ...itemInput, id: item.id, objectiveId: f.goals[0], correctOption: 1 });
+  assert.deepEqual(await f.act(f.actors.student, "submit_diagnostic", input, 201), saved, "retry must read the saved original version");
+  const next = { ...input, attemptId: crypto.randomUUID(), answers: [{ itemId: item.id, selectedOption: 0, revision: 2 }] };
+  const concurrent = await Promise.all(Array.from({ length: 3 }, () => f.act(f.actors.student, "submit_diagnostic", next, 201)));
+  assert.ok(concurrent.every((result) => result.attemptId === next.attemptId));
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM diagnostic_attempts").first()).count, 2);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='diagnostic.completed'").first()).count, 2);
+});
+
+test("failed review audit leaves family work, task and mastery ungraded until one successful retry", async (t) => {
+  const f = await fixture(t);
+  const task = await f.act(f.actors.guardian, "create_family_task", { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "采访并介绍家常菜", detail: "记录自己的交流成果。" }, 201);
+  const work = await f.text(task.id);
+  await f.act(f.actors.guardian, "confirm_family_submission", { submissionId: work.id, helpLevel: "independent" });
+  await f.db.prepare("CREATE TRIGGER review_failure BEFORE INSERT ON audit_logs WHEN NEW.action='submission.reviewed' BEGIN SELECT RAISE(ABORT,'review_write_failed'); END").run();
+  const input = f.review(work.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 72 }] });
+  await f.act(f.actors.teacher, "confirm_submission_review", input, 500);
+  const pending = await f.db.prepare("SELECT review_status,score FROM submissions WHERE id=?").bind(work.id).first();
+  assert.notEqual(pending.review_status, "reviewed"); assert.equal(pending.score, null);
+  for (const table of ["submission_reviews", "submission_review_confirmations", "mastery_snapshots"]) {
+    const filter = table === "mastery_snapshots" ? "student_user_id" : "submission_id";
+    assert.equal((await f.db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${filter}=?`).bind(table === "mastery_snapshots" ? f.ids.student : work.id).first()).count, 0);
+  }
+  assert.equal((await f.db.prepare("SELECT status FROM learning_recommendations WHERE id=?").bind(task.id).first()).status, "pending");
+  await f.db.prepare("DROP TRIGGER review_failure").run();
+  await f.act(f.actors.teacher, "confirm_submission_review", input);
+  const data = await f.workspace(f.actors.guardian);
+  assert.equal(data.submissions[0].score, 80); assert.equal(data.submissions[0].review_status, "reviewed");
+  assert.equal(data.recommendations.find((row) => row.id === task.id).status, "completed");
+  assert.equal(data.mastery[0].evidenceCount, 1);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='submission.reviewed' AND target_id=?").bind(work.id).first()).count, 1);
+  await f.act(f.actors.teacher, "confirm_submission_review", input, 409);
+});
+
+test("writing diagnostic AI suggestion includes the original prompt without confirming a grade", async (t) => {
+  const f = await fixture(t);
+  const task = await diagnosticTask(f, "writing", f.goals[2]);
+  const work = await f.act(f.actors.student, "submit_text", { assignmentId: task.id, answer: "我喜欢这道菜。" }, 201);
+  await f.db.prepare("UPDATE assignments SET diagnostic_prompt='后来修改的要求' WHERE id=?").bind(task.id).run();
+  await f.db.prepare("INSERT INTO app_settings (key,value) VALUES ('openai_api_key','fixture-key')").run();
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let providerInput = "";
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, "https://api.openai.com/v1/responses");
+    providerInput = JSON.parse(options.body).input[1].content;
+    return Response.json({ status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({ suggestedScore: 50, comment: "理由尚不完整 [1]", weaknessTags: [], objectiveScores: [{ objectiveId: f.goals[2], score: 50 }], dimensionScores: [] }) }] }] });
+  };
+  await f.act(f.actors.teacher, "suggest_text_review", { id: work.id });
+  assert.ok(providerInput.includes(task.input.diagnosticPrompt)); assert.ok(!providerInput.includes("后来修改的要求"));
+  const stored = await f.db.prepare("SELECT score,review_status FROM submissions WHERE id=?").bind(work.id).first();
+  assert.equal(stored.score, null); assert.equal(stored.review_status, "ai_suggested_pending_review");
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM mastery_snapshots WHERE student_user_id=?").bind(f.ids.student).first()).count, 0);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: f.goals[2], score: 65 }] }));
+  assert.equal((await f.workspace(f.actors.guardian)).submissions[0].score, 80);
+});
+
 test("text retries preserve one original work and audit across concurrency, response loss and completed family review", async (t) => {
   const f = await fixture(t);
   const payload = { submissionId: crypto.randomUUID(), assignmentId: f.assignment.id, answer: "同一份文字作品只保存一次。" };
