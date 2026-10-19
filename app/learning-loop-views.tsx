@@ -9,6 +9,7 @@ import { DiagnosticMediaInput, DiagnosticStimulus } from "./diagnostic-evidence"
 import type { InterventionSuggestion } from "./lib/diagnostic-types";
 import { createFamilyPlan, EXCHANGE_PARTNERS, FAMILY_TASK_TEMPLATES, readFamilyPlan, type ExchangePartner } from "./lib/family-task";
 import { FamilyExchangeConfirmation, FamilyTaskGuide, FamilyWorkEvidence } from "./family-task-guide";
+import { FamilyFeedbackPanel } from "./family-feedback";
 import { ABILITY_LABELS } from "./lib/diagnostic-types";
 import { HELP_LEVEL_LABELS, sequenceTime } from "./lib/learning-sequence-types";
 import { UnitReportLink } from "./unit-report-links";
@@ -463,6 +464,7 @@ export function GuardianFamilyTasks({ data, act, notify }: LoopProps) {
         </section>;
       }) : <p className="empty-state">还没有亲子任务。</p>}
     </article>
+    <FamilyFeedbackPanel key={data.selectedStudent?.id} view="guardian" studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt} notify={notify}/>
   </section>;
 }
 

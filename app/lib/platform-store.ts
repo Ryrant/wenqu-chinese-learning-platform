@@ -189,6 +189,8 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_decision_next_idx ON learning_sequence_decisions (tenant_id,next_sequence_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_trial_records (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sequence_id TEXT NOT NULL, kind TEXT NOT NULL, method TEXT, minutes INTEGER, reference_submission_id TEXT, reference_title TEXT, note TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS trial_records_sequence_idx ON learning_trial_records (tenant_id,sequence_id,created_at)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS family_usability_feedback (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, family_task_id TEXT NOT NULL, student_user_id TEXT NOT NULL, assignment_id TEXT, class_id TEXT, task_revision INTEGER NOT NULL, task_snapshot_json TEXT NOT NULL, participation TEXT NOT NULL, instructions TEXT NOT NULL, operation_help TEXT NOT NULL, alternative TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS family_feedback_task_idx ON family_usability_feedback (tenant_id,family_task_id,created_at)"),
   ]);
   for (const statement of [
     "ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT",
@@ -321,7 +323,7 @@ ORDER BY rm.created_at ASC`).bind(email).all<{ tenantId: string; role: string }>
 
 export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
-  const status = message === "authentication_required"
+  const status = ["family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
     ? 401
     : message === "forbidden"
       ? 403

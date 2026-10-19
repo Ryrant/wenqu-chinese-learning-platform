@@ -28,6 +28,7 @@ const bundle = await build({
     export { GET as internalReport } from './app/api/v1/trial-records/report/route';
     export { GET as portfolio } from './app/api/v1/family-portfolio/route';
     export { GET as followups } from './app/api/v1/teaching-followups/route';
+    export { GET as familyFeedback, POST as familyFeedbackAction } from './app/api/v1/family-feedback/route';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
@@ -123,7 +124,15 @@ async function fixture(t) {
     const response = await api.followups(new Request("http://127.0.0.1/api/v1/teaching-followups", { headers: cookie ? { cookie } : {} }));
     const data = await response.json(); assert.equal(response.status, status, JSON.stringify(data)); return { response, data };
   };
-  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups };
+  const feedback = async (cookie = actors.guardian, view = "guardian", studentId = ids.student, status = 200) => {
+    const response = await api.familyFeedback(new Request(`http://127.0.0.1/api/v1/family-feedback?view=${view}${view === "guardian" ? `&studentId=${studentId}` : ""}`, { headers: cookie ? { cookie } : {} }));
+    const data = await response.json(); assert.equal(response.status, status, JSON.stringify(data)); return { response, data };
+  };
+  const feedbackAction = async (cookie, body, status = 201) => {
+    const response = await api.familyFeedbackAction(new Request("http://127.0.0.1/api/v1/family-feedback", { method: "POST", headers: { ...(cookie ? { cookie } : {}), "content-type": "application/json" }, body: JSON.stringify(body) }));
+    const data = await response.json(); assert.equal(response.status, status, JSON.stringify(data)); return data;
+  };
+  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups, feedback, feedbackAction };
 }
 
 test("unconfigured and invalid AI suggestions leave grades and mastery unset; structured REST output is validated", async (t) => {
@@ -1480,6 +1489,118 @@ test("teaching followups show retests only when due and remove reviewed independ
   assert.ok(!(await f.followups()).data.items.some((item) => item.kind !== "review" && item.goals.some((goal) => goal.id === f.goals[0])));
 });
 
+const familyFeedbackInput = (taskId, extra = {}) => ({ action: "record", id: crypto.randomUUID(), taskId, revision: 1, participation: "unable", instructions: "needs_explanation", operationHelp: "guidance", alternative: "not_tried", note: "看不懂上传步骤，需要操作指引，尚未安排替代交流。", ...extra });
+async function feedbackTask(f) {
+  return f.act(f.actors.guardian, "create_family_task", { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "家庭使用反馈验证任务", detail: "用自己的话复述一次交流。", templateId: "home-dish", partner: "peer" }, 201);
+}
+
+test("family usability feedback records non-completion before any work and never confirms exchanges, completes tasks or writes language scores", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const input = familyFeedbackInput(task.id);
+  assert.equal((await f.feedback()).data.tasks.find((item) => item.id === task.id).revision, 1);
+  for (const extra of [{ participation: "" }, { operationHelp: "auto_score" }, { revision: "1" }, { note: "" }, { note: "长".repeat(1501) }]) await f.feedbackAction(f.actors.guardian, { ...input, ...extra }, 400);
+  await f.feedbackAction(f.actors.guardian, input); await f.feedbackAction(f.actors.guardian, input);
+  await f.feedbackAction(f.actors.guardian, { ...input, note: "同 ID 不得覆盖" }, 409);
+  const concurrent = familyFeedbackInput(task.id, { participation: "completed", instructions: "clear", operationHelp: "none", alternative: "not_needed", note: "" });
+  await Promise.all([f.feedbackAction(f.actors.guardian, concurrent), f.feedbackAction(f.actors.guardian, concurrent)]);
+  const { data, response } = await f.feedback();
+  assert.equal(response.headers.get("cache-control"), "private, no-store"); assert.equal(data.entries.length, 2);
+  const stored = data.entries.find((item) => item.id === input.id);
+  assert.equal(stored.participation, "unable"); assert.equal(stored.operationHelp, "guidance"); assert.equal(stored.snapshot.plan.template.id, "home-dish"); assert.equal(stored.classId, f.classroom.id);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM submissions").first()).n, 0);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM mastery_snapshots WHERE student_user_id=?").bind(f.ids.student).first()).n, 0);
+  assert.equal((await f.db.prepare("SELECT status FROM learning_recommendations WHERE id=?").bind(task.id).first()).status, "pending");
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='family_feedback.created'").first()).n, 2);
+  const work = await f.upload(f.actors.student, { familyTaskId: task.id, familyPartner: "peer", familyRevision: 1 });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id), 409);
+  await f.act(f.actors.teacher, "confirm_alternative_exchange", { submissionId: work.id, helpLevel: "prompted" });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 0 }], helpLevel: "prompted", promptCount: 2 }));
+  const gradeBefore = await f.db.prepare("SELECT score,family_help_level,family_confirmed_at FROM submissions WHERE id=?").bind(work.id).first();
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id, { participation: "stopped", alternative: "did_not_work" }));
+  assert.deepEqual(await f.db.prepare("SELECT score,family_help_level,family_confirmed_at FROM submissions WHERE id=?").bind(work.id).first(), gradeBefore);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM mastery_snapshots WHERE student_user_id=?").bind(f.ids.student).first()).n, 1, "only the teacher-rated work produces language evidence");
+});
+
+test("family usability feedback restricts parent writing, original-class teaching reads, tenant scope, revoked bindings and password gates", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const input = familyFeedbackInput(task.id);
+  await f.feedbackAction(f.actors.guardian, input);
+  for (const actor of ["student", "teacher"]) await f.feedbackAction(f.actors[actor], familyFeedbackInput(task.id), 403);
+  const unboundAdmin = await api.familyFeedbackAction(new Request("http://127.0.0.1/api/v1/family-feedback", { method: "POST", headers: { cookie: f.actors.admin, "content-type": "application/json" }, body: JSON.stringify(familyFeedbackInput(task.id)) }));
+  assert.ok([403, 404].includes(unboundAdmin.status), "administrator access alone never impersonates a bound parent");
+  await f.feedback(null, "guardian", f.ids.student, 401);
+  await f.feedback(f.actors.student, "guardian", f.ids.student, 403);
+  await f.feedback(f.actors.student, "teaching", undefined, 403);
+  await f.feedback(f.actors.otherGuardian, "guardian", f.ids.student, 403);
+  assert.equal((await f.feedback(f.actors.teacher, "teaching")).data.entries.length, 1);
+  assert.equal((await f.feedback(f.actors.otherTeacher, "teaching")).data.entries.length, 0);
+  assert.equal((await f.feedback(f.actors.otherTenant, "teaching")).data.entries.length, 0);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "教师与监护复合角色", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  assert.equal((await f.feedback(f.actors.otherTeacher, "guardian")).data.entries.length, 1);
+  assert.equal((await f.feedback(f.actors.otherTeacher, "teaching")).data.entries.length, 0, "guardian rights never expand teaching feedback scope");
+  await f.feedbackAction(f.actors.otherTeacher, { action: "void", id: input.id, reason: "不能撤销另一家长记录" }, 403);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.guardian, studentUserIds: [] });
+  await f.feedback(f.actors.guardian, "guardian", f.ids.student, 403);
+  await f.feedbackAction(f.actors.guardian, input, 403);
+  await f.feedbackAction(f.actors.guardian, { action: "void", id: input.id, reason: "绑定已撤销" }, 403);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: f.classroom.id, studentUserIds: [] });
+  assert.equal((await f.feedback(f.actors.teacher, "teaching")).data.entries.length, 1, "withdrawal does not erase original-class records");
+  await f.db.prepare("UPDATE classes SET teacher_user_id=? WHERE id=?").bind(f.ids.otherTeacher, f.classroom.id).run();
+  assert.equal((await f.feedback(f.actors.teacher, "teaching")).data.entries.length, 0);
+  assert.equal((await f.feedback(f.actors.otherTeacher, "teaching")).data.entries.length, 1);
+  await f.db.prepare("UPDATE users SET must_change_password=1 WHERE id=?").bind(f.ids.otherTeacher).run();
+  assert.equal((await f.feedback(f.actors.otherTeacher, "teaching", undefined, 403)).data.error, "password_change_required");
+  assert.equal((await f.feedbackAction(f.actors.otherTeacher, familyFeedbackInput(task.id), 403)).error, "password_change_required");
+  assert.equal((await f.feedback(f.actors.admin, "teaching")).data.entries[0].canVoid, true);
+});
+
+test("family usability feedback freezes versions and teaching scope, recovers retries after task edits, and atomically rejects changed tasks or failed audits", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const original = familyFeedbackInput(task.id);
+  await f.feedbackAction(f.actors.guardian, original);
+  const nextClass = await f.act(f.actors.otherTeacher, "create_class", { name: "新任务原班", level: "A2" }, 201);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: nextClass.id, studentUserIds: [f.ids.student] });
+  const nextAssignment = await f.act(f.actors.otherTeacher, "create_assignment", { classId: nextClass.id, title: "新教学任务", activityType: "文字", objectiveIds: [f.goals[1]], rubric }, 201);
+  await f.act(f.actors.otherTeacher, "publish_assignment", { id: nextAssignment.id });
+  await f.act(f.actors.guardian, "update_family_task", { id: task.id, assignmentId: nextAssignment.id, objectiveId: f.goals[1], title: "新任务说明", detail: "当前新要求不能覆盖旧反馈。", partner: "teacher", revision: 1 });
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id), 409);
+  await f.feedbackAction(f.actors.guardian, original);
+  const newer = familyFeedbackInput(task.id, { revision: 2 }); await f.feedbackAction(f.actors.guardian, newer);
+  const oldTeacher = (await f.feedback(f.actors.teacher, "teaching")).data;
+  assert.deepEqual(oldTeacher.tasks, []); assert.equal(oldTeacher.entries.length, 1); assert.equal(oldTeacher.entries[0].snapshot.title, "家庭使用反馈验证任务"); assert.equal(oldTeacher.entries[0].revision, 1);
+  const newTeacher = (await f.feedback(f.actors.otherTeacher, "teaching")).data;
+  assert.equal(newTeacher.tasks[0].snapshot.title, "新任务说明"); assert.deepEqual(newTeacher.entries.map((item) => item.id), [newer.id]);
+  const originalBatch = f.db.batch.bind(f.db);
+  const race = t.mock.method(f.db, "batch", async (statements) => { await f.db.prepare("UPDATE learning_recommendations SET title='并发更新的要求' WHERE id=?").bind(task.id).run(); return originalBatch(statements); });
+  const racing = familyFeedbackInput(task.id, { revision: 2 }); await f.feedbackAction(f.actors.guardian, racing, 409); race.mock.restore();
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM family_usability_feedback WHERE id=?").bind(racing.id).first()).n, 0);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='family_feedback.created'").first()).n, 2);
+  await f.db.prepare("CREATE TRIGGER feedback_audit_failure BEFORE INSERT ON audit_logs WHEN NEW.action='family_feedback.created' BEGIN SELECT RAISE(ABORT,'fixture_feedback_audit_failed'); END").run();
+  const failed = familyFeedbackInput(task.id, { revision: 2 }); await f.feedbackAction(f.actors.guardian, failed, 500);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM family_usability_feedback WHERE id=?").bind(failed.id).first()).n, 0, "audit failure must roll back the feedback");
+});
+
+test("family usability history includes all task candidates, keeps archived non-completion, and voids records without replacing their evidence", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const original = familyFeedbackInput(task.id);
+  await f.feedbackAction(f.actors.guardian, original);
+  await f.db.prepare(`WITH RECURSIVE copies(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM copies WHERE n<55)
+    INSERT INTO learning_recommendations (id,tenant_id,student_user_id,assignment_id,objective_id,source_type,source_id,title,detail,created_by,family_plan_json)
+    SELECT 'feedback-task-'||n,tenant_id,student_user_id,assignment_id,objective_id,'family','feedback-task-'||n,'更多任务 '||n,detail,created_by,family_plan_json FROM learning_recommendations,copies WHERE id=?`).bind(task.id).run();
+  assert.equal((await f.feedback()).data.tasks.length, 56);
+  await f.act(f.actors.guardian, "archive_family_task", { id: task.id });
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id, { participation: "stopped", alternative: "did_not_work" }));
+  assert.equal((await f.feedback()).data.tasks.find((item) => item.id === task.id).status, "archived");
+  await f.feedbackAction(f.actors.guardian, { action: "void", id: original.id, reason: "" }, 400);
+  await f.feedbackAction(f.actors.guardian, { action: "void", id: original.id, reason: "误记为本次使用，保留原因撤销。" }, 200);
+  await f.feedbackAction(f.actors.guardian, { action: "void", id: original.id, reason: "误记为本次使用，保留原因撤销。" }, 200);
+  await f.feedbackAction(f.actors.guardian, { action: "void", id: original.id, reason: "不能覆盖原原因" }, 409);
+  await f.feedbackAction(f.actors.guardian, original, 409);
+  const entries = (await f.feedback()).data.entries;
+  assert.equal(entries.length, 2); assert.equal(entries.filter((item) => !item.voidedAt).length, 1);
+  assert.equal(entries.find((item) => item.id === original.id).note, original.note); assert.ok(entries.find((item) => item.id === original.id).voidReason);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='family_feedback.voided'").first()).n, 1);
+  for (const body of [null, [], "invalid"]) await f.feedbackAction(f.actors.guardian, body, 400);
+  const malformed = await api.familyFeedbackAction(new Request("http://127.0.0.1/api/v1/family-feedback", { method: "POST", headers: { cookie: f.actors.guardian }, body: "{" })); assert.equal(malformed.status, 400);
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {
@@ -1500,6 +1621,8 @@ test("additive migration upgrades existing data and runtime initialization is re
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0010_delayed_retest.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0011_teaching_next_steps.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0012_trial_records.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'").get());
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM family_usability_feedback").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_trial_records").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_sequence_decisions").get().count, 0);
     assert.deepEqual({ ...db.prepare("SELECT title,retest_prompt,retest_context,retest_available_at,retest_reference_id FROM learning_sequences WHERE id='legacy-sequence'").get() }, { title: "旧任务组", retest_prompt: "", retest_context: "", retest_available_at: null, retest_reference_id: null });
@@ -1511,6 +1634,9 @@ test("additive migration upgrades existing data and runtime initialization is re
     db.exec("ALTER TABLE learning_trial_records RENAME COLUMN void_reason TO incomplete_void_reason; DELETE FROM d1_migrations WHERE name='0012_trial_records.sql'");
     db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
     assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0012_trial_records.sql'").get(), undefined);
+    db.exec("ALTER TABLE family_usability_feedback RENAME COLUMN operation_help TO incomplete_operation_help; DELETE FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'");
+    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
+    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'").get(), undefined);
   } finally { db.close(); }
   const runtimeDb = new api.NodeSqliteDatabase("file::memory:");
   try { await api.ensurePlatformSchema(runtimeDb); await api.ensurePlatformSchema(runtimeDb); } finally { runtimeDb.close(); }

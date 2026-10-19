@@ -3,6 +3,7 @@ import { TeacherLearningSequences, SequenceReports } from "./learning-sequences"
 import { TrialOverview } from "./trial-records";
 import { UnitReportIndex } from "./unit-report-links";
 import { FamilyPortfolio } from "./family-portfolio";
+import { FamilyFeedbackPanel } from "./family-feedback";
 import { TeachingFollowups, initialFollowupView } from "./teaching-followups";
 import type { FollowupAction } from "./lib/teaching-followup-types";
 import { readSequenceWork } from "./lib/learning-sequence-types";
@@ -219,6 +220,7 @@ export function TeacherView({ nav, data: workspace, act, notify, refresh, naviga
     <PageTitle eyebrow="最新学习证据 · 班级范围" title="教学总览" detail="按学生与目标读取最新掌握度，避免历史快照重复计入。"/>
     <MetricGrid items={[["班级", data.classes.length, "当前教师可访问", "green"], ["已发布任务", published.length, "目标与量规可追溯", "blue"], ["待批阅", pending.length, "等待教师确认", "orange"], ["平均掌握度", `${mastery}%`, "仅最新快照", "purple"]]}/>
     <TeachingFollowups revision={data.generatedAt} view={followupView} onView={(view) => { navigationIntent.current.value++; setFollowupView(view); }} onOpen={openFollowup}/>
+    <FamilyFeedbackPanel view="teaching" revision={data.generatedAt} notify={notify}/>
     <TeacherMasteryHeatmap data={data}/>
     <TeacherAbilityProfiles data={data}/>
     <FamilyPortfolio revision={data.generatedAt}/>
@@ -293,7 +295,7 @@ export function AdminView(props: AdminProps) {
   const { nav, data, act, notify } = props;
   if (nav === "内容中心") return <><LegacyAdminView {...props}/><AdminObjectiveLibrary data={data} act={act} notify={notify}/></>;
   if (nav === "成员管理") return <><LegacyAdminView {...props}/><section className="loop-section enrollment-section"><AdminEnrollmentEditor data={data} act={act} notify={notify}/></section></>;
-  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/><UnitReportIndex sequences={data.learningSequences ?? []}/></article><FamilyPortfolio revision={data.generatedAt}/></>;
+  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/><UnitReportIndex sequences={data.learningSequences ?? []}/></article><FamilyFeedbackPanel view="teaching" revision={data.generatedAt} notify={notify}/><FamilyPortfolio revision={data.generatedAt}/></>;
   return <LegacyAdminView {...props}/>;
 }
 
