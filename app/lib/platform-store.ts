@@ -193,6 +193,8 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare("CREATE INDEX IF NOT EXISTS family_feedback_task_idx ON family_usability_feedback (tenant_id,family_task_id,created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_trial_batches (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, title TEXT NOT NULL, scope_json TEXT NOT NULL, request_json TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS trial_batches_class_idx ON learning_trial_batches (tenant_id,class_id,created_at)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS family_feedback_responses (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, feedback_id TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS feedback_responses_source_idx ON family_feedback_responses (tenant_id,feedback_id,created_at)"),
   ]);
   for (const statement of [
     "ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT",
@@ -225,8 +227,11 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     "ALTER TABLE learning_sequences ADD COLUMN retest_context TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE learning_sequences ADD COLUMN retest_available_at TEXT",
     "ALTER TABLE learning_sequences ADD COLUMN retest_reference_id TEXT",
+    "ALTER TABLE family_usability_feedback ADD COLUMN response_id TEXT",
+    "ALTER TABLE family_usability_feedback ADD COLUMN followup_outcome TEXT",
   ]) await trySchema(db, statement);
   await db.batch([
+    db.prepare("CREATE INDEX IF NOT EXISTS family_feedback_response_idx ON family_usability_feedback (tenant_id,response_id,created_at)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_submission_pending_idx ON submissions (tenant_id,family_task_id) WHERE family_task_id IS NOT NULL AND review_status!='reviewed'"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_submission_pending_idx ON submissions (tenant_id,sequence_id,sequence_stage) WHERE sequence_id IS NOT NULL AND review_status!='reviewed'"),
     db.prepare("UPDATE lesson_plans SET updated_at=created_at WHERE updated_at IS NULL"),
@@ -325,7 +330,7 @@ ORDER BY rm.created_at ASC`).bind(email).all<{ tenantId: string; role: string }>
 
 export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
-  const status = ["trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
+  const status = ["family_feedback_response_unavailable", "family_response_id_conflict", "family_response_source_changed", "family_response_already_voided", "trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
     ? 401
     : message === "forbidden"
       ? 403

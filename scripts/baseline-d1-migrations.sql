@@ -129,3 +129,10 @@ INSERT OR IGNORE INTO d1_migrations (name)
 SELECT '0014_trial_batches.sql'
 WHERE (SELECT COUNT(*) FROM pragma_table_info('learning_trial_batches') WHERE name IN ('id','tenant_id','class_id','title','scope_json','request_json','revision','created_by','created_at','voided_at','voided_by','void_reason'))=12
 AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='trial_batches_class_idx');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0015_family_feedback_followups.sql'
+WHERE (SELECT COUNT(*) FROM pragma_table_info('family_usability_feedback') WHERE name IN ('response_id','followup_outcome'))=2
+AND (SELECT COUNT(*) FROM pragma_table_info('family_feedback_responses') WHERE name IN ('id','tenant_id','feedback_id','kind','detail','created_by','created_at','voided_at','voided_by','void_reason'))=10
+AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='family_feedback_response_idx')
+AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='feedback_responses_source_idx');

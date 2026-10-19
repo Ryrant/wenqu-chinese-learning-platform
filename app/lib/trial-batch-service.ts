@@ -219,6 +219,7 @@ export async function readTrialBatch(input: PlatformContext, id: string): Promis
     }) }));
   return { batch, participants, entries: entries.filter((entry) => eligible.some((group) => group.id === entry.sequenceId) && inPeriod(entry.createdAt)),
     feedback: feedback.entries.filter((entry) => entry.classId === scope.classId && scope.participants.some((person) => person.id === entry.studentId)
-      && entry.snapshot.objectiveId === scope.objectiveId && scope.familyTasks.some((task) => task.id === entry.taskId && task.revision === entry.revision && task.studentId === entry.studentId) && inPeriod(entry.createdAt)),
+      && entry.snapshot.objectiveId === scope.objectiveId && scope.familyTasks.some((task) => task.id === entry.taskId && task.revision === entry.revision && task.studentId === entry.studentId) && inPeriod(entry.createdAt))
+      .map((entry) => ({ ...entry, responses: entry.responses.filter((response) => inPeriod(response.createdAt)) })),
     workloadScope: own(context) ? "institution" : "self", generatedAt: new Date().toISOString() };
 }

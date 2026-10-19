@@ -1,12 +1,14 @@
 import { readFamilyPlan } from "./family-task";
-import { ALTERNATIVE_LABELS, INSTRUCTION_LABELS, OPERATION_LABELS, PARTICIPATION_LABELS, feedbackReasonRequired, type FeedbackFields, type FeedbackSnapshot, type FeedbackTask, type FeedbackView, type FamilyFeedbackData } from "./family-feedback-types";
+import { ALTERNATIVE_LABELS, FOLLOWUP_OUTCOME_LABELS, INSTRUCTION_LABELS, OPERATION_LABELS, PARTICIPATION_LABELS, feedbackReasonRequired, type FeedbackFields, type FeedbackSnapshot, type FeedbackTask, type FeedbackView, type FamilyFeedbackData, type FollowupOutcome } from "./family-feedback-types";
+import { readFeedbackResponses } from "./family-feedback-followup-service";
 import type { PlatformContext } from "./platform-store";
 
 type TaskRow = { id: string; student_user_id: string; assignment_id: string | null; classId: string | null; className: string | null; studentName: string;
   title: string; detail: string; objective_id: string | null; objectiveTitle: string | null; assignmentTitle: string | null; family_plan_json: string; status: string };
 type FeedbackRow = { id: string; family_task_id: string; student_user_id: string; assignment_id: string | null; class_id: string | null; task_revision: number; task_snapshot_json: string;
   participation: FeedbackFields["participation"]; instructions: FeedbackFields["instructions"]; operation_help: FeedbackFields["operationHelp"]; alternative: FeedbackFields["alternative"];
-  note: string; created_by: string; created_at: string; voided_at: string | null; voided_by: string | null; void_reason: string | null };
+  note: string; created_by: string; created_at: string; voided_at: string | null; voided_by: string | null; void_reason: string | null;
+  response_id: string | null; followup_outcome: FollowupOutcome | null };
 
 function snapshot(row: TaskRow): FeedbackSnapshot {
   return { version: 1, title: row.title, detail: row.detail, objectiveId: row.objective_id, objectiveTitle: row.objectiveTitle,
@@ -40,28 +42,36 @@ export async function readFamilyFeedback(context: PlatformContext, view: Feedbac
       WHERE f.tenant_id=? AND ${recordAccess} ORDER BY f.created_at DESC,f.rowid DESC`)
       .bind(context.tenantId, ...args).all<FeedbackRow & { className: string | null; studentName: string; authorName: string }>(),
   ]);
+  const responses = await readFeedbackResponses(context, view, entries.results.map((row) => row.id));
   return { tasks: tasks.results.map((row): FeedbackTask => ({ id: row.id, studentId: row.student_user_id, studentName: row.studentName, classId: row.classId,
     className: row.className, revision: readFamilyPlan(row.family_plan_json)?.revision ?? 0, status: row.status, snapshot: snapshot(row) })),
   entries: entries.results.map((row) => ({ id: row.id, taskId: row.family_task_id, studentId: row.student_user_id, studentName: row.studentName,
     classId: row.class_id, className: row.className, revision: row.task_revision, snapshot: JSON.parse(row.task_snapshot_json) as FeedbackSnapshot,
     participation: row.participation, instructions: row.instructions, operationHelp: row.operation_help, alternative: row.alternative, note: row.note,
     authorName: row.authorName, createdAt: row.created_at, voidedAt: row.voided_at, voidReason: row.void_reason,
-    canVoid: !row.voided_at && (admin || (view === "guardian" && row.created_by === context.userId)) })), generatedAt: new Date().toISOString() };
+    canVoid: !row.voided_at && (admin || (view === "guardian" && row.created_by === context.userId)),
+    responseId: row.response_id, followupOutcome: row.followup_outcome, responses: responses.filter((response) => response.feedbackId === row.id),
+    canRespond: view === "teaching" && !row.voided_at && !row.response_id })), generatedAt: new Date().toISOString() };
 }
 
-export async function recordFamilyFeedback(context: PlatformContext, input: { id: string; taskId: string; revision: number } & FeedbackFields) {
+export async function recordFamilyFeedback(context: PlatformContext, input: { id: string; taskId: string; revision: number; responseId?: string | null; followupOutcome?: FollowupOutcome | null } & FeedbackFields) {
   if (!context.roles.includes("guardian")) throw new Error("forbidden");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.id)) throw new Error("invalid_family_feedback_id");
   if (!Number.isInteger(input.revision) || input.revision < 0) throw new Error("invalid_family_feedback_revision");
   if (!Object.hasOwn(PARTICIPATION_LABELS, input.participation) || !Object.hasOwn(INSTRUCTION_LABELS, input.instructions)
     || !Object.hasOwn(OPERATION_LABELS, input.operationHelp) || !Object.hasOwn(ALTERNATIVE_LABELS, input.alternative)) throw new Error("invalid_family_feedback_fields");
-  if (typeof input.note !== "string" || input.note.length > 1500 || (feedbackReasonRequired(input) && !input.note.trim())) throw new Error("invalid_family_feedback_note");
+  const responseId = input.responseId ?? null; const outcome = input.followupOutcome ?? null;
+  if ((responseId !== null && (typeof responseId !== "string" || !responseId || responseId.length > 120))
+    || (outcome !== null && (typeof outcome !== "string" || !Object.hasOwn(FOLLOWUP_OUTCOME_LABELS, outcome)))
+    || ((responseId === null) !== (outcome === null))) throw new Error("invalid_family_feedback_followup");
+  if (typeof input.note !== "string" || input.note.length > 1500 || ((feedbackReasonRequired(input) || outcome === "partly" || outcome === "unresolved") && !input.note.trim())) throw new Error("invalid_family_feedback_note");
   const { db, tenantId, userId } = context;
   const saved = () => db.prepare("SELECT * FROM family_usability_feedback WHERE id=? AND tenant_id=?").bind(input.id, tenantId).first<FeedbackRow>();
   async function recover(row: FeedbackRow) {
     await assertGuardian(context, row.student_user_id);
     if (row.created_by !== userId || row.family_task_id !== input.taskId || row.task_revision !== input.revision || row.participation !== input.participation
-      || row.instructions !== input.instructions || row.operation_help !== input.operationHelp || row.alternative !== input.alternative || row.note !== input.note) throw new Error("family_feedback_id_conflict");
+      || row.instructions !== input.instructions || row.operation_help !== input.operationHelp || row.alternative !== input.alternative || row.note !== input.note
+      || row.response_id !== responseId || row.followup_outcome !== outcome) throw new Error("family_feedback_id_conflict");
     if (row.voided_at) throw new Error("family_feedback_already_voided");
     return { id: row.id };
   }
@@ -70,25 +80,32 @@ export async function recordFamilyFeedback(context: PlatformContext, input: { id
     .bind(input.taskId, tenantId, userId).first<TaskRow>();
   if (!task) throw new Error("family_task_not_found");
   if ((readFamilyPlan(task.family_plan_json)?.revision ?? 0) !== input.revision) throw new Error("family_feedback_task_changed");
+  // 后续反馈沿用当前任务版本，但必须仍属于原反馈的学生和原班级。
+  const responseClause = `EXISTS (SELECT 1 FROM family_feedback_responses r JOIN family_usability_feedback f ON f.id=r.feedback_id AND f.tenant_id=r.tenant_id
+    WHERE r.id=? AND r.tenant_id=lr.tenant_id AND r.voided_at IS NULL AND f.voided_at IS NULL AND f.response_id IS NULL
+      AND f.family_task_id=lr.id AND f.student_user_id=lr.student_user_id AND f.class_id IS ?)`;
+  if (responseId && !await db.prepare(`SELECT lr.id FROM learning_recommendations lr WHERE lr.id=? AND lr.tenant_id=? AND ${responseClause}`)
+    .bind(task.id, tenantId, responseId, task.classId).first()) throw new Error("family_feedback_response_unavailable");
   try { await db.batch([
     // 提交时固定看到的任务版本与原班级；任务后续改名或改关联不会转移历史反馈权限。
     db.prepare(`INSERT INTO family_usability_feedback
-      (id,tenant_id,family_task_id,student_user_id,assignment_id,class_id,task_revision,task_snapshot_json,participation,instructions,operation_help,alternative,note,created_by)
-      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? FROM learning_recommendations lr WHERE lr.id=? AND lr.tenant_id=? AND lr.source_type='family'
-        AND lr.student_user_id=? AND lr.assignment_id IS ? AND lr.objective_id IS ? AND lr.family_plan_json=? AND lr.title=? AND lr.detail=? AND ${guardianClause("lr")}`)
+      (id,tenant_id,family_task_id,student_user_id,assignment_id,class_id,task_revision,task_snapshot_json,participation,instructions,operation_help,alternative,note,created_by,response_id,followup_outcome)
+      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? FROM learning_recommendations lr WHERE lr.id=? AND lr.tenant_id=? AND lr.source_type='family'
+        AND lr.student_user_id=? AND lr.assignment_id IS ? AND lr.objective_id IS ? AND lr.family_plan_json=? AND lr.title=? AND lr.detail=? AND ${guardianClause("lr")}
+        AND (SELECT a.class_id FROM assignments a WHERE a.id=lr.assignment_id AND a.tenant_id=lr.tenant_id) IS ? AND (? IS NULL OR ${responseClause})`)
       .bind(input.id, tenantId, task.id, task.student_user_id, task.assignment_id, task.classId, input.revision, JSON.stringify(snapshot(task)),
-        input.participation, input.instructions, input.operationHelp, input.alternative, input.note, userId,
-        task.id, tenantId, task.student_user_id, task.assignment_id, task.objective_id, task.family_plan_json, task.title, task.detail, userId),
+        input.participation, input.instructions, input.operationHelp, input.alternative, input.note, userId, responseId, outcome,
+        task.id, tenantId, task.student_user_id, task.assignment_id, task.objective_id, task.family_plan_json, task.title, task.detail, userId, task.classId, responseId, responseId, task.classId),
     db.prepare(`INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json)
       SELECT ?,?,?,'family_feedback.created','family_feedback',?,? WHERE changes()>0`)
-      .bind(crypto.randomUUID(), tenantId, userId, input.id, JSON.stringify({ taskId: task.id, revision: input.revision })),
+      .bind(crypto.randomUUID(), tenantId, userId, input.id, JSON.stringify({ taskId: task.id, revision: input.revision, responseId, followupOutcome: outcome })),
   ]); } catch (error) {
     const concurrent = await saved(); if (concurrent) return recover(concurrent);
     if (error instanceof Error && error.message.includes("family_usability_feedback.id")) throw new Error("family_feedback_id_conflict");
     throw error;
   }
   const result = await saved();
-  if (!result) { await assertGuardian(context, task.student_user_id); throw new Error("family_feedback_task_changed"); }
+  if (!result) { await assertGuardian(context, task.student_user_id); throw new Error(responseId ? "family_feedback_response_unavailable" : "family_feedback_task_changed"); }
   return recover(result);
 }
 

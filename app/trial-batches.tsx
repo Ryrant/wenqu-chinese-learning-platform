@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ALTERNATIVE_LABELS, INSTRUCTION_LABELS, OPERATION_LABELS, PARTICIPATION_LABELS } from "./lib/family-feedback-types";
+import { ALTERNATIVE_LABELS, FEEDBACK_RESPONSE_LABELS, FOLLOWUP_OUTCOME_LABELS, INSTRUCTION_LABELS, OPERATION_LABELS, PARTICIPATION_LABELS, type FamilyFeedbackEntry } from "./lib/family-feedback-types";
 import { HELP_LEVEL_LABELS, sequenceTime, unitReportUrl } from "./lib/learning-sequence-types";
 import type { Notify } from "./lib/platform-types";
 import { batchFamilyVersion, batchSummary, type BatchCatalog, type BatchClass, type BatchEvidence, type BatchFamilyTask, type BatchReport, type BatchSequence, type TrialBatch } from "./lib/trial-batch-types";
@@ -104,6 +104,10 @@ function BatchActions({ batch, classroom, draft, update, busy, setBusy, save }: 
 function EvidenceCell({ work }: { work?: BatchEvidence | null }) {
   return work ? <><strong>{work.goalScore === null ? "本期评价未核对" : `${work.goalScore}/100`}</strong><br/>{HELP_LEVEL_LABELS[work.helpLevel]} · 提示 {work.promptCount ?? "未记录"} 次<br/>{work.contextConfirmed ? "新情境已核对" : "新情境尚未确认"}<br/>{work.inPeriod ? "期内作品" : "期外初次参照"} · {work.rubricMatched ? "原量规一致" : "原量规不同或未保留"}</> : <>没有期内作品</>;
 }
+function BatchFeedbackSupport({ entry }: { entry: FamilyFeedbackEntry }) {
+  return <>{entry.responseId && <p>后续反馈：{entry.followupOutcome ? FOLLOWUP_OUTCOME_LABELS[entry.followupOutcome][0] : "结果未保留"} · 处理记录 {entry.responseId}</p>}
+    {entry.responses.map((response) => <div key={response.id}><h4>教师处理：{FEEDBACK_RESPONSE_LABELS[response.kind][0]}{response.voidedAt ? " · 已撤销" : ""}</h4><p>{response.authorName} · {sequenceTime(response.createdAt)} · {response.id}</p><p className={styles.copy}>{response.detail}</p>{response.voidedAt && <p className={styles.copy}>撤销原因：{response.voidReason}</p>}</div>)}</>;
+}
 function BatchResults({ report }: { report: BatchReport }) {
   const summary = batchSummary(report); const workload = trialSummary(report.entries, []); const scope = report.batch.scope;
   return <div className={styles.results}><h4>{report.batch.title}</h4><p>{scope.className} · {scope.objectiveTitle} · {scope.startDate} 至 {scope.endDate}（北京时间，含首尾日期）</p><p className={styles.copy}>{scope.workScope}</p>
@@ -125,8 +129,8 @@ function BatchResults({ report }: { report: BatchReport }) {
       </> : <p>{group.transferStatus}</p>}</section>)}
     </details>)}
     <h4>家庭可用性</h4><p>{summary.familyRecords} 条期内有效反馈，涉及 {summary.familyStudents} 人；{summary.missingFamilyTasks}/{scope.familyTasks.length} 份关联版本没有期内有效反馈。家庭反馈与语言成绩、交流确认及任务完成分别记录。</p>
-    <details><summary>查看关联家庭版本、反馈与撤销历史</summary>{!scope.familyTasks.length && <p>未关联家庭任务版本，家庭可用性仍待观察。</p>}{scope.familyTasks.map((task) => <p key={taskKey(task)}>{scope.participants.find((person) => person.id === task.studentId)?.name} · {task.title} · {batchFamilyVersion(task.revision)} · {task.id.slice(0, 8)}</p>)}
-      {report.feedback.map((entry) => <article className={styles.entry} key={entry.id}><h4>{scope.participants.find((person) => person.id === entry.studentId)?.name} · {entry.snapshot.title} · {batchFamilyVersion(entry.revision)}{entry.voidedAt ? " · 已撤销" : ""}</h4><p>{PARTICIPATION_LABELS[entry.participation][0]}；说明：{INSTRUCTION_LABELS[entry.instructions][0]}；操作帮助：{OPERATION_LABELS[entry.operationHelp][0]}；替代交流：{ALTERNATIVE_LABELS[entry.alternative][0]}</p><p className={styles.copy}>{entry.note || "未补充说明"}</p><p className={styles.copy}>原说明：{entry.snapshot.detail}</p><p>{entry.authorName} · {sequenceTime(entry.createdAt)} · {entry.id.slice(0, 8)}</p>{entry.voidedAt && <p className={styles.copy}>撤销原因：{entry.voidReason}</p>}</article>)}
+    <details><summary>查看关联家庭版本、反馈与撤销历史</summary><p>仅展示期内反馈及其期内处理记录；后续反馈按自己的时间和任务版本纳入。缺少期外来源不表示困难已解决；保留当前撤销状态。</p>{!scope.familyTasks.length && <p>未关联家庭任务版本，家庭可用性仍待观察。</p>}{scope.familyTasks.map((task) => <p key={taskKey(task)}>{scope.participants.find((person) => person.id === task.studentId)?.name} · {task.title} · {batchFamilyVersion(task.revision)} · {task.id.slice(0, 8)}</p>)}
+      {report.feedback.map((entry) => <article className={styles.entry} key={entry.id}><h4>{scope.participants.find((person) => person.id === entry.studentId)?.name} · {entry.snapshot.title} · {batchFamilyVersion(entry.revision)}{entry.voidedAt ? " · 已撤销" : ""}</h4><p>{PARTICIPATION_LABELS[entry.participation][0]}；说明：{INSTRUCTION_LABELS[entry.instructions][0]}；操作帮助：{OPERATION_LABELS[entry.operationHelp][0]}；替代交流：{ALTERNATIVE_LABELS[entry.alternative][0]}</p><p className={styles.copy}>{entry.note || "未补充说明"}</p><p className={styles.copy}>原说明：{entry.snapshot.detail}</p><BatchFeedbackSupport entry={entry}/><p>{entry.authorName} · {sequenceTime(entry.createdAt)} · {entry.id.slice(0, 8)}</p>{entry.voidedAt && <p className={styles.copy}>撤销原因：{entry.voidReason}</p>}</article>)}
     </details>
     <details><summary>查看用时、退出及未改善原记录（{report.entries.length} 条）</summary>{!report.entries.length && <p>当前授权范围没有期内记录，保持未记录。</p>}{report.entries.map((entry) => <article className={styles.entry} key={entry.id}><h4>{TRIAL_KIND_LABELS[entry.kind]}{entry.voidedAt ? " · 已撤销" : ""}</h4><p>{entry.teacherName} · {sequenceTime(entry.createdAt)} · {entry.id.slice(0, 8)}</p><p>{entry.method && `${TRIAL_METHOD_LABELS[entry.method]} · ${entry.minutes ?? "未记录"} 分钟`}</p><p className={styles.copy}>{entry.note}</p><a target="_blank" rel="noopener" href={unitReportUrl(entry.sequenceId)}>{entry.sequenceTitle}</a>{entry.voidedAt && <p className={styles.copy}>撤销原因：{entry.voidReason}</p>}</article>)}</details>
     <p className={styles.meta}>汇总依当前可读记录和撤销状态重新生成；小规模试用用于发现问题，不能将前后变化直接归因于平台。</p>

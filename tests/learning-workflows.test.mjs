@@ -33,6 +33,7 @@ const bundle = await build({
     export { GET as batchDetail } from './app/api/v1/trial-batches/[id]/route';
     export { GET as batchReport } from './app/api/v1/trial-batches/[id]/report/route';
     export { batchSummary } from './app/lib/trial-batch-types';
+    export { feedbackCaseState } from './app/lib/family-feedback-types';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
@@ -1787,6 +1788,140 @@ test("trial batch catalogs and linked evidence cover more than a browsing page w
   assert.equal(api.batchSummary(missing).unavailableGroups, 121); assert.equal(missing.entries.length, 0);
 });
 
+const supportInput = (feedbackId, extra = {}) => ({ action: "respond", id: crypto.randomUUID(), feedbackId, kind: "operation", detail: "先打开家庭任务，再选择录音上传；可请同伴交流。", ...extra });
+
+test("family support preserves original and follow-up versions, explicit outcomes and ordered history without writing learning evidence", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const original = familyFeedbackInput(task.id);
+  await f.feedbackAction(f.actors.guardian, original);
+  const entries = async () => (await f.feedback()).data.entries;
+  const state = async () => { const all = await entries(); return api.feedbackCaseState(all.find((item) => item.id === original.id), all); };
+  assert.equal(await state(), "unrecorded");
+  const response = supportInput(original.id);
+  await Promise.all([f.feedbackAction(f.actors.teacher, response), f.feedbackAction(f.actors.teacher, response)]);
+  await f.feedbackAction(f.actors.teacher, { ...response, detail: "不可覆盖" }, 409);
+  assert.equal(await state(), "awaiting");
+  await f.act(f.actors.guardian, "update_family_task", { id: task.id, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "家庭任务新版本", detail: "新版录音说明", partner: "peer", revision: 1 });
+  const followup = familyFeedbackInput(task.id, { revision: 2, responseId: response.id, followupOutcome: "partly" });
+  for (const extra of [{ followupOutcome: null }, { followupOutcome: "automatic" }, { responseId: [] }, { responseId: null }, { note: "", participation: "completed", instructions: "clear", operationHelp: "none", alternative: "not_needed" }]) await f.feedbackAction(f.actors.guardian, { ...followup, ...extra }, 400);
+  await Promise.all([f.feedbackAction(f.actors.guardian, followup), f.feedbackAction(f.actors.guardian, followup)]);
+  assert.equal(await state(), "needs_followup");
+  const resolved = familyFeedbackInput(task.id, { revision: 2, responseId: response.id, followupOutcome: "resolved", participation: "in_progress", instructions: "clear", operationHelp: "none", alternative: "worked", note: "现在会上传了，孩子作品仍未提交。" });
+  await f.feedbackAction(f.actors.guardian, resolved);
+  assert.equal(await state(), "resolved");
+  let all = await entries(); const root = all.find((item) => item.id === original.id);
+  assert.equal(root.snapshot.title, "家庭使用反馈验证任务"); assert.equal(root.revision, 1); assert.equal(root.responses.length, 1);
+  assert.equal(all.find((item) => item.id === resolved.id).snapshot.title, "家庭任务新版本");
+  const withdrawal = { action: "void", id: resolved.id, reason: "本次结果误记" }; await f.feedbackAction(f.actors.guardian, withdrawal, 200);
+  assert.equal(await state(), "needs_followup");
+  const secondResponse = supportInput(original.id, { kind: "partner", detail: "再次安排由教师交流，家长另行反馈。" }); await f.feedbackAction(f.actors.teacher, secondResponse);
+  assert.equal(await state(), "awaiting", "new support never inherits a result for an older response");
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id, { revision: 2, responseId: secondResponse.id, followupOutcome: "not_tried" }));
+  assert.equal(await state(), "not_tried");
+  const voidResponse = { action: "void_response", id: secondResponse.id, reason: "替代安排需要改约时间" };
+  await f.feedbackAction(f.actors.teacher, voidResponse, 200); await f.feedbackAction(f.actors.teacher, voidResponse, 200);
+  await f.feedbackAction(f.actors.teacher, { ...voidResponse, reason: "不得覆盖" }, 409);
+  await f.feedbackAction(f.actors.teacher, secondResponse, 409);
+  assert.equal(await state(), "needs_followup");
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id, { revision: 2, responseId: secondResponse.id, followupOutcome: "resolved" }), 409);
+  await f.feedbackAction(f.actors.teacher, supportInput(followup.id), 400);
+  await f.feedbackAction(f.actors.guardian, { action: "void", id: original.id, reason: "撤销原反馈但保留全部处理历史" }, 200);
+  await f.feedbackAction(f.actors.teacher, supportInput(original.id), 409);
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id, { revision: 2, responseId: response.id, followupOutcome: "unresolved" }), 409);
+  all = await entries(); assert.equal(all.find((item) => item.id === original.id).responses.length, 2); assert.equal(await state(), "withdrawn");
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM submissions").first()).n, 0);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM mastery_snapshots WHERE student_user_id=?").bind(f.ids.student).first()).n, 0);
+  assert.equal((await f.db.prepare("SELECT status FROM learning_recommendations WHERE id=?").bind(task.id).first()).status, "pending");
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='family_response.created'").first()).n, 2);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='family_response.voided'").first()).n, 1);
+});
+
+test("family support enforces original-class and author permissions, guardian bindings, mixed roles and password gates", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const original = familyFeedbackInput(task.id); await f.feedbackAction(f.actors.guardian, original);
+  for (const actor of ["guardian", "student", "otherTeacher", "otherTenant"]) await f.feedbackAction(f.actors[actor], supportInput(original.id), 403);
+  await f.feedbackAction(null, supportInput(original.id), 401);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "有监护绑定的其他教师", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  await f.feedbackAction(f.actors.otherTeacher, supportInput(original.id), 403);
+  const support = supportInput(original.id); await f.feedbackAction(f.actors.teacher, support);
+  assert.equal((await f.feedback()).data.entries[0].responses[0].canVoid, false);
+  assert.equal((await f.feedback(f.actors.otherTeacher, "guardian")).data.entries[0].responses[0].detail, support.detail);
+  for (const actor of ["guardian", "otherTeacher", "student"]) await f.feedbackAction(f.actors[actor], { action: "void_response", id: support.id, reason: "无权撤销" }, 403);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: f.classroom.id, studentUserIds: [] });
+  await f.act(f.actors.guardian, "archive_family_task", { id: task.id });
+  await f.feedbackAction(f.actors.teacher, supportInput(original.id));
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.guardian, studentUserIds: [] });
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id, { responseId: support.id, followupOutcome: "resolved" }), 404);
+  await f.db.prepare("UPDATE classes SET teacher_user_id=? WHERE id=?").bind(f.ids.otherTeacher, f.classroom.id).run();
+  await f.feedbackAction(f.actors.teacher, support, 403);
+  await f.feedbackAction(f.actors.otherTeacher, supportInput(original.id));
+  await f.feedbackAction(f.actors.otherTeacher, { action: "void_response", id: support.id, reason: "不是原处理人" }, 403);
+  assert.deepEqual((await f.feedback(f.actors.teacher, "teaching")).data.entries, []);
+  await f.db.prepare("UPDATE users SET must_change_password=1 WHERE id=?").bind(f.ids.otherTeacher).run();
+  assert.equal((await f.feedbackAction(f.actors.otherTeacher, supportInput(original.id), 403)).error, "password_change_required");
+  await f.feedbackAction(f.actors.admin, { action: "void_response", id: support.id, reason: "管理员撤销误记" }, 200);
+  await f.db.prepare("UPDATE family_usability_feedback SET class_id=NULL WHERE id=?").bind(original.id).run();
+  await f.feedbackAction(f.actors.teacher, supportInput(original.id), 403);
+  await f.feedbackAction(f.actors.admin, supportInput(original.id));
+});
+
+test("family support atomically rejects withdrawn sources and changed classes, and rolls back saves and withdrawals if audit fails", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const original = familyFeedbackInput(task.id); await f.feedbackAction(f.actors.guardian, original);
+  const response = supportInput(original.id);
+  for (const extra of [{ kind: "invalid" }, { detail: " " }, { detail: "字".repeat(2001) }, { id: "invalid" }]) await f.feedbackAction(f.actors.teacher, { ...response, ...extra }, 400);
+  await f.db.prepare("CREATE TRIGGER support_audit_failure BEFORE INSERT ON audit_logs WHEN NEW.action='family_response.created' BEGIN SELECT RAISE(ABORT,'support_audit_failed'); END").run();
+  await f.feedbackAction(f.actors.teacher, response, 500);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM family_feedback_responses").first()).n, 0);
+  await f.db.prepare("DROP TRIGGER support_audit_failure").run(); await f.feedbackAction(f.actors.teacher, response);
+  const batch = f.db.batch.bind(f.db);
+  const race = t.mock.method(f.db, "batch", async (statements) => { await f.db.prepare("UPDATE family_feedback_responses SET voided_at=CURRENT_TIMESTAMP WHERE id=?").bind(response.id).run(); return batch(statements); });
+  const followup = familyFeedbackInput(task.id, { responseId: response.id, followupOutcome: "unresolved" });
+  await f.feedbackAction(f.actors.guardian, followup, 409); race.mock.restore();
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM family_usability_feedback WHERE response_id IS NOT NULL").first()).n, 0);
+  const next = supportInput(original.id); await f.feedbackAction(f.actors.teacher, next);
+  await f.db.prepare("CREATE TRIGGER followup_audit_failure BEFORE INSERT ON audit_logs WHEN NEW.action='family_feedback.created' BEGIN SELECT RAISE(ABORT,'followup_audit_failed'); END").run();
+  await f.feedbackAction(f.actors.guardian, { ...followup, responseId: next.id }, 500);
+  await f.db.prepare("DROP TRIGGER followup_audit_failure").run();
+  await f.db.prepare("CREATE TRIGGER support_void_audit_failure BEFORE INSERT ON audit_logs WHEN NEW.action='family_response.voided' BEGIN SELECT RAISE(ABORT,'support_void_audit_failed'); END").run();
+  await f.feedbackAction(f.actors.teacher, { action: "void_response", id: next.id, reason: "测试事务" }, 500);
+  assert.equal((await f.db.prepare("SELECT voided_at FROM family_feedback_responses WHERE id=?").bind(next.id).first()).voided_at, null);
+  await f.db.prepare("DROP TRIGGER support_void_audit_failure").run();
+  const otherClass = await f.act(f.actors.otherTeacher, "create_class", { name: "换班后的任务", level: "A2" }, 201);
+  const changeClass = t.mock.method(f.db, "batch", async (statements) => { await f.db.prepare("UPDATE assignments SET class_id=? WHERE id=?").bind(otherClass.id, f.assignment.id).run(); return batch(statements); });
+  await f.feedbackAction(f.actors.guardian, { ...followup, responseId: next.id }, 409); changeClass.mock.restore();
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id, { responseId: next.id, followupOutcome: "resolved" }), 409);
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id));
+  assert.equal((await f.feedback(f.actors.teacher, "teaching")).data.entries.length, 1, "new-class feedback is not disclosed to the former teacher");
+  const rootRace = t.mock.method(f.db, "batch", async (statements) => { await f.db.prepare("UPDATE family_usability_feedback SET voided_at=CURRENT_TIMESTAMP WHERE id=?").bind(original.id).run(); return batch(statements); });
+  await f.feedbackAction(f.actors.teacher, supportInput(original.id), 409); rootRace.mock.restore();
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM family_feedback_responses").first()).n, 2);
+});
+
+test("family support reads complete ordered histories and trial reports include only period-scoped support with escaped details", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const original = familyFeedbackInput(task.id); await f.feedbackAction(f.actors.guardian, original);
+  const response = supportInput(original.id, { detail: "原处理 <script>unsafeSupport()</script> & \"内容\"" }); await f.feedbackAction(f.actors.teacher, response);
+  const followup = familyFeedbackInput(task.id, { responseId: response.id, followupOutcome: "resolved" }); await f.feedbackAction(f.actors.guardian, followup);
+  await f.db.prepare(`WITH RECURSIVE copies(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM copies WHERE n<55)
+    INSERT INTO family_feedback_responses (id,tenant_id,feedback_id,kind,detail,created_by,created_at)
+    SELECT 'support-history-'||n,tenant_id,feedback_id,kind,'期外处理 '||n,created_by,'2001-02-03 16:00:00' FROM family_feedback_responses,copies WHERE id=?`).bind(response.id).run();
+  const all = (await f.feedback()).data.entries; const root = all.find((entry) => entry.id === original.id);
+  assert.equal(root.responses.length, 56); assert.equal(root.responses[0].id, response.id, "current timestamp sorts above historical support");
+  await f.db.prepare("UPDATE family_usability_feedback SET created_at='2001-02-03 01:00:00' WHERE id=?").bind(original.id).run();
+  await f.db.prepare("UPDATE family_usability_feedback SET created_at='2001-02-03 02:00:00' WHERE id=?").bind(followup.id).run();
+  await f.db.prepare("UPDATE family_feedback_responses SET created_at='2001-02-03 01:01:00' WHERE id=?").bind(response.id).run();
+  const input = await batchInput(f, { startDate: "2001-02-03", endDate: "2001-02-03", familyTasks: [{ id: task.id, revision: 1 }] }); await f.batchAction(f.actors.teacher, input);
+  const report = (await f.batches(f.actors.teacher, input.id)).data;
+  assert.equal(report.feedback.find((entry) => entry.id === original.id).responses.length, 1);
+  assert.equal(report.feedback.find((entry) => entry.id === followup.id).followupOutcome, "resolved");
+  const { data: html } = await f.batches(f.actors.teacher, input.id, 200, true);
+  assert.ok(html.includes("本项使用困难已解决") && html.includes("unsafeSupport()") && html.includes("&lt;script&gt;"));
+  assert.ok(!html.includes("<script>unsafeSupport()") && !html.includes("期外处理 55"));
+  await f.db.prepare("UPDATE family_feedback_responses SET created_at='2001-02-02 15:59:59' WHERE id=?").bind(response.id).run();
+  assert.equal((await f.batches(f.actors.teacher, input.id)).data.feedback.find((entry) => entry.id === original.id).responses.length, 0);
+  const latest = (await f.feedback()).data.entries; const latestRoot = latest.find((entry) => entry.id === original.id);
+  assert.equal(latestRoot.responses[0].id, "support-history-55", "same-second ties retain insertion order");
+  assert.equal(api.feedbackCaseState(latestRoot, latest), "awaiting", "latest support cannot inherit a resolved outcome from an older response");
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {
@@ -1794,6 +1929,7 @@ test("additive migration upgrades existing data and runtime initialization is re
     for (const name of files) {
       if (name === "0008_family_exchange.sql") db.exec(`INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,score,review_status) VALUES ('legacy-exchange','legacy-tenant','legacy-assignment','legacy-student',81,'reviewed')`);
       if (name === "0010_delayed_retest.sql") db.exec(`INSERT INTO learning_sequences (id,tenant_id,student_user_id,assignment_id,objective_id,objective_title,baseline_submission_id,baseline_snapshot_json,title,practice_prompt,transfer_prompt,transfer_context,rubric_json,medium,created_by) VALUES ('legacy-sequence','legacy-tenant','legacy-student','legacy-assignment','goal','旧目标','legacy-exchange','{}','旧任务组','原练习','原迁移','原情境','[]','text','legacy-teacher')`);
+      if (name === "0015_family_feedback_followups.sql") db.exec(`INSERT INTO family_usability_feedback (id,tenant_id,family_task_id,student_user_id,task_revision,task_snapshot_json,participation,instructions,operation_help,alternative,note,created_by) VALUES ('legacy-feedback','legacy-tenant','legacy-task','legacy-student',1,'{}','unable','unclear','guidance','not_tried','旧困难','legacy-guardian')`);
       db.exec(await readFile(path.join(root, "drizzle", name), "utf8"));
     }
     assert.deepEqual({ ...db.prepare("SELECT score,family_snapshot_json,family_confirmed_by,family_confirmation_role FROM submissions WHERE id='legacy-exchange'").get() }, { score: 81, family_snapshot_json: "{}", family_confirmed_by: null, family_confirmation_role: null });
@@ -1809,8 +1945,11 @@ test("additive migration upgrades existing data and runtime initialization is re
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0012_trial_records.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0014_trial_batches.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0015_family_feedback_followups.sql'").get());
+    assert.deepEqual({ ...db.prepare("SELECT response_id,followup_outcome FROM family_usability_feedback WHERE id='legacy-feedback'").get() }, { response_id: null, followup_outcome: null });
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM family_feedback_responses").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_trial_batches").get().count, 0);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM family_usability_feedback").get().count, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM family_usability_feedback").get().count, 1);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_trial_records").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_sequence_decisions").get().count, 0);
     assert.deepEqual({ ...db.prepare("SELECT title,retest_prompt,retest_context,retest_available_at,retest_reference_id FROM learning_sequences WHERE id='legacy-sequence'").get() }, { title: "旧任务组", retest_prompt: "", retest_context: "", retest_available_at: null, retest_reference_id: null });
@@ -1828,6 +1967,9 @@ test("additive migration upgrades existing data and runtime initialization is re
     db.exec("ALTER TABLE learning_trial_batches RENAME COLUMN scope_json TO incomplete_scope_json; DELETE FROM d1_migrations WHERE name='0014_trial_batches.sql'");
     db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
     assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0014_trial_batches.sql'").get(), undefined);
+    db.exec("ALTER TABLE family_feedback_responses RENAME COLUMN detail TO incomplete_detail; DELETE FROM d1_migrations WHERE name='0015_family_feedback_followups.sql'");
+    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
+    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0015_family_feedback_followups.sql'").get(), undefined);
   } finally { db.close(); }
   const runtimeDb = new api.NodeSqliteDatabase("file::memory:");
   try { await api.ensurePlatformSchema(runtimeDb); await api.ensurePlatformSchema(runtimeDb); } finally { runtimeDb.close(); }
