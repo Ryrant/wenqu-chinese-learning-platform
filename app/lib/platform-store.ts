@@ -184,6 +184,9 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS learning_recommendation_source_idx ON learning_recommendations (tenant_id,student_user_id,source_type,source_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_sequences (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, assignment_id TEXT NOT NULL, objective_id TEXT NOT NULL, objective_title TEXT NOT NULL, baseline_submission_id TEXT NOT NULL, baseline_snapshot_json TEXT NOT NULL, title TEXT NOT NULL, practice_prompt TEXT NOT NULL, transfer_prompt TEXT NOT NULL, transfer_context TEXT NOT NULL, rubric_json TEXT NOT NULL, medium TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS learning_sequences_student_idx ON learning_sequences (tenant_id,student_user_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS learning_sequence_decisions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sequence_id TEXT NOT NULL, reference_submission_id TEXT NOT NULL, reference_snapshot_json TEXT NOT NULL, kind TEXT NOT NULL, rationale TEXT NOT NULL, remaining TEXT NOT NULL, next_sequence_id TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_decision_reference_idx ON learning_sequence_decisions (tenant_id,sequence_id,reference_submission_id)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_decision_next_idx ON learning_sequence_decisions (tenant_id,next_sequence_id)"),
   ]);
   for (const statement of [
     "ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT",
@@ -324,7 +327,7 @@ export function platformApiError(error: unknown) {
         ? 404
         : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
-          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict", "sequence_retest_required", "sequence_retest_not_open", "sequence_retest_already_scheduled"].includes(message) ? 409
+          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict", "sequence_retest_required", "sequence_retest_not_open", "sequence_retest_already_scheduled", "sequence_decision_id_conflict", "sequence_decision_already_published"].includes(message) ? 409
           : message.startsWith("invalid_") ? 400
       : message === "authentication_config_missing"
           ? 500

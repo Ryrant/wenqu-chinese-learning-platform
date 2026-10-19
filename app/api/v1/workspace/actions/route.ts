@@ -25,7 +25,7 @@ import { searchPublishedKnowledge } from "../../../../lib/retrieval";
 import { createStudentSubmission } from "../../../../lib/submission-service";
 import { assertDiagnosticMedia } from "../../../../lib/diagnostic-media";
 import { suggestIntervention } from "../../../../lib/intervention-support";
-import { createLearningSequence, scheduleDelayedRetest } from "../../../../lib/learning-sequence-service";
+import { createLearningSequence, scheduleDelayedRetest, publishTeachingNextStep } from "../../../../lib/learning-sequence-service";
 
 type ActionBody = { action?: string; [key: string]: unknown };
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", update_lesson_plan: "teacher", archive_lesson_plan: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
       create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian", confirm_family_submission: "guardian",
-      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher", create_learning_sequence: "teacher", schedule_delayed_retest: "teacher",
+      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher", create_learning_sequence: "teacher", schedule_delayed_retest: "teacher", publish_teaching_next_step: "teacher",
       create_invitation: "admin", review_content: "admin", reprocess_content: "admin", archive_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
       submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
     };
@@ -346,6 +346,17 @@ export async function POST(request: Request) {
       }
       await audit(db, tenantId, userId, "submission.ai_review_suggested", "submission", id);
       return Response.json(result);
+    }
+
+    if (action === "publish_teaching_next_step") {
+      const result = await publishTeachingNextStep(db, context, {
+        id: requireText(body.id, "teaching_decision_id", 120), sequenceId: requireText(body.sequenceId, "sequence_id", 120),
+        referenceSubmissionId: requireText(body.referenceSubmissionId, "reference_submission_id", 120), kind: requireText(body.kind, "teaching_decision", 40),
+        rationale: requireText(body.rationale, "decision_rationale", 2000), remaining: requireText(body.remaining, "decision_remaining", 1000),
+        title: requireText(body.title, "sequence_title", 120), practicePrompt: requireText(body.practicePrompt, "practice_prompt", 2000),
+        transferPrompt: requireText(body.transferPrompt, "transfer_prompt", 2000), transferContext: requireText(body.transferContext, "transfer_context", 1000),
+      });
+      return Response.json(result, { status: 201 });
     }
 
     if (action === "schedule_delayed_retest") {

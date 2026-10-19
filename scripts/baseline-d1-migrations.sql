@@ -107,3 +107,10 @@ WHERE EXISTS (SELECT 1 FROM pragma_table_info('learning_sequences') WHERE name='
 AND EXISTS (SELECT 1 FROM pragma_table_info('learning_sequences') WHERE name='retest_context')
 AND EXISTS (SELECT 1 FROM pragma_table_info('learning_sequences') WHERE name='retest_available_at')
 AND EXISTS (SELECT 1 FROM pragma_table_info('learning_sequences') WHERE name='retest_reference_id');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0011_teaching_next_steps.sql'
+WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='learning_sequence_decisions')
+AND (SELECT COUNT(*) FROM pragma_table_info('learning_sequence_decisions') WHERE name IN ('id','tenant_id','sequence_id','reference_submission_id','reference_snapshot_json','kind','rationale','remaining','next_sequence_id','created_by','created_at'))=11
+AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='sequence_decision_reference_idx')
+AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='sequence_decision_next_idx');

@@ -4,6 +4,8 @@ export const SEQUENCE_STAGE_LABELS = { practice: "针对性练习", transfer: "�
 export type SequenceStage = keyof typeof SEQUENCE_STAGE_LABELS;
 export type HelpLevel = "unknown" | "independent" | "prompted" | "assisted";
 export const HELP_LEVEL_LABELS: Record<HelpLevel, string> = { unknown: "未记录", independent: "独立完成", prompted: "提供了提示", assisted: "共同完成或较多帮助" };
+export const TEACHING_DECISION_LABELS = { practice: "继续练习", fade_support: "减少提示", challenge: "进阶挑战", collect_evidence: "补充证据" } as const;
+export type TeachingDecisionKind = keyof typeof TEACHING_DECISION_LABELS;
 export type ReviewEvidence = { version: 1; rubric: RubricDimension[]; objectives: Array<{ id: string; title: string }>; helpLevel: HelpLevel; contextConfirmed: boolean };
 export type SequenceWorkSnapshot = { version: 1; sequenceId: string; stage: SequenceStage; title: string; prompt: string; context: string; objectiveId: string; objectiveTitle: string; rubric: RubricDimension[]; medium: "text" | "audio"; availableAt?: string; referenceSubmissionId?: string };
 export type SequenceEvidence = {
@@ -13,11 +15,13 @@ export type SequenceEvidence = {
   rubric: RubricDimension[] | null; helpLevel: HelpLevel; contextConfirmed: boolean;
 };
 export type SequenceSource = { studentUserId: string; studentName: string; assignmentId: string; assignmentStatus: string; referenceRubric: RubricDimension[]; work: SequenceEvidence };
+export type TeachingDecision = { id: string; reference: SequenceEvidence; kind: TeachingDecisionKind; rationale: string; remaining: string; nextSequenceId: string; nextTitle: string; teacherName: string; createdAt: string };
 export type LearningSequence = {
   id: string; studentUserId: string; studentName: string; assignmentId: string; objectiveId: string; objectiveTitle: string;
   title: string; practicePrompt: string; transferPrompt: string; transferContext: string; rubric: RubricDimension[]; medium: "text" | "audio";
   baseline: SequenceEvidence; practice: SequenceEvidence[]; transfer: SequenceEvidence[];
   retestPrompt: string; retestContext: string; retestAvailableAt: string | null; retestReferenceId: string | null; retestOpen: boolean; retest: SequenceEvidence[]; canScheduleRetest: boolean;
+  decisions: TeachingDecision[]; origin: { sequenceId: string; title: string; kind: TeachingDecisionKind } | null; canPlanNext: boolean;
 };
 export function jsonValue<T>(value: unknown, fallback: T): T {
   if (typeof value !== "string") return fallback;
@@ -43,6 +47,11 @@ export function sequenceTaskId(id: string, stage: SequenceStage) { return `seque
 export function sequenceStages(sequence: LearningSequence): SequenceStage[] { return sequence.retestAvailableAt ? ["practice", "transfer", "retest"] : ["practice", "transfer"]; }
 export function sequenceStageReady(sequence: LearningSequence, stage: SequenceStage) {
   return stage === "practice" || (stage === "retest" ? sequence.retestOpen : sequence.practice.some((work) => work.reviewed));
+}
+export function nextSequenceStage(sequence: LearningSequence): SequenceStage | null {
+  if (!sequence.practice.some((work) => work.reviewed)) return "practice";
+  if (!sequence.transfer.some((work) => work.reviewed)) return "transfer";
+  return sequence.retestOpen && !sequence.retest.some((work) => work.reviewed) ? "retest" : null;
 }
 export function sequencePrompt(sequence: LearningSequence, stage: SequenceStage) { return stage === "practice" ? sequence.practicePrompt : stage === "transfer" ? sequence.transferPrompt : sequence.retestPrompt; }
 export function sequenceTime(value: string) {

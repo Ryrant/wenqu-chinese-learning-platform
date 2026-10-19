@@ -2,7 +2,7 @@ import { assertSubmissionReviewAccess, submissionAccessClause } from "./access-c
 import type { WorkDiagnosticSnapshot } from "./diagnostic-types";
 import { readFamilyWorkSnapshot } from "./family-task";
 import { validateRubric } from "./learning-loop";
-import { jsonValue, readReviewEvidence, readSequenceWork, SEQUENCE_STAGE_LABELS, type LearningSequence, type SequenceEvidence, type SequenceSource, type SequenceWorkSnapshot } from "./learning-sequence-types";
+import { jsonValue, readReviewEvidence, readSequenceWork, SEQUENCE_STAGE_LABELS, TEACHING_DECISION_LABELS, type TeachingDecisionKind, type LearningSequence, type SequenceEvidence, type SequenceSource, type SequenceWorkSnapshot } from "./learning-sequence-types";
 import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 
@@ -18,6 +18,11 @@ type SequenceRow = {
   id: string; student_user_id: string; studentName: string; assignment_id: string; objective_id: string; objective_title: string;
   title: string; practice_prompt: string; transfer_prompt: string; transfer_context: string; rubric_json: string; medium: "text" | "audio"; baseline_snapshot_json: string;
   retest_prompt: string; retest_context: string; retest_available_at: string | null; retest_reference_id: string | null;
+};
+type DecisionRow = {
+  id: string; sequence_id: string; reference_submission_id: string; reference_snapshot_json: string;
+  kind: TeachingDecisionKind; rationale: string; remaining: string; next_sequence_id: string; created_by: string; created_at: string;
+  nextTitle: string; nextPracticePrompt: string; nextTransferPrompt: string; nextTransferContext: string; teacherName: string;
 };
 
 async function workRows(db: PlatformDatabase, context: PlatformContext, filter: string, args: unknown[] = []) {
@@ -146,6 +151,59 @@ export async function scheduleDelayedRetest(db: PlatformDatabase, context: Platf
   return { id: row.id, availableAt };
 }
 
+export async function publishTeachingNextStep(db: PlatformDatabase, context: PlatformContext, input: {
+  id: string; sequenceId: string; referenceSubmissionId: string; kind: string; rationale: string; remaining: string;
+  title: string; practicePrompt: string; transferPrompt: string; transferContext: string;
+}) {
+  if (!context.roles.some((role) => role === "teacher" || role === "admin")) throw new Error("forbidden");
+  if (!Object.hasOwn(TEACHING_DECISION_LABELS, input.kind)) throw new Error("invalid_teaching_decision");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.id)) throw new Error("invalid_teaching_decision_id");
+  const row = await db.prepare("SELECT * FROM learning_sequences WHERE id=? AND tenant_id=?").bind(input.sequenceId, context.tenantId).first<SequenceRow & { baseline_submission_id: string }>();
+  if (!row) throw new Error("sequence_not_found");
+  await assertSubmissionReviewAccess(db, context, row.baseline_submission_id);
+  async function existingResult() {
+    const saved = await db.prepare(`SELECT d.*,ls.title AS nextTitle,ls.practice_prompt AS nextPracticePrompt,ls.transfer_prompt AS nextTransferPrompt,ls.transfer_context AS nextTransferContext
+      FROM learning_sequence_decisions d JOIN learning_sequences ls ON ls.id=d.next_sequence_id AND ls.tenant_id=d.tenant_id WHERE d.id=? AND d.tenant_id=?`)
+      .bind(input.id, context.tenantId).first<DecisionRow>();
+    if (!saved) return null;
+    if (saved.created_by !== context.userId || saved.sequence_id !== input.sequenceId || saved.reference_submission_id !== input.referenceSubmissionId
+      || saved.kind !== input.kind || saved.rationale !== input.rationale || saved.remaining !== input.remaining || saved.nextTitle !== input.title
+      || saved.nextPracticePrompt !== input.practicePrompt || saved.nextTransferPrompt !== input.transferPrompt || saved.nextTransferContext !== input.transferContext) throw new Error("sequence_decision_id_conflict");
+    return { id: saved.id, nextSequenceId: saved.next_sequence_id };
+  }
+  const existing = await existingResult();
+  if (existing) return existing;
+  const reference = (await workRows(db, context, "s.id=? AND s.sequence_id=? AND s.assignment_id=? AND s.student_user_id=? AND s.sequence_stage IN ('transfer','retest') AND s.review_status='reviewed' AND a.status='published'", [input.referenceSubmissionId, row.id, row.assignment_id, row.student_user_id]))[0];
+  if (!reference) throw new Error("sequence_decision_reference_not_found");
+  const eligible = await db.prepare(`SELECT lo.id FROM learning_objectives lo WHERE lo.tenant_id=? AND lo.id=? AND lo.status='active'
+    AND EXISTS (SELECT 1 FROM enrollments e JOIN assignments a ON a.class_id=e.class_id AND a.tenant_id=e.tenant_id
+      WHERE e.tenant_id=lo.tenant_id AND e.student_user_id=? AND e.status='active' AND a.id=?)`)
+    .bind(context.tenantId, row.objective_id, row.student_user_id, row.assignment_id).first();
+  if (!eligible) throw new Error("invalid_sequence_objective");
+  if (input.practicePrompt.trim() === input.transferPrompt.trim()) throw new Error("invalid_sequence_context");
+  const nextSequenceId = crypto.randomUUID();
+  // 教学判断不生成分数；依据作品即使缺少目标评分，也可成为下一轮补证据任务的真实起点。
+  try { await db.batch([
+    db.prepare(`INSERT INTO learning_sequences (id,tenant_id,student_user_id,assignment_id,objective_id,objective_title,baseline_submission_id,baseline_snapshot_json,title,practice_prompt,transfer_prompt,transfer_context,rubric_json,medium,created_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(nextSequenceId, context.tenantId, row.student_user_id, row.assignment_id, row.objective_id, row.objective_title, reference.id, JSON.stringify(evidence(reference)),
+        input.title, input.practicePrompt, input.transferPrompt, input.transferContext, row.rubric_json, row.medium, context.userId),
+    db.prepare("INSERT INTO learning_sequence_decisions (id,tenant_id,sequence_id,reference_submission_id,reference_snapshot_json,kind,rationale,remaining,next_sequence_id,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .bind(input.id, context.tenantId, row.id, reference.id, JSON.stringify(evidence(reference)), input.kind, input.rationale, input.remaining, nextSequenceId, context.userId),
+    db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,'learning_sequence.next_step_published','learning_sequence',?,?)")
+      .bind(crypto.randomUUID(), context.tenantId, context.userId, row.id, JSON.stringify({ decisionId: input.id, referenceSubmissionId: reference.id, nextSequenceId, kind: input.kind })),
+    db.prepare("INSERT INTO notifications (id,tenant_id,user_id,title,detail,kind) VALUES (?,?,?,?,?,'learning_sequence')")
+      .bind(crypto.randomUUID(), context.tenantId, row.student_user_id, input.title, `教师已安排${TEACHING_DECISION_LABELS[input.kind as TeachingDecisionKind]}，请进入学习任务查看要求。`),
+  ]); } catch (error) {
+    if (error instanceof Error && error.message.includes("learning_sequence_decisions.")) {
+      const saved = await existingResult(); if (saved) return saved;
+      if (error.message.includes("reference_submission_id")) throw new Error("sequence_decision_already_published");
+    }
+    throw error;
+  }
+  return { id: input.id, nextSequenceId };
+}
+
 export async function assertSequenceTarget(db: PlatformDatabase, context: PlatformContext, input: { assignmentId: string; sequenceId?: string | null; sequenceStage?: string; familyTaskId?: string | null }): Promise<SequenceWorkSnapshot | null> {
   if (!input.sequenceId && input.sequenceStage === undefined) return null;
   if (typeof input.sequenceId !== "string" || !input.sequenceId || (input.sequenceStage !== "practice" && input.sequenceStage !== "transfer" && input.sequenceStage !== "retest") || input.familyTaskId) throw new Error("invalid_sequence_target");
@@ -178,6 +236,10 @@ export async function readSequenceWorkspace(db: PlatformDatabase, context: Platf
     .bind(context.tenantId, ...access.args, ...(focusedStudentId ? [focusedStudentId] : [])).all<SequenceRow & { teacherUserId: string }>()).results;
   const ids = rows.map((item) => item.id);
   const works = ids.length ? await workRows(db, context, `s.sequence_id IN (${ids.map(() => "?").join(",")})`, ids) : [];
+  const decisions = ids.length ? (await db.prepare(`SELECT d.*,ls.title AS nextTitle,u.display_name AS teacherName FROM learning_sequence_decisions d
+    JOIN learning_sequences ls ON ls.id=d.next_sequence_id AND ls.tenant_id=d.tenant_id JOIN users u ON u.id=d.created_by
+    WHERE d.tenant_id=? AND d.sequence_id IN (${ids.map(() => "?").join(",")}) ORDER BY d.created_at DESC,d.rowid DESC`)
+    .bind(context.tenantId, ...ids).all<DecisionRow>()).results : [];
   const learningSequences: LearningSequence[] = rows.map((row) => ({
     id: row.id, studentUserId: row.student_user_id, studentName: row.studentName, assignmentId: row.assignment_id,
     objectiveId: row.objective_id, objectiveTitle: row.objective_title, title: row.title, practicePrompt: row.practice_prompt,
@@ -186,6 +248,10 @@ export async function readSequenceWorkspace(db: PlatformDatabase, context: Platf
     retestPrompt: row.retest_prompt, retestContext: row.retest_context, retestAvailableAt: row.retest_available_at, retestReferenceId: row.retest_reference_id,
     retestOpen: !!row.retest_available_at && Date.parse(row.retest_available_at) <= Date.now(),
     canScheduleRetest: context.roles.includes("admin") || (context.roles.includes("teacher") && row.teacherUserId === context.userId),
+    canPlanNext: context.roles.includes("admin") || (context.roles.includes("teacher") && row.teacherUserId === context.userId),
+    decisions: decisions.filter((item) => item.sequence_id === row.id).map((item) => ({ id: item.id, reference: JSON.parse(item.reference_snapshot_json), kind: item.kind, rationale: item.rationale,
+      remaining: item.remaining, nextSequenceId: item.next_sequence_id, nextTitle: item.nextTitle, teacherName: item.teacherName, createdAt: item.created_at })),
+    origin: (() => { const origin = decisions.find((item) => item.next_sequence_id === row.id); return origin ? { sequenceId: origin.sequence_id, title: rows.find((item) => item.id === origin.sequence_id)!.title, kind: origin.kind } : null; })(),
     practice: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "practice").map(evidence),
     transfer: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "transfer").map(evidence),
     retest: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "retest").map(evidence),

@@ -2,9 +2,15 @@
 
 import { useState } from "react";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
-import { HELP_LEVEL_LABELS, sameRubric, SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, sequencePrompt, sequenceTime, type LearningSequence, type SequenceEvidence, type SequenceSource } from "./lib/learning-sequence-types";
+import { HELP_LEVEL_LABELS, TEACHING_DECISION_LABELS, sameRubric, SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, nextSequenceStage, sequencePrompt, sequenceTime, type LearningSequence, type SequenceEvidence, type SequenceSource } from "./lib/learning-sequence-types";
 import { DiagnosticStimulus } from "./diagnostic-evidence";
+import { TeachingNextStepPlanner } from "./teaching-next-step";
 import styles from "./learning-sequences.module.css";
+
+function openSequenceReport(id: string) {
+  const report = document.getElementById(`learning-sequence-${id}`);
+  if (report instanceof HTMLDetailsElement) report.open = true;
+}
 
 export function WorkEvidence({ work, objectiveId }: { work: SequenceEvidence; objectiveId: string }) {
   const goal = work.objectives.find((item) => item.id === objectiveId);
@@ -76,7 +82,8 @@ export function SequenceReports({ sequences, onStartTask, scheduling }: { sequen
     {sequences.map((sequence) => {
       const transfer = sequence.transfer[0];
       const reference = sequence.transfer.find((work) => work.id === sequence.retestReferenceId);
-      return <details className={`panel ${styles.report}`} key={sequence.id}><summary>{sequence.title} · {sequence.studentName} · {sequence.objectiveTitle}</summary>
+      return <details id={`learning-sequence-${sequence.id}`} className={`panel ${styles.report}`} key={sequence.id}><summary>{sequence.title} · {sequence.studentName} · {sequence.objectiveTitle}</summary>
+        {sequence.origin && <p>本组来自教师的“{TEACHING_DECISION_LABELS[sequence.origin.kind]}”安排：<a href={`#learning-sequence-${sequence.origin.sequenceId}`} onClick={() => openSequenceReport(sequence.origin!.sequenceId)}>{sequence.origin.title}</a>。初次作品采用该安排的依据作品。</p>}
         <p role="status">{evidenceStatus(transfer, sequence.objectiveId, "迁移")}</p><p className={styles.copy}>迁移情境变化：{sequence.transferContext}</p>
         {sequence.retestAvailableAt && <><p>复测开放：{sequenceTime(sequence.retestAvailableAt)} · {sequence.retestOpen ? "已开放" : "尚未开放"}</p><p className={styles.copy}>复测情境变化：{sequence.retestContext}</p><p role="status">{evidenceStatus(sequence.retest[0], sequence.objectiveId, "复测")}</p></>}
         <div className={`${styles.stages} ${sequence.retestAvailableAt ? styles.withRetest : ""}`}><section><h4>初次任务</h4><WorkEvidence work={sequence.baseline} objectiveId={sequence.objectiveId}/></section>
@@ -93,6 +100,21 @@ export function SequenceReports({ sequences, onStartTask, scheduling }: { sequen
         {sequence.retestAvailableAt && <section><h4>复测的固定参照作品</h4>{reference ? <details><summary>{reference.title} · {sequenceTime(reference.submittedAt)} · {reference.id.slice(0, 8)}</summary><WorkEvidence work={reference} objectiveId={sequence.objectiveId}/></details> : <p>参照作品不可用，暂不计算差值。</p>}
           <ScoreComparison sequence={sequence} before={reference} after={sequence.retest[0]} labels={["参照迁移", "复测"]}/></section>}
         {scheduling && sequence.canScheduleRetest && <RetestScheduler sequence={sequence} {...scheduling}/>}
+        <section className={styles.decisions}><h4>教师后续安排</h4>
+          {!sequence.decisions.length && <p>尚未发布后续安排。</p>}
+          {sequence.decisions.map((decision) => {
+            const next = sequences.find((item) => item.id === decision.nextSequenceId);
+            const stage = next ? nextSequenceStage(next) : null;
+            return <article className={styles.decision} key={decision.id}><strong>{TEACHING_DECISION_LABELS[decision.kind]} · {decision.nextTitle}</strong>
+              <p>{decision.teacherName} · {sequenceTime(decision.createdAt)}</p><p className={styles.copy}>判断理由：{decision.rationale}</p><p className={styles.copy}>仍待观察：{decision.remaining}</p>
+              <details><summary>查看判断依据 · {decision.reference.title} · {decision.reference.id.slice(0, 8)}</summary><WorkEvidence work={decision.reference} objectiveId={sequence.objectiveId}/></details>
+              {next ? <p><a href={`#learning-sequence-${next.id}`} onClick={() => openSequenceReport(next.id)}>查看下一轮作品与进度</a></p> : <p>下一轮任务暂不可用，请刷新后查看。</p>}
+              {onStartTask && next && stage && !next[stage].some((work) => !work.reviewed) && <button className="soft-button" type="button" onClick={() => onStartTask(sequenceTaskId(next.id, stage))}>进入下一轮{SEQUENCE_STAGE_LABELS[stage]}</button>}
+              {stage && next?.[stage].some((work) => !work.reviewed) && <p>下一轮作品待教师评价。</p>}
+            </article>;
+          })}
+          {scheduling && sequence.canPlanNext && <TeachingNextStepPlanner sequence={sequence} {...scheduling}/>}
+        </section>
       </details>;
     })}
   </section>;

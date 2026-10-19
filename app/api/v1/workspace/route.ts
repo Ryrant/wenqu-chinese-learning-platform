@@ -6,7 +6,7 @@ import { loadPlatformSettings, publicPlatformSettings } from "../../../lib/platf
 import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
 import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
 import { readSequenceWorkspace } from "../../../lib/learning-sequence-service";
-import { SEQUENCE_STAGE_LABELS, sequenceTaskId, type SequenceStage } from "../../../lib/learning-sequence-types";
+import { SEQUENCE_STAGE_LABELS, sequenceTaskId, nextSequenceStage } from "../../../lib/learning-sequence-types";
 
 export const dynamic = "force-dynamic";
 
@@ -303,11 +303,8 @@ export async function GET(request: Request) {
     ];
     const sequenceWorkspace = await readSequenceWorkspace(db, context, admin || teacher ? null : focusStudentId);
     for (const sequence of sequenceWorkspace.learningSequences.filter((item) => item.studentUserId === focusStudentId)) {
-      let stage: SequenceStage = sequence.practice.some((work) => work.reviewed) ? "transfer" : "practice";
-      if (stage === "transfer" && sequence.transfer.some((work) => work.reviewed)) {
-        if (!sequence.retestOpen || sequence.retest.some((work) => work.reviewed)) continue;
-        stage = "retest";
-      }
+      const stage = nextSequenceStage(sequence);
+      if (!stage) continue;
       const works = sequence[stage];
       planCandidates.push({ id: sequenceTaskId(sequence.id, stage), kind: "sequence", title: `${sequence.title} · ${SEQUENCE_STAGE_LABELS[stage]}`,
         waitingReview: works.some((work) => !work.reviewed), dueAt: null });
