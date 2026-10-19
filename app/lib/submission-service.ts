@@ -1,7 +1,7 @@
 import { ensurePlatformRuntime, type PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 import type { DiagnosticMode, WorkDiagnosticSnapshot } from "./diagnostic-types";
-import { exchangePartner, FAMILY_EXCHANGE_RUBRIC, readFamilyPlan, type FamilyWorkSnapshot } from "./family-task";
+import { exchangePartner, FAMILY_EXCHANGE_RUBRIC, readFamilyPlan, readFamilyWorkSnapshot, type FamilyWorkSnapshot } from "./family-task";
 import { assertSequenceTarget } from "./learning-sequence-service";
 
 export type SubmissionTargetInput = { assignmentId: string; familyTaskId?: string | null; familyPartner?: string; familyRevision?: number; sequenceId?: string | null; sequenceStage?: string };
@@ -40,11 +40,34 @@ export async function assertSubmissionTarget(db: PlatformDatabase, context: Plat
 export async function createStudentSubmission(db: PlatformDatabase, context: PlatformContext, input: SubmissionTargetInput & {
   id?: string; assignmentId: string; familyTaskId?: string | null; textAnswer?: string | null; assetKey?: string | null;
 }) {
-  const assignment = await assertSubmissionTarget(db, context, input);
   if (input.textAnswer != null && typeof input.textAnswer !== "string") throw new Error("invalid_submission_answer");
   if (input.assetKey != null && typeof input.assetKey !== "string") throw new Error("invalid_asset_key");
+  if (input.id !== undefined && (typeof input.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.id))) throw new Error("invalid_submission_id");
   const answer = input.textAnswer?.trim().slice(0, 10000) || null;
   if (!answer && !input.assetKey) throw new Error("invalid_submission_answer");
+  const id = input.id ?? crypto.randomUUID();
+  const readTextRetry = async () => {
+    if (!input.id || input.assetKey) return null;
+    const saved = await db.prepare(`SELECT assignment_id AS assignmentId,student_user_id AS studentUserId,text_answer AS answer,
+        asset_key AS assetKey,family_task_id AS familyTaskId,family_snapshot_json AS familySnapshot,
+        sequence_id AS sequenceId,sequence_stage AS sequenceStage,review_status AS reviewStatus
+      FROM submissions WHERE id=? AND tenant_id=?`).bind(id, context.tenantId).first<{
+        assignmentId: string; studentUserId: string; answer: string | null; assetKey: string | null; familyTaskId: string | null;
+        familySnapshot: string; sequenceId: string | null; sequenceStage: string | null; reviewStatus: string;
+      }>();
+    if (!saved) return null;
+    const family = readFamilyWorkSnapshot(saved.familySnapshot);
+    if (saved.studentUserId !== context.userId || saved.assignmentId !== input.assignmentId || saved.answer !== answer
+      || saved.assetKey !== (input.assetKey ?? null) || saved.familyTaskId !== (input.familyTaskId || null)
+      || saved.sequenceId !== (input.sequenceId || null) || saved.sequenceStage !== (input.sequenceStage ?? null)
+      || (input.familyPartner !== undefined && family?.partner !== input.familyPartner)
+      || (input.familyRevision !== undefined && (family?.plan?.revision ?? 0) !== input.familyRevision)) throw new Error("submission_id_conflict");
+    return { id, reviewStatus: saved.reviewStatus };
+  };
+  // 响应丢失后的重试只确认同一学生、同一请求已保存的原件，不再创建作品或审计。
+  const retry = await readTextRetry();
+  if (retry) return retry;
+  const assignment = await assertSubmissionTarget(db, context, input);
   if ((assignment.diagnosticMode === "speaking" && !input.assetKey)
     || (assignment.diagnosticMode === "writing" && (!answer || input.assetKey))) throw new Error("invalid_diagnostic_submission");
   if (input.assetKey) {
@@ -52,7 +75,6 @@ export async function createStudentSubmission(db: PlatformDatabase, context: Pla
     const object = await (await ensurePlatformRuntime()).storage?.get(input.assetKey);
     if (object?.customMetadata.studentUserId !== context.userId || object.customMetadata.tenantId !== context.tenantId) throw new Error("forbidden");
   }
-  const id = input.id ?? crypto.randomUUID();
   let snapshot: WorkDiagnosticSnapshot | null = null;
   if (assignment.diagnosticMode && !assignment.sequenceSnapshot) {
     const objectives = await db.prepare(`SELECT lo.id,lo.title FROM assignment_objectives ao
@@ -81,6 +103,9 @@ export async function createStudentSubmission(db: PlatformDatabase, context: Pla
       throw new Error(active ? "family_task_changed" : "family_task_not_found");
     }
   } catch (error) {
+    const concurrentRetry = await readTextRetry();
+    if (concurrentRetry) return concurrentRetry;
+    if (input.id && error instanceof Error && error.message.includes("submissions.id")) throw new Error("submission_id_conflict");
     if (input.familyTaskId && error instanceof Error && error.message.includes("submissions.tenant_id, submissions.family_task_id")) throw new Error("family_submission_pending");
     if (input.sequenceId && error instanceof Error && error.message.includes("submissions.tenant_id, submissions.sequence_id, submissions.sequence_stage")) throw new Error("sequence_submission_pending");
     throw error;

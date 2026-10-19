@@ -131,30 +131,35 @@ export async function submitDiagnostic(db: PlatformDatabase, context: PlatformCo
       (id,tenant_id,student_user_id,objective_id,source_type,source_id,title,detail,due_at,status,created_by)
       VALUES (?,?,?,?,?,?,?,?,?,'pending',?)
       ON CONFLICT(tenant_id,student_user_id,source_type,source_id)
-      DO UPDATE SET status='pending',due_at=excluded.due_at,completed_at=NULL`)
+      DO UPDATE SET objective_id=excluded.objective_id,title=excluded.title,detail=excluded.detail,status='pending',due_at=excluded.due_at,completed_at=NULL`)
       .bind(crypto.randomUUID(), context.tenantId, context.userId, item.objectiveId, "diagnostic", item.id, `错题复习：${item.prompt.slice(0, 60)}`, "重新作答诊断错题，答对后完成。", new Date().toISOString(), context.userId)
       .run();
   }
   return { attemptId, score, objectiveScores, incorrectCount: evidence.filter((item) => !item.isCorrect).length };
 }
 
-export async function answerReviewItem(db: PlatformDatabase, context: PlatformContext, input: { recommendationId: string; selectedOption: number }) {
+export async function answerReviewItem(db: PlatformDatabase, context: PlatformContext, input: { recommendationId: string; selectedOption: number; revision?: number }) {
   if (!Number.isInteger(input.selectedOption) || input.selectedOption < 0 || input.selectedOption > 3) throw new Error("invalid_selected_option");
-  const row = await db.prepare(`SELECT lr.id,lr.objective_id AS objectiveId,lr.due_at AS dueAt,di.correct_option AS correctOption
+  const row = await db.prepare(`SELECT lr.id,lr.objective_id AS objectiveId,lr.due_at AS dueAt,di.correct_option AS correctOption,
+      di.objective_id AS itemObjectiveId,di.revision,di.id AS itemId
     FROM learning_recommendations lr
     JOIN diagnostic_items di ON di.id=lr.source_id AND di.tenant_id=lr.tenant_id
     WHERE lr.id=? AND lr.tenant_id=? AND lr.student_user_id=? AND lr.source_type='diagnostic' AND lr.status='pending'`)
     .bind(input.recommendationId, context.tenantId, context.userId)
-    .first<{ id: string; objectiveId: string; dueAt: string | null; correctOption: number }>();
+    .first<{ id: string; objectiveId: string; dueAt: string | null; correctOption: number; itemObjectiveId: string; revision: number; itemId: string }>();
   if (!row) throw new Error("review_item_not_found");
   if (!isRecommendationDue(row.dueAt)) throw new Error("review_not_due");
+  if (!Number.isInteger(input.revision) || input.revision !== row.revision || row.objectiveId !== row.itemObjectiveId) throw new Error("review_item_changed");
   const correct = input.selectedOption === Number(row.correctOption);
   const nextDueAt = correct ? null : tomorrowIso();
-  await db.prepare(`UPDATE learning_recommendations
+  const updated = await db.prepare(`UPDATE learning_recommendations
     SET status=?,due_at=?,completed_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE NULL END
-    WHERE id=? AND tenant_id=? AND student_user_id=?`)
-    .bind(correct ? "completed" : "pending", nextDueAt, correct ? 1 : 0, row.id, context.tenantId, context.userId)
+    WHERE id=? AND tenant_id=? AND student_user_id=? AND status='pending' AND due_at IS ?
+      AND EXISTS (SELECT 1 FROM diagnostic_items di WHERE di.id=? AND di.tenant_id=learning_recommendations.tenant_id
+        AND di.revision=? AND di.objective_id=learning_recommendations.objective_id)`)
+    .bind(correct ? "completed" : "pending", nextDueAt, correct ? 1 : 0, row.id, context.tenantId, context.userId, row.dueAt, row.itemId, row.revision)
     .run();
+  if (!updated.meta.changes) throw new Error("review_item_changed");
   await updateMasteryEvidence(db, {
     tenantId: context.tenantId,
     studentUserId: context.userId,

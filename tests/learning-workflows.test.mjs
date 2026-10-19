@@ -17,6 +17,7 @@ const bundle = await build({
     export { POST as setup } from './app/api/v1/auth/setup/route';
     export { POST as actions } from './app/api/v1/workspace/actions/route';
     export { GET as workspace } from './app/api/v1/workspace/route';
+    export { GET as health } from './app/api/v1/health/route';
     export { POST as upload } from './app/api/v1/speech/submissions/route';
     export { POST as submit } from './app/api/v1/submissions/route';
     export { GET as audio } from './app/api/v1/submissions/[id]/audio/route';
@@ -154,6 +155,117 @@ async function fixture(t) {
   };
   return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups, feedback, feedbackAction, batches, batchAction, studentCase };
 }
+
+test("text retries preserve one original work and audit across concurrency, response loss and completed family review", async (t) => {
+  const f = await fixture(t);
+  const payload = { submissionId: crypto.randomUUID(), assignmentId: f.assignment.id, answer: "同一份文字作品只保存一次。" };
+  const saved = await f.act(f.actors.student, "submit_text", payload, 201);
+  const retries = await Promise.all(Array.from({ length: 3 }, () => f.act(f.actors.student, "submit_text", payload, 201)));
+  assert.ok(retries.every((item) => item.id === saved.id));
+  const count = async (sql, id = saved.id) => (await f.db.prepare(sql).bind(id).first()).count;
+  assert.equal(await count("SELECT COUNT(*) AS count FROM submissions WHERE id=?"), 1);
+  assert.equal(await count("SELECT COUNT(*) AS count FROM audit_logs WHERE action='submission.created' AND target_id=?"), 1);
+  await f.act(f.actors.student, "submit_text", { ...payload, answer: "改过的答案不能冒充原请求。" }, 409);
+  await f.act(f.actors.stranger, "submit_text", payload, 409);
+  await f.act(f.actors.student, "submit_text", { ...payload, submissionId: "invalid" }, 400);
+  const concurrent = { ...payload, submissionId: crypto.randomUUID() };
+  const firstSaves = await Promise.all(Array.from({ length: 3 }, () => f.act(f.actors.student, "submit_text", concurrent, 201)));
+  assert.ok(firstSaves.every((item) => item.id === concurrent.submissionId));
+  assert.equal(await count("SELECT COUNT(*) AS count FROM audit_logs WHERE action='submission.created' AND target_id=?", concurrent.submissionId), 1);
+  const task = await f.act(f.actors.guardian, "create_family_task", { studentUserId: f.ids.student, assignmentId: f.assignment.id, objectiveId: f.goals[0], title: "重试家庭作品", detail: "采访并提交自己的总结。" }, 201);
+  const family = { ...payload, submissionId: crypto.randomUUID(), familyTaskId: task.id };
+  const work = await f.act(f.actors.student, "submit_text", family, 201);
+  await f.act(f.actors.guardian, "confirm_family_submission", { submissionId: work.id, helpLevel: "independent" });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { objectiveScores: [{ objectiveId: f.goals[0], score: 0 }] }));
+  const retried = await f.act(f.actors.student, "submit_text", family, 201);
+  assert.equal(retried.id, work.id); assert.equal(retried.reviewStatus, "reviewed");
+  assert.equal(await count("SELECT COUNT(*) AS count FROM submissions WHERE family_task_id=?", task.id), 1);
+});
+
+test("review rejects stale versions and retargeted items without scoring; a fresh diagnostic restores the correct goal", async (t) => {
+  const f = await fixture(t);
+  const input = { objectiveId: f.goals[0], level: "REVIEW", prompt: "原题", options: ["米饭", "苹果", "香蕉", "梨"], correctOption: 0 };
+  const item = await f.act(f.actors.admin, "upsert_diagnostic_item", input, 201);
+  await f.act(f.actors.student, "submit_diagnostic", { level: input.level, answers: [{ itemId: item.id, selectedOption: 1, revision: 1 }] }, 201);
+  const original = (await f.workspace(f.actors.student)).recommendations.find((row) => row.source_id === item.id);
+  const count = async () => (await f.db.prepare("SELECT COUNT(*) AS count FROM mastery_snapshots WHERE student_user_id=?").bind(f.ids.student).first()).count;
+  const before = await count();
+  await f.act(f.actors.admin, "upsert_diagnostic_item", { ...input, id: item.id, objectiveId: f.goals[1], prompt: "新目标新题", correctOption: 1 });
+  await f.act(f.actors.student, "answer_review_item", { id: original.id, selectedOption: 0, revision: original.reviewRevision }, 409);
+  await f.act(f.actors.student, "answer_review_item", { id: original.id, selectedOption: 1, revision: 2 }, 409);
+  assert.equal(await count(), before);
+  const changed = await f.workspace(f.actors.student);
+  assert.ok(!changed.recommendations.some((row) => row.id === original.id));
+  assert.ok(!changed.learningPlan.some((row) => row.id === original.id));
+  await f.act(f.actors.student, "submit_diagnostic", { level: input.level, answers: [{ itemId: item.id, selectedOption: 0, revision: 2 }] }, 201);
+  const fresh = (await f.workspace(f.actors.student)).recommendations.find((row) => row.id === original.id);
+  assert.equal(fresh.objective_id, f.goals[1]); assert.equal(fresh.reviewRevision, 2);
+  await f.act(f.actors.admin, "upsert_diagnostic_item", { ...input, id: item.id, objectiveId: f.goals[1], prompt: "同目标改版", correctOption: 2 });
+  const afterDiagnostic = await count();
+  await f.act(f.actors.student, "answer_review_item", { id: fresh.id, selectedOption: 1, revision: fresh.reviewRevision }, 409);
+  assert.equal(await count(), afterDiagnostic);
+  const latest = (await f.workspace(f.actors.student)).recommendations.find((row) => row.id === original.id);
+  const result = await f.act(f.actors.student, "answer_review_item", { id: latest.id, selectedOption: 2, revision: latest.reviewRevision });
+  assert.equal(result.correct, true); assert.equal(result.status, "completed");
+  const mastery = (await f.workspace(f.actors.student)).mastery;
+  assert.equal(mastery.find((row) => row.objectiveId === f.goals[0]).evidenceCount, 1);
+  assert.equal(mastery.find((row) => row.objectiveId === f.goals[1]).evidenceCount, 2);
+});
+
+test("review rechecks the item version in the write when an edit follows the initial read", async (t) => {
+  const f = await fixture(t);
+  const input = { objectiveId: f.goals[0], level: "RACE", prompt: "并发复习题", options: ["甲", "乙", "丙", "丁"], correctOption: 0 };
+  const item = await f.act(f.actors.admin, "upsert_diagnostic_item", input, 201);
+  await f.act(f.actors.student, "submit_diagnostic", { level: input.level, answers: [{ itemId: item.id, selectedOption: 1, revision: 1 }] }, 201);
+  const review = (await f.workspace(f.actors.student)).recommendations.find((row) => row.source_id === item.id);
+  const prepare = f.db.prepare.bind(f.db); let edited = false;
+  f.db.prepare = (sql) => {
+    const statement = prepare(sql); const first = statement.first.bind(statement);
+    statement.first = async (...args) => {
+      const row = await first(...args);
+      if (!edited && row?.id === review.id && sql.includes("di.revision")) {
+        edited = true; await prepare("UPDATE diagnostic_items SET revision=revision+1,correct_option=1 WHERE id=?").bind(item.id).run();
+      }
+      return row;
+    };
+    return statement;
+  };
+  await f.act(f.actors.student, "answer_review_item", { id: review.id, selectedOption: 0, revision: 1 }, 409);
+  assert.ok(edited);
+  assert.equal((await prepare("SELECT evidence_count AS count FROM mastery_snapshots WHERE student_user_id=? ORDER BY id DESC LIMIT 1").bind(f.ids.student).first()).count, 1);
+  assert.equal((await prepare("SELECT status FROM learning_recommendations WHERE id=?").bind(review.id).first()).status, "pending");
+});
+
+test("missing mastery remains unknown while an explicitly evaluated zero remains zero", async (t) => {
+  const f = await fixture(t);
+  const parent = await f.workspace(f.actors.guardian);
+  assert.equal(parent.weeklyReport.masteryAverage, null); assert.deepEqual(parent.mastery, []);
+  const teacher = await f.workspace(f.actors.teacher);
+  assert.ok(teacher.enrollments.some((row) => row.studentUserId === f.ids.student && row.status === "active"));
+  assert.ok(!teacher.masteryMatrix.some((row) => row.studentUserId === f.ids.student));
+  const work = await f.text();
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { score: 0, objectiveScores: [{ objectiveId: f.goals[0], score: 0 }] }));
+  const measured = await f.workspace(f.actors.guardian);
+  assert.equal(measured.weeklyReport.masteryAverage, 0); assert.equal(measured.mastery[0].evidenceCount, 1);
+});
+
+test("saved service credentials do not advertise automatic speech scoring or external moderation", async (t) => {
+  const f = await fixture(t);
+  const settings = await f.workspace(f.actors.admin);
+  assert.equal(settings.services.speech.status, "manual"); assert.equal(settings.services.moderation.status, "rules");
+  await f.db.batch([
+    f.db.prepare("INSERT INTO app_settings(key,value) VALUES('speech_api_key','test-credential')"),
+    f.db.prepare("INSERT INTO app_settings(key,value) VALUES('moderation_api_key','test-credential')"),
+  ]);
+  const configured = await f.workspace(f.actors.admin);
+  assert.equal(configured.services.speech.status, "manual"); assert.equal(configured.services.moderation.status, "rules");
+  const health = await (await api.health()).json();
+  assert.equal(health.providers.speechScoring, "credentials_saved_manual_review");
+  assert.equal(health.providers.moderation, "credentials_saved_rules_only");
+  const recording = await f.upload(f.actors.student);
+  assert.equal(recording.reviewStatus, "human_review");
+  assert.equal((await f.db.prepare("SELECT score FROM submissions WHERE id=?").bind(recording.id).first()).score, null);
+});
 
 test("unconfigured and invalid AI suggestions leave grades and mastery unset; structured REST output is validated", async (t) => {
   const f = await fixture(t);
@@ -515,11 +627,11 @@ test("daily plans select different published tasks for equal totals, explain sco
     const data = await f.workspace(f.actors[actor]);
     for (const item of data.recommendations.filter((item) => item.source_type === "diagnostic" && item.status === "pending")) {
       if (actor === "student") {
-        const deferred = await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 1 });
+        const deferred = await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 1, revision: item.reviewRevision });
         assert.equal(deferred.correct, false);
         assert.ok(!(await f.workspace(f.actors[actor])).learningPlan.some((plan) => plan.id === item.id), "next-day review must not be selected before it opens");
-        await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 0 }, 409);
-      } else await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 0 });
+        await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 0, revision: item.reviewRevision }, 409);
+      } else await f.act(f.actors[actor], "answer_review_item", { id: item.id, selectedOption: 0, revision: item.reviewRevision });
     }
     await f.act(f.actors[actor], "submit_text", { assignmentId: f.assignment.id, answer: "已完成基础作品，下一步按计划练习。" }, 201);
   }

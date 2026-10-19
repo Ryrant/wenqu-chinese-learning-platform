@@ -28,9 +28,9 @@ export async function GET() {
       textGeneration: settings?.aiKey || settings?.openAiKey ? "configured" : "not_configured_template_available",
       openai: settings?.openAiKey ? "configured" : "not_configured_template_available",
       aiModel: settings?.aiModel ?? "gpt-5.6-luna",
-      speechScoring: settings?.speechKey ? "configured" : "not_configured_manual_review",
+      speechScoring: settings?.speechKey ? "credentials_saved_manual_review" : "not_configured_manual_review",
       retrieval: database ? "published_keyword_available" : "unavailable",
-      moderation: settings?.moderationKey ? "configured" : "rules_only",
+      moderation: settings?.moderationKey ? "credentials_saved_rules_only" : "rules_only",
     },
   }, { headers: { "cache-control": "no-store" } });
 }

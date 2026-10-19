@@ -35,6 +35,8 @@ export function Dashboard() {
   const [toast, setToast] = useState<Toast>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshError, setRefreshError] = useState("");
+  const [retryRefreshing, setRetryRefreshing] = useState(false);
   const [authMode, setAuthMode] = useState<"standard" | "local" | null>(null);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -81,6 +83,7 @@ export function Dashboard() {
       workspaceSelection.current = { requested: next.selectedStudent?.id, committed: next.selectedStudent?.id };
       setWorkspaceReceivedAt(performance.now());
       setData(next);
+      setRefreshError("");
       if (!next.user.roles.includes(role)) {
         const first = next.user.roles[0] ?? "student";
         setRole(first); setActiveNav(navigation[first][0]);
@@ -121,7 +124,9 @@ export function Dashboard() {
     const response = await fetch("/api/v1/workspace/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...payload }) });
     const result = await readJson<Record<string, unknown>>(response);
     if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "操作失败");
-    await refresh();
+    // 写入已成功，后续读取失败不能要求用户重新提交同一操作。
+    try { await refresh(); }
+    catch (reason) { setRefreshError(`操作已保存，工作区刷新失败：${reason instanceof Error ? reason.message : "请重试刷新"}。无需重复提交。`); }
     return result;
   }
 
@@ -253,6 +258,11 @@ export function Dashboard() {
         {noticesOpen && <div className="notice-drawer"><div className="panel-heading"><h3>通知</h3><button onClick={() => setNoticesOpen(false)}>关闭</button></div>{data.notifications.length ? data.notifications.map((item) => <button key={String(item.id)} className={item.read_at ? "read" : ""} onClick={async () => { await act("mark_notification", { id: item.id }); }}><strong>{String(item.title)}</strong><small>{String(item.detail)}</small></button>) : <p className="empty-state">暂无通知</p>}</div>}
       </header>
       <div className="content"><div className="truth-banner"><strong>✓ 已连接 D1 + R2</strong><span>所有数字来自当前租户数据；未配置的模型能力会明确标注，不展示伪造分数。</span></div>
+        {refreshError && <div className="panel" role="alert"><p>{refreshError}</p><button type="button" className="soft-button" disabled={retryRefreshing} onClick={async () => {
+          setRetryRefreshing(true);
+          try { await refresh(); } catch (reason) { setRefreshError(`工作区仍未刷新：${reason instanceof Error ? reason.message : "请稍后重试"}。之前成功保存的操作无需重复提交。`); }
+          finally { setRetryRefreshing(false); }
+        }}>{retryRefreshing ? "正在刷新…" : "重新读取工作区"}</button></div>}
         {role === "student" && <StudentView nav={activeNav} data={data} receivedAt={workspaceReceivedAt} act={act} refresh={refresh} notify={notify} navigate={setActiveNav}/>}
         {role === "teacher" && <TeacherView nav={activeNav} data={data} act={act} notify={notify} refresh={refresh} navigate={setActiveNav}/>}
         {role === "guardian" && <GuardianView nav={activeNav} data={data} act={act} notify={notify} selectStudent={async (studentId) => refresh(studentId)}/>}

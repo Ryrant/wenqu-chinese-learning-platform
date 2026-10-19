@@ -160,8 +160,8 @@ export function StudentTodayPlan({ data, act, notify, navigate, onStartTask }: L
   </article>;
 }
 
-export function StudentReviewCenter({ data, act, notify }: LoopProps) {
-  const [answers, setAnswers] = useState<Record<string, number>>({});
+export function StudentReviewCenter({ data, act, refresh, notify }: LoopProps & { refresh: () => Promise<void> }) {
+  const [answers, setAnswers] = useState<Record<string, { selectedOption: number; revision: number }>>({});
   const [busyId, setBusyId] = useState("");
   const reviews = data.recommendations.filter((item) =>
     item.source_type === "diagnostic"
@@ -170,13 +170,17 @@ export function StudentReviewCenter({ data, act, notify }: LoopProps) {
   );
 
   async function answer(id: string) {
-    if (!Number.isInteger(answers[id])) return notify("请选择答案", "选择一个选项后再提交。", "error");
+    const item = reviews.find((review) => review.id === id);
+    if (!item || !Number.isInteger(answers[id]?.selectedOption) || answers[id].revision !== Number(item.reviewRevision)) return notify("请选择答案", "请按当前题目选择一个选项后再提交。", "error");
     setBusyId(id);
     try {
-      const result = await act("answer_review_item", { id, selectedOption: answers[id] });
+      const result = await act("answer_review_item", { id, ...answers[id] });
       notify(result.correct ? "回答正确" : "需要再巩固", result.correct ? "这道错题已完成。" : "系统已安排次日再次复习。");
     } catch (reason) {
-      notify("复习提交失败", reason instanceof Error ? reason.message : "请重试", "error");
+      if (reason instanceof Error && reason.message === "review_item_changed") {
+        try { await refresh(); notify("题目已更新，本次未计分", "请按最新题目重新选择答案；题目所属目标改变时，请重新完成诊断。", "error"); }
+        catch (error) { notify("题目已更新，本次未计分", `重新读取失败：${error instanceof Error ? error.message : "请刷新页面后重试"}`, "error"); }
+      } else notify("复习提交失败", reason instanceof Error ? reason.message : "请重试", "error");
     } finally {
       setBusyId("");
     }
@@ -192,7 +196,7 @@ export function StudentReviewCenter({ data, act, notify }: LoopProps) {
         <small>{stringValue(item.objectiveTitle)} · {dueLabel(item.due_at)}</small>
         {item.reviewAbility === "listening" && !!item.reviewMediaId && <DiagnosticStimulus id={String(item.reviewMediaId)} kind="audio"/>}
         <div className="option-grid">{options.map((option, index) => <label key={option}>
-          <input type="radio" name={`review-${id}`} checked={answers[id] === index} onChange={() => setAnswers({ ...answers, [id]: index })}/>
+          <input type="radio" name={`review-${id}`} disabled={busyId === id} checked={answers[id]?.revision === Number(item.reviewRevision) && answers[id]?.selectedOption === index} onChange={() => setAnswers({ ...answers, [id]: { selectedOption: index, revision: Number(item.reviewRevision) } })}/>
           <span>{String.fromCharCode(65 + index)}. {option}</span>
         </label>)}</div>
         <button className="soft-button" type="button" disabled={busyId === id} onClick={() => answer(id)}>{busyId === id ? "提交中…" : "检查答案"}</button>
@@ -271,7 +275,7 @@ export function TeacherAssignmentCreator({ data, act, notify, focus }: LoopProps
 
 export function TeacherMasteryHeatmap({ data }: Pick<LoopProps, "data">) {
   const objectives = data.learningObjectives.filter((item) => item.status !== "inactive");
-  const students = [...new Map(data.masteryMatrix.map((item) => [String(item.studentUserId), stringValue(item.studentName)])).entries()];
+  const students = [...new Map(data.enrollments.filter((item) => item.status === "active").map((item) => [String(item.studentUserId), stringValue(item.studentName)])).entries()];
   const valueByCell = new Map(data.masteryMatrix.map((item) => [`${item.studentUserId}:${item.objectiveId}`, numberValue(item.mastery)]));
 
   return <article className="panel loop-panel">
@@ -376,7 +380,7 @@ export function GuardianWeeklyReport({ data }: Pick<LoopProps, "data">) {
       <article className="metric-card green"><span>提交作业</span><strong>{report.submittedCount}</strong><small>最近 7 天</small></article>
       <article className="metric-card blue"><span>教师确认</span><strong>{report.reviewedCount}</strong><small>仅计人工确认</small></article>
       <article className="metric-card orange"><span>确认均分</span><strong>{report.averageScore ?? "—"}</strong><small>无确认成绩则留空</small></article>
-      <article className="metric-card purple"><span>最新掌握度</span><strong>{report.masteryAverage}%</strong><small>{report.pendingRecommendations} 项待复习</small></article>
+      <article className="metric-card purple"><span>最新掌握度</span><strong>{report.masteryAverage === null ? "待评估" : `${report.masteryAverage}%`}</strong><small>{report.pendingRecommendations} 项待复习</small></article>
     </section>
   </section>;
 }

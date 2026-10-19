@@ -181,7 +181,7 @@ export function TeacherView({ nav, data: workspace, act, notify, refresh, naviga
   }, new Map<string, (typeof data.submissionReviews)[number]>());
   const published = data.assignments.filter((item) => item.status === "published");
   const completion = published.length ? Math.round(data.submissions.length / Math.max(published.length, 1) * 100) : 0;
-  const mastery = data.masteryMatrix.length ? Math.round(data.masteryMatrix.reduce((sum, item) => sum + numberValue(item.mastery) * 100, 0) / data.masteryMatrix.length) : 0;
+  const mastery = data.masteryMatrix.length ? Math.round(data.masteryMatrix.reduce((sum, item) => sum + numberValue(item.mastery) * 100, 0) / data.masteryMatrix.length) : null;
 
   async function generate(event: React.FormEvent) {
     event.preventDefault(); setBusy(true);
@@ -220,7 +220,7 @@ export function TeacherView({ nav, data: workspace, act, notify, refresh, naviga
 
   if (nav === "教学总览") return <section>
     <PageTitle eyebrow="最新学习证据 · 班级范围" title="教学总览" detail="按学生与目标读取最新掌握度，避免历史快照重复计入。"/>
-    <MetricGrid items={[["班级", data.classes.length, "当前教师可访问", "green"], ["已发布任务", published.length, "目标与量规可追溯", "blue"], ["待批阅", pending.length, "等待教师确认", "orange"], ["平均掌握度", `${mastery}%`, "仅最新快照", "purple"]]}/>
+    <MetricGrid items={[["班级", data.classes.length, "当前教师可访问", "green"], ["已发布任务", published.length, "目标与量规可追溯", "blue"], ["待批阅", pending.length, "等待教师确认", "orange"], ["平均掌握度", mastery === null ? "待评估" : `${mastery}%`, "仅最新快照", "purple"]]}/>
     <TeachingFollowups revision={data.generatedAt} view={followupView} onView={(view) => { navigationIntent.current.value++; setFollowupView(view); }} onOpen={openFollowup}/>
     <FamilyFeedbackPanel view="teaching" revision={data.generatedAt} notify={notify}/>
     <TrialBatches revision={data.generatedAt} notify={notify}/>
@@ -264,20 +264,20 @@ export function TeacherView({ nav, data: workspace, act, notify, refresh, naviga
     {generated && <article className="panel result-card"><span className="safe-chip">已保存 · 等待教师审核 · {generationMode(generated)}</span><h2>{stringValue(generated.title)}</h2><h4>教学目标</h4><ul>{jsonArray<string>(generated.objectives ?? generated.objectives_json).map((item) => <li key={item}>{item}</li>)}</ul><h4>教学环节</h4>{jsonArray<Record<string, unknown>>(generated.activities ?? generated.activities_json).map((item, index) => <div className="citation" key={String(item.title ?? index)}><strong>{stringValue(item.title)} · {numberValue(item.minutes)} 分钟</strong><p>{stringValue(item.detail)}</p></div>)}<h4>引用来源（只读）</h4>{jsonArray<Record<string, unknown>>(generated.citations ?? generated.citations_json).map((item) => <div className="citation" key={String(item.id)}><strong>{stringValue(item.title)}</strong><p>{stringValue(item.excerpt)}</p></div>)}</article>}
   </section>;
 
-  return <><PageTitle eyebrow="教学总览 · 实时数据" title="教学总览" detail={`${data.classes.length} 个班级，${published.length} 项任务正在进行。`}/><MetricGrid items={[["已发布任务", published.length, "来自 assignments 表", "green"], ["待批阅作业", pending.length, "低置信度全部转人工", "orange"], ["平均掌握度", mastery, "来自掌握度快照", "blue"], ["已保存教案", data.lessonPlans.length, "均处于教师审核状态", "purple"]]}/><section className="teacher-grid"><article className="panel"><div className="panel-heading"><div><span className="eyebrow">任务状态</span><h3>近期任务</h3></div></div>{data.assignments.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{stringValue(item.title)}</strong><small>{stringValue(item.className)} · {numberValue(item.submissionCount)} 份提交</small></div>{item.status === "published" ? <span className="status published">进行中</span> : <button className="soft-button" onClick={async () => { try { await act("publish_assignment", { id: item.id }); notify("任务已发布", "学生端现在可以提交。"); } catch (reason) { notify("发布失败", reason instanceof Error ? reason.message : "请重试", "error"); } }}>审核并发布</button>}</div>)}</article><article className="panel"><div className="panel-heading"><div><span className="eyebrow">班级证据</span><h3>平均掌握度</h3></div></div><div className="progress-content"><ProgressRing value={mastery} label="掌握度"/><div><strong>{completion}%</strong><p>每项指标都由当前工作区记录计算，不再使用固定演示数字。</p></div></div></article></section></>;
+  return <><PageTitle eyebrow="教学总览 · 实时数据" title="教学总览" detail={`${data.classes.length} 个班级，${published.length} 项任务正在进行。`}/><MetricGrid items={[["已发布任务", published.length, "来自 assignments 表", "green"], ["待批阅作业", pending.length, "低置信度全部转人工", "orange"], ["平均掌握度", mastery ?? "待评估", "来自掌握度快照", "blue"], ["已保存教案", data.lessonPlans.length, "均处于教师审核状态", "purple"]]}/><section className="teacher-grid"><article className="panel"><div className="panel-heading"><div><span className="eyebrow">任务状态</span><h3>近期任务</h3></div></div>{data.assignments.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{stringValue(item.title)}</strong><small>{stringValue(item.className)} · {numberValue(item.submissionCount)} 份提交</small></div>{item.status === "published" ? <span className="status published">进行中</span> : <button className="soft-button" onClick={async () => { try { await act("publish_assignment", { id: item.id }); notify("任务已发布", "学生端现在可以提交。"); } catch (reason) { notify("发布失败", reason instanceof Error ? reason.message : "请重试", "error"); } }}>审核并发布</button>}</div>)}</article><article className="panel"><div className="panel-heading"><div><span className="eyebrow">班级证据</span><h3>平均掌握度</h3></div></div><div className="progress-content"><ProgressRing value={mastery} label="掌握度"/><div><strong>{completion}%</strong><p>每项指标都由当前工作区记录计算，不再使用固定演示数字。</p></div></div></article></section></>;
 }
 
 export function GuardianView({ nav, data, act, notify, selectStudent }: GuardianProps) {
-  const average = data.mastery.length ? Math.round(data.mastery.reduce((sum, item) => sum + numberValue(item.mastery) * 100, 0) / data.mastery.length) : 0;
+  const average = data.mastery.length ? Math.round(data.mastery.reduce((sum, item) => sum + numberValue(item.mastery) * 100, 0) / data.mastery.length) : null;
   const reviewed = data.submissions.filter((item) => item.review_status === "reviewed");
   const childSwitch = <GuardianStudentSwitcher data={data} selectStudent={selectStudent}/>;
 
   if (nav === "成长报告") return <section>
     <PageTitle eyebrow="可追溯学情" title="成长报告" detail="周报只使用最近 7 天真实作业、教师确认成绩、最新掌握度和待复习项。" action={childSwitch}/>
     <GuardianWeeklyReport data={data}/>
-    <AbilityEvidenceProfile key={data.selectedStudent?.id} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
-    <StudentCaseTimeline key={data.selectedStudent?.id} view="guardian" studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
-    <FamilyPortfolio key={data.selectedStudent?.id} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
+    <AbilityEvidenceProfile key={`profile:${data.selectedStudent?.id}`} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
+    <StudentCaseTimeline key={`case:${data.selectedStudent?.id}`} view="guardian" studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
+    <FamilyPortfolio key={`portfolio:${data.selectedStudent?.id}`} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
     <SequenceReports sequences={(data.learningSequences ?? []).filter((item) => item.studentUserId === data.selectedStudent?.id)}/>
     <article className="panel reviewed-work-list"><h3>已审核作品</h3>{reviewed.length ? reviewed.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{readSequenceWork(item.sequence_snapshot_json)?.title ?? stringValue(item.assignmentTitle)}</strong><small>{localDate(item.reviewed_at ?? item.created_at)} · 学习目标：{readSequenceWork(item.sequence_snapshot_json)?.objectiveTitle ?? stringValue(item.objectiveTitles, "未关联目标")}</small><p>教师反馈：{textSummary(item.feedback, "教师暂未填写文字反馈")}</p></div><span className="status published">{numberValue(item.score)} 分</span></div>) : <p className="empty-state">当前孩子最近还没有教师确认的作品。</p>}</article>
   </section>;
@@ -291,7 +291,7 @@ export function GuardianView({ nav, data, act, notify, selectStudent }: Guardian
   return <section>
     <PageTitle eyebrow="孩子概览 · 当前状态" title={`${data.selectedStudent?.displayName ?? "孩子"}的学习概览`} detail="查看掌握度、薄弱目标、当前待办和最近教师反馈。" action={childSwitch}/>
     <section className="guardian-hero"><div><span className="eyebrow">本周重点</span><h2>先看证据，再给建议</h2><p>平台不展示虚构时长或提升百分比；建议来自真实作业审核、最新掌握度与待复习项。</p></div><ProgressRing value={average} label="平均掌握度"/></section>
-    <MetricGrid items={[["平均掌握度", `${average}%`, `${data.mastery.length} 个能力目标`, "green"], ["当前待办", pendingTasks, "任务与复习项", "orange"], ["教师已确认", reviewed.length, "真实批阅记录", "blue"], ["薄弱目标", data.mastery.filter((item) => numberValue(item.mastery) < 0.6).length, "掌握度低于 60%", "purple"]]}/>
+    <MetricGrid items={[["平均掌握度", average === null ? "待评估" : `${average}%`, `${data.mastery.length} 个能力目标`, "green"], ["当前待办", pendingTasks, "任务与复习项", "orange"], ["教师已确认", reviewed.length, "真实批阅记录", "blue"], ["薄弱目标", data.mastery.filter((item) => numberValue(item.mastery) < 0.6).length, "掌握度低于 60%", "purple"]]}/>
     <section className="guardian-overview-grid"><article className="panel"><h3>能力目标</h3>{data.mastery.map((item) => <div className="history-row" key={String(item.objectiveId ?? item.skill)}><div><strong>{stringValue(item.title)}</strong><small>{stringValue(item.skill)} · {numberValue(item.evidenceCount)} 条证据</small></div><span className={numberValue(item.mastery) < 0.6 ? "status warning" : "status published"}>{Math.round(numberValue(item.mastery) * 100)}%</span></div>)}</article><article className="panel"><h3>最近教师反馈</h3>{latestFeedback ? <div className="feedback-highlight"><strong>{stringValue(latestFeedback.assignmentTitle)}</strong><p>{stringValue(latestFeedback.feedback, "教师已确认成绩，暂未填写文字反馈。")}</p><small>{localDate(latestFeedback.reviewed_at ?? latestFeedback.created_at)} · {numberValue(latestFeedback.score)} 分</small></div> : <p className="empty-state">教师确认作业后，反馈会显示在这里。</p>}</article></section>
   </section>;
 }
