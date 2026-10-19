@@ -1,6 +1,7 @@
 "use client";
 import { TeacherLearningSequences, SequenceReports } from "./learning-sequences";
 import { TrialOverview } from "./trial-records";
+import { UnitReportIndex } from "./unit-report-links";
 import { readSequenceWork } from "./lib/learning-sequence-types";
 
 import { AbilityEvidenceProfile, TeacherAbilityProfiles } from "./diagnostic-evidence";
@@ -260,7 +261,7 @@ export function AdminView(props: AdminProps) {
   const { nav, data, act, notify } = props;
   if (nav === "内容中心") return <><LegacyAdminView {...props}/><AdminObjectiveLibrary data={data} act={act} notify={notify}/></>;
   if (nav === "成员管理") return <><LegacyAdminView {...props}/><section className="loop-section enrollment-section"><AdminEnrollmentEditor data={data} act={act} notify={notify}/></section></>;
-  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/></article></>;
+  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/><UnitReportIndex sequences={data.learningSequences ?? []}/></article></>;
   return <LegacyAdminView {...props}/>;
 }
 

@@ -24,6 +24,8 @@ const bundle = await build({
     export { POST as uploadMedia } from './app/api/v1/diagnostic-media/route';
     export { GET as media } from './app/api/v1/diagnostic-media/[id]/route';
     export { trialSummary } from './app/lib/trial-types';
+    export { GET as unitReport } from './app/api/v1/learning-sequences/[id]/report/route';
+    export { GET as internalReport } from './app/api/v1/trial-records/report/route';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
@@ -103,7 +105,15 @@ async function fixture(t) {
     const result = await response.json(); assert.equal(response.status, expectedStatus, JSON.stringify(result)); return result;
   };
   const readMedia = (cookie, id) => api.media(new Request(`http://127.0.0.1/api/v1/diagnostic-media/${id}`, { headers: cookie ? { cookie } : {} }), { params: Promise.resolve({ id }) });
-  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia };
+  const unitReport = async (cookie, id, status = 200) => {
+    const response = await api.unitReport(new Request(`http://127.0.0.1/api/v1/learning-sequences/${id}/report`, { headers: cookie ? { cookie } : {} }), { params: Promise.resolve({ id }) });
+    const html = await response.text(); assert.equal(response.status, status, html.slice(0, 1000)); return { response, html };
+  };
+  const internalReport = async (cookie, sequenceId, status = 200) => {
+    const response = await api.internalReport(new Request(`http://127.0.0.1/api/v1/trial-records/report${sequenceId === undefined ? "" : `?sequenceId=${encodeURIComponent(sequenceId)}`}`, { headers: cookie ? { cookie } : {} }));
+    const html = await response.text(); assert.equal(response.status, status, html.slice(0, 1000)); return { response, html };
+  };
+  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport };
 }
 
 test("unconfigured and invalid AI suggestions leave grades and mastery unset; structured REST output is validated", async (t) => {
@@ -1015,6 +1025,102 @@ test("teacher prompt counts stay optional, validate actual help, freeze across n
   await f.act(f.actors.guardian, "confirm_family_submission", { submissionId: familyWork.id, helpLevel: "prompted" });
   await f.act(f.actors.teacher, "confirm_submission_review", f.review(familyWork.id, { helpLevel: "unknown", promptCount: 0 }), 400);
   await f.act(f.actors.teacher, "confirm_submission_review", f.review(familyWork.id, { helpLevel: "unknown", promptCount: 3 }));
+});
+
+test("unit reports recheck all role and tenant permissions, exclude internal observations, and never write grades", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f);
+  await f.act(f.actors.teacher, "create_trial_record", { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "review", method: "platform", minutes: 12, note: "仅教师及机构可见的内部耗时依据" }, 201);
+  await f.act(f.actors.teacher, "create_trial_record", { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "no_improvement", note: "不进入学生报告的内部观察原因" }, 201);
+  const before = await f.db.prepare("SELECT COUNT(*) AS count,SUM(mastery) AS total FROM mastery_snapshots").first();
+  for (const actor of ["student", "guardian", "teacher", "admin"]) {
+    const { response, html } = await f.unitReport(f.actors[actor], flow.sequence.id);
+    assert.match(response.headers.get("content-type"), /text\/html/); assert.match(response.headers.get("cache-control"), /private, no-store/);
+    assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
+    for (const id of [flow.baseline.id, flow.practice.id, flow.transfer.id]) assert.ok(html.includes(id));
+    assert.ok(html.includes("未记录")); assert.ok(html.includes("尚未安排延后复测"));
+    assert.ok(!html.includes("仅教师及机构可见的内部耗时依据")); assert.ok(!html.includes("不进入学生报告的内部观察原因"));
+  }
+  for (const actor of ["stranger", "otherGuardian", "otherTeacher", "otherTenant"]) await f.unitReport(f.actors[actor], flow.sequence.id, 404);
+  await f.unitReport(null, flow.sequence.id, 401);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "跨角色教师", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  await f.unitReport(f.actors.otherTeacher, flow.sequence.id);
+  await f.internalReport(f.actors.otherTeacher, flow.sequence.id, 404);
+  assert.deepEqual(await f.db.prepare("SELECT COUNT(*) AS count,SUM(mastery) AS total FROM mastery_snapshots").first(), before);
+  for (const actor of ["teacher", "student", "guardian"]) {
+    await f.db.prepare("UPDATE users SET must_change_password=1 WHERE id=?").bind(f.ids[actor]).run();
+    const gated = await f.unitReport(f.actors[actor], flow.sequence.id, 403);
+    assert.ok(gated.html.includes("请先修改初始密码")); assert.ok(!gated.html.includes(flow.baseline.id));
+    if (actor === "teacher") assert.ok((await f.internalReport(f.actors[actor], undefined, 403)).html.includes("请先修改初始密码"));
+    await f.db.prepare("UPDATE users SET must_change_password=0 WHERE id=?").bind(f.ids[actor]).run();
+    await f.unitReport(f.actors[actor], flow.sequence.id);
+  }
+});
+
+test("unit reports preserve full histories, pending and unknown evidence, fixed retest references and next-round snapshots with escaped content", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f, true);
+  const extra = await flow.submit("transfer");
+  const untrusted = '<script>window.bad=1</script> & "原始反馈"';
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(extra.id, { score: 0, comment: untrusted, helpLevel: "independent", promptCount: 0, contextConfirmed: true }));
+  const availableAt = new Date(Date.now() + 60_000).toISOString();
+  await f.act(f.actors.teacher, "schedule_delayed_retest", { sequenceId: flow.sequence.id, referenceSubmissionId: flow.transfer.id, prompt: "隔时向新邻居介绍另一道菜。", context: "改为邻居和新菜品。", availableAt }, 201);
+  t.mock.method(Date, "now", () => Date.parse(availableAt));
+  const retest = await flow.submit("retest");
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(retest.id, { helpLevel: "unknown" }));
+  const next = await f.act(f.actors.teacher, "publish_teaching_next_step", { id: crypto.randomUUID(), sequenceId: flow.sequence.id, referenceSubmissionId: extra.id, kind: "collect_evidence", rationale: "缺少目标评价，保留本次原始作品。", remaining: "仍需观察独立新情境表现。", title: "后续单元证据", practicePrompt: "围绕同一目标练习。", transferPrompt: "向新同学介绍另一道菜。", transferContext: "改变交流对象与菜品。" }, 201);
+  await f.db.prepare("UPDATE learning_sequences SET title=?,baseline_snapshot_json=json_remove(json_set(baseline_snapshot_json,'$.rubric',json('null')),'$.promptCount') WHERE id=?").bind('<img src=x onerror="bad()">原始单元', flow.sequence.id).run();
+  await f.db.prepare(`WITH RECURSIVE copies(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM copies WHERE n<55)
+    INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,review_status,sequence_id,sequence_stage,sequence_snapshot_json)
+    SELECT 'report-history-'||n,s.tenant_id,s.assignment_id,s.student_user_id,'历史原文 '||n,'reviewed',s.sequence_id,'practice',s.sequence_snapshot_json
+    FROM submissions s,copies WHERE s.id=?`).bind(flow.practice.id).run();
+  let { html } = await f.unitReport(f.actors.guardian, flow.sequence.id);
+  assert.ok(html.includes("练习 56 份")); assert.ok(html.includes("report-history-55")); assert.ok(html.includes("历史原文 55"));
+  assert.ok(html.includes(`固定参照作品 ID：${flow.transfer.id}`)); assert.ok(html.includes(retest.id));
+  assert.ok(html.includes("历史量规未保留")); assert.ok(html.includes("暂不计算前后差值"));
+  assert.ok(html.includes("教师确认总分：0")); assert.ok(html.includes("提示次数：0"));
+  assert.ok(html.includes(`/api/v1/submissions/${extra.id}/audio`)); assert.ok(html.includes("PDF 不嵌入录音"));
+  assert.ok(!html.includes(untrusted)); assert.ok(html.includes("&lt;script&gt;window.bad=1&lt;/script&gt; &amp; &quot;原始反馈&quot;"));
+  assert.ok(!html.includes('<img src=x onerror=')); assert.equal((html.match(/<script\b/g) ?? []).length, 1);
+  const child = (await f.unitReport(f.actors.student, next.nextSequenceId)).html;
+  assert.ok(child.includes("本组来自")); assert.ok(child.includes(encodeURIComponent(flow.sequence.id))); assert.ok(child.includes("提示次数：0"));
+  const pending = await flow.submit("transfer");
+  await f.db.prepare("UPDATE assignments SET rubric_json='[]' WHERE id=?").bind(f.assignment.id).run();
+  const pendingEvidence = (await f.workspace(f.actors.guardian)).learningSequences.find((item) => item.id === flow.sequence.id).transfer.find((item) => item.id === pending.id);
+  assert.deepEqual(pendingEvidence.rubric, rubric, "pending sequence work retains its submitted criteria even before a review exists");
+  assert.deepEqual(pendingEvidence.dimensions, []);
+  html = (await f.unitReport(f.actors.guardian, flow.sequence.id)).html;
+  assert.ok(html.includes(pending.id)); assert.ok(html.includes("迁移作品待教师评价"));
+  assert.ok(html.includes("待批阅时不回退到旧成绩"));
+});
+
+test("internal printable reports separate personal workload, class observations, tenant scope and voided history", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f);
+  const first = { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "preparation", method: "platform", minutes: 0, note: "前任教师个人耗时私有标记" };
+  await f.act(f.actors.teacher, "create_trial_record", first, 201);
+  await f.act(f.actors.teacher, "create_trial_record", { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "withdrawn", note: "本班退出观察 <script>bad()</script>" }, 201);
+  for (const actor of ["student", "guardian", "otherGuardian"]) await f.internalReport(f.actors[actor], undefined, 403);
+  await f.internalReport(null, undefined, 401);
+  await f.internalReport(f.actors.otherTenant, flow.sequence.id, 404);
+  await f.internalReport(f.actors.teacher, "", 400);
+  const firstReport = (await f.internalReport(f.actors.teacher, flow.sequence.id)).html;
+  assert.ok(firstReport.includes("0 分钟")); assert.ok(firstReport.includes("未记录")); assert.ok(firstReport.includes("&lt;script&gt;bad()&lt;/script&gt;"));
+  await f.db.prepare("UPDATE classes SET teacher_user_id=? WHERE id=?").bind(f.ids.otherTeacher, f.classroom.id).run();
+  const replacement = (await f.internalReport(f.actors.otherTeacher, flow.sequence.id)).html;
+  assert.ok(!replacement.includes(first.note)); assert.ok(replacement.includes("本班退出观察"));
+  await f.internalReport(f.actors.teacher, flow.sequence.id, 404);
+  const second = { ...first, id: crypto.randomUUID(), kind: "review", minutes: 7, note: "新任教师个人耗时标记" };
+  await f.act(f.actors.otherTeacher, "create_trial_record", second, 201);
+  await f.act(f.actors.admin, "void_trial_record", { id: second.id, reason: "保留原始更正原因" });
+  const { response, html } = await f.internalReport(f.actors.admin);
+  assert.match(response.headers.get("cache-control"), /private, no-store/);
+  assert.ok(html.includes(first.note)); assert.ok(html.includes(second.note)); assert.ok(html.includes("已撤销")); assert.ok(html.includes("保留原始更正原因"));
+  assert.ok(html.includes("全部记录与撤销原因 · 3 条"));
+  const another = await f.act(f.actors.admin, "create_learning_sequence", { baselineSubmissionId: flow.baseline.id, objectiveId: f.goals[0], title: "另一任务组", practicePrompt: "组织理由。", transferPrompt: "向同学介绍另一道菜。", transferContext: "改变对象与菜品。" }, 201);
+  const empty = (await f.internalReport(f.actors.admin, another.id)).html;
+  assert.ok(empty.includes("当前范围尚无试用记录")); assert.ok(!empty.includes(first.note)); assert.ok(!empty.includes(second.note));
 });
 
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {

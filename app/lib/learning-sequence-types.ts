@@ -48,6 +48,7 @@ export function sameRubric(left: RubricDimension[] | null, right: RubricDimensio
     && left.every((item) => right.some((other) => item.name === other.name && item.weight === other.weight));
 }
 export function sequenceTaskId(id: string, stage: SequenceStage) { return `sequence:${id}:${stage}`; }
+export const unitReportUrl = (id: string) => `/api/v1/learning-sequences/${encodeURIComponent(id)}/report`;
 export function sequenceStages(sequence: LearningSequence): SequenceStage[] { return sequence.retestAvailableAt ? ["practice", "transfer", "retest"] : ["practice", "transfer"]; }
 export function sequenceStageReady(sequence: LearningSequence, stage: SequenceStage) {
   return stage === "practice" || (stage === "retest" ? sequence.retestOpen : sequence.practice.some((work) => work.reviewed));
@@ -58,6 +59,15 @@ export function nextSequenceStage(sequence: LearningSequence): SequenceStage | n
   return sequence.retestOpen && !sequence.retest.some((work) => work.reviewed) ? "retest" : null;
 }
 export function sequencePrompt(sequence: LearningSequence, stage: SequenceStage) { return stage === "practice" ? sequence.practicePrompt : stage === "transfer" ? sequence.transferPrompt : sequence.retestPrompt; }
+export function evidenceStatus(work: SequenceEvidence | undefined, objectiveId: string, label: string) {
+  if (!work) return `待${label}验证`;
+  if (!work.reviewed) return `${label}作品待教师评价`;
+  if (!work.contextConfirmed) return "已评价；新对象或情境尚未确认";
+  if (work.helpLevel === "unknown") return "已评价；独立完成程度尚未记录";
+  if (work.helpLevel !== "independent") return `新情境中仍使用了帮助，独立${label}待验证`;
+  if (!work.objectives.some((item) => item.id === objectiveId)) return "已有独立作品；目标表现仍待评价";
+  return "已记录新情境中的独立作品，具体表现见教师评价";
+}
 export function sequenceTime(value: string) {
   // SQLite CURRENT_TIMESTAMP 是 UTC；与复测的带时区时间统一显示，避免看起来在开放前提交。
   const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? value.replace(" ", "T") + "Z" : value;

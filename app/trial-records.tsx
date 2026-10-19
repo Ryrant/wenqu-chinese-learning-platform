@@ -51,7 +51,7 @@ function RecordList({ entries, controls }: { entries: TrialEntry[]; controls: Co
   </div>;
 }
 
-export function TrialOverview({ entries, sequences, controls }: { entries: TrialEntry[]; sequences: LearningSequence[]; controls?: Controls }) {
+export function TrialOverview({ entries, sequences, controls, sequenceId }: { entries: TrialEntry[]; sequences: LearningSequence[]; controls?: Controls; sequenceId?: string }) {
   const summary = trialSummary(entries, sequences.filter((item) => item.canPlanNext));
   return <section className={styles.overview}><h4>真实试用记录</h4>
     <p>耗时为教师自记。教师查看本人耗时及本班观察，管理员查看本机构记录。记录数不等于学生人数；撤销记录不计入汇总。</p>
@@ -62,6 +62,7 @@ export function TrialOverview({ entries, sequences, controls }: { entries: Trial
     <p>{summary.observations.map((item) => `${TRIAL_KIND_LABELS[item.kind]}：${item.count} 条`).join("；")}。</p>
     <p>已评价作品的提示次数：{summary.prompts.known} 份已记录，{summary.prompts.missing} 份未记录。同一作品重复关联只计一次。</p>
     <p>小规模试用用于发现问题；前后分数变化不能直接归因于平台。</p>
+    <p><a href={`/api/v1/trial-records/report${sequenceId ? `?sequenceId=${encodeURIComponent(sequenceId)}` : ""}`} target="_blank" rel="noopener">查看内部试用报告 / 打印</a></p>
     {controls && <details><summary>查看试用明细与撤销记录</summary><RecordList entries={entries} controls={controls}/></details>}
   </section>;
 }
@@ -77,7 +78,7 @@ export function TrialRecorder({ sequence, entries, act, notify }: { sequence: Le
   const [busy, setBusy] = useState(false);
   const works = [...new Map([sequence.baseline, ...sequence.practice, ...sequence.transfer, ...sequence.retest].map((work) => [work.id, work])).values()];
   const records = entries.filter((item) => item.sequenceId === sequence.id);
-  return <section className={styles.section}><TrialOverview entries={records} sequences={[sequence]}/>
+  return <section className={styles.section}><TrialOverview entries={records} sequences={[sequence]} sequenceId={sequence.id}/>
     <button type="button" className="soft-button" disabled={busy} onClick={() => setEditing(!editing)}>{editing ? "收起记录表单" : "新增试用记录"}</button>
     {editing && <form className="form-card" onSubmit={async (event) => {
       event.preventDefault(); if (busy) return; setBusy(true);

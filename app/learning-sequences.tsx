@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
-import { HELP_LEVEL_LABELS, TEACHING_DECISION_LABELS, sameRubric, SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, nextSequenceStage, sequencePrompt, sequenceTime, type LearningSequence, type SequenceEvidence, type SequenceSource } from "./lib/learning-sequence-types";
+import { HELP_LEVEL_LABELS, TEACHING_DECISION_LABELS, sameRubric, SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, nextSequenceStage, sequencePrompt, sequenceTime, evidenceStatus, type LearningSequence, type SequenceEvidence, type SequenceSource } from "./lib/learning-sequence-types";
 import { DiagnosticStimulus } from "./diagnostic-evidence";
 import { TeachingNextStepPlanner } from "./teaching-next-step";
 import { TrialRecorder } from "./trial-records";
+import { UnitReportLink } from "./unit-report-links";
 import type { TrialEntry } from "./lib/trial-types";
 import styles from "./learning-sequences.module.css";
 
@@ -25,16 +26,6 @@ export function WorkEvidence({ work, objectiveId }: { work: SequenceEvidence; ob
     <p>帮助程度：{HELP_LEVEL_LABELS[work.helpLevel]} · 提示次数：{work.promptCount ?? "未记录"}</p>{work.feedback && <p className={styles.copy}>教师反馈：{work.feedback}</p>}
     {!work.rubric && <small>历史量规未保留，不使用当前任务补造评价依据。</small>}
   </div>;
-}
-
-function evidenceStatus(work: SequenceEvidence | undefined, objectiveId: string, label: string) {
-  if (!work) return `待${label}验证`;
-  if (!work.reviewed) return `${label}作品待教师评价`;
-  if (!work.contextConfirmed) return "已评价；新对象或情境尚未确认";
-  if (work.helpLevel === "unknown") return "已评价；独立完成程度尚未记录";
-  if (work.helpLevel !== "independent") return `新情境中仍使用了帮助，独立${label}待验证`;
-  if (!work.objectives.some((item) => item.id === objectiveId)) return "已有独立作品；目标表现仍待评价";
-  return "已记录新情境中的独立作品，具体表现见教师评价";
 }
 
 function ScoreComparison({ before, after, labels, sequence }: { before?: SequenceEvidence; after?: SequenceEvidence; labels: [string, string]; sequence: LearningSequence }) {
@@ -85,6 +76,7 @@ export function SequenceReports({ sequences, onStartTask, scheduling, trialEntri
       const transfer = sequence.transfer[0];
       const reference = sequence.transfer.find((work) => work.id === sequence.retestReferenceId);
       return <details id={`learning-sequence-${sequence.id}`} className={`panel ${styles.report}`} key={sequence.id}><summary>{sequence.title} · {sequence.studentName} · {sequence.objectiveTitle}</summary>
+        <UnitReportLink sequenceId={sequence.id}/>
         {sequence.origin && <p>本组来自教师的“{TEACHING_DECISION_LABELS[sequence.origin.kind]}”安排：<a href={`#learning-sequence-${sequence.origin.sequenceId}`} onClick={() => openSequenceReport(sequence.origin!.sequenceId)}>{sequence.origin.title}</a>。初次作品采用该安排的依据作品。</p>}
         <p role="status">{evidenceStatus(transfer, sequence.objectiveId, "迁移")}</p><p className={styles.copy}>迁移情境变化：{sequence.transferContext}</p>
         {sequence.retestAvailableAt && <><p>复测开放：{sequenceTime(sequence.retestAvailableAt)} · {sequence.retestOpen ? "已开放" : "尚未开放"}</p><p className={styles.copy}>复测情境变化：{sequence.retestContext}</p><p role="status">{evidenceStatus(sequence.retest[0], sequence.objectiveId, "复测")}</p></>}

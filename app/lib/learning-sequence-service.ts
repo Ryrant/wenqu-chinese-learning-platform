@@ -56,7 +56,7 @@ function evidence(row: WorkRow): SequenceEvidence {
     objectives: scores.map((item) => ({ id: item.objectiveId, title: titles.find((goal) => goal.id === item.objectiveId)?.title ?? item.objectiveId, score: item.score })),
     dimensions: row.review_status === "reviewed" ? jsonValue(row.dimensionScoresJson, []) : [],
     // 旧普通作品没有保存量规时，不能用当前作业补造历史评价依据。
-    rubric: review?.rubric ?? family?.rubric ?? (diagnostic.version === 1 ? diagnostic.rubric ?? null : null),
+    rubric: review?.rubric ?? task?.rubric ?? family?.rubric ?? (diagnostic.version === 1 ? diagnostic.rubric ?? null : null),
     helpLevel: row.family_help_level === "prompted" || row.family_help_level === "assisted" ? row.family_help_level
       : review?.helpLevel ?? (row.family_help_level === "independent" ? "independent" : "unknown"),
     contextConfirmed: review?.contextConfirmed ?? false, promptCount: readPromptCount(review?.promptCount),
@@ -231,14 +231,15 @@ export async function assertSequenceTarget(db: PlatformDatabase, context: Platfo
     objectiveId: row.objective_id, objectiveTitle: row.objective_title, rubric: JSON.parse(row.rubric_json), medium: row.medium };
 }
 
-export async function readSequenceWorkspace(db: PlatformDatabase, context: PlatformContext, focusedStudentId: string | null) {
+export async function readSequenceWorkspace(db: PlatformDatabase, context: PlatformContext, focusedStudentId: string | null, onlySequenceId?: string) {
   const access = submissionAccessClause(context);
-  const filter = focusedStudentId ? " AND ls.student_user_id=?" : "";
+  const filter = (focusedStudentId ? " AND ls.student_user_id=?" : "")
+    + (onlySequenceId ? " AND (ls.id=? OR ls.id IN (SELECT d.sequence_id FROM learning_sequence_decisions d WHERE d.tenant_id=ls.tenant_id AND d.next_sequence_id=?))" : "");
   const rows = (await db.prepare(`SELECT ls.*,u.display_name AS studentName,c.teacher_user_id AS teacherUserId FROM learning_sequences ls
     JOIN submissions s ON s.id=ls.baseline_submission_id AND s.tenant_id=ls.tenant_id
     JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
     JOIN users u ON u.id=ls.student_user_id WHERE ls.tenant_id=? AND ${access.sql}${filter} ORDER BY ls.created_at DESC,ls.rowid DESC`)
-    .bind(context.tenantId, ...access.args, ...(focusedStudentId ? [focusedStudentId] : [])).all<SequenceRow & { teacherUserId: string }>()).results;
+    .bind(context.tenantId, ...access.args, ...(focusedStudentId ? [focusedStudentId] : []), ...(onlySequenceId ? [onlySequenceId, onlySequenceId] : [])).all<SequenceRow & { teacherUserId: string }>()).results;
   const ids = rows.map((item) => item.id);
   const works = ids.length ? await workRows(db, context, `s.sequence_id IN (${ids.map(() => "?").join(",")})`, ids) : [];
   const decisions = ids.length ? (await db.prepare(`SELECT d.*,ls.title AS nextTitle,u.display_name AS teacherName FROM learning_sequence_decisions d
@@ -261,7 +262,7 @@ export async function readSequenceWorkspace(db: PlatformDatabase, context: Platf
     transfer: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "transfer").map(evidence),
     retest: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "retest").map(evidence),
   }));
-  const sequenceSources = context.roles.some((role) => role === "admin" || role === "teacher")
+  const sequenceSources = !onlySequenceId && context.roles.some((role) => role === "admin" || role === "teacher")
     ? (await workRows(db, context, "s.review_status='reviewed' AND a.status='published' AND (?=1 OR c.teacher_user_id=?)", [context.roles.includes("admin") ? 1 : 0, context.userId])).map(source).filter((item) => item.work.objectives.length)
     : [];
   return { learningSequences, sequenceSources };
