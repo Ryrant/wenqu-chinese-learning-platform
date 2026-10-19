@@ -5,6 +5,8 @@ import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { HELP_LEVEL_LABELS, TEACHING_DECISION_LABELS, sameRubric, SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, nextSequenceStage, sequencePrompt, sequenceTime, type LearningSequence, type SequenceEvidence, type SequenceSource } from "./lib/learning-sequence-types";
 import { DiagnosticStimulus } from "./diagnostic-evidence";
 import { TeachingNextStepPlanner } from "./teaching-next-step";
+import { TrialRecorder } from "./trial-records";
+import type { TrialEntry } from "./lib/trial-types";
 import styles from "./learning-sequences.module.css";
 
 function openSequenceReport(id: string) {
@@ -20,7 +22,7 @@ export function WorkEvidence({ work, objectiveId }: { work: SequenceEvidence; ob
     {work.hasAudio ? <audio controls preload="metadata" src={`/api/v1/submissions/${encodeURIComponent(work.id)}/audio`} aria-label={`${work.title}原始录音`}/> : <p className={styles.copy}>{work.textAnswer}</p>}
     <p>目标评价：{goal ? `${goal.score}/100` : "未评价"} · 总分：{work.score === null ? "未评价" : work.score}</p>
     <ul>{(work.rubric ?? work.dimensions).map((item) => <li key={item.name}>{item.name}：{work.dimensions.find((dimension) => dimension.name === item.name)?.score ?? "未评价"}</li>)}</ul>
-    <p>帮助程度：{HELP_LEVEL_LABELS[work.helpLevel]}</p>{work.feedback && <p className={styles.copy}>教师反馈：{work.feedback}</p>}
+    <p>帮助程度：{HELP_LEVEL_LABELS[work.helpLevel]} · 提示次数：{work.promptCount ?? "未记录"}</p>{work.feedback && <p className={styles.copy}>教师反馈：{work.feedback}</p>}
     {!work.rubric && <small>历史量规未保留，不使用当前任务补造评价依据。</small>}
   </div>;
 }
@@ -76,7 +78,7 @@ function RetestScheduler({ sequence, act, notify }: { sequence: LearningSequence
   </div>;
 }
 
-export function SequenceReports({ sequences, onStartTask, scheduling }: { sequences: LearningSequence[]; onStartTask?: (id: string) => void; scheduling?: { act: Act; notify: Notify } }) {
+export function SequenceReports({ sequences, onStartTask, scheduling, trialEntries = [] }: { sequences: LearningSequence[]; onStartTask?: (id: string) => void; scheduling?: { act: Act; notify: Notify }; trialEntries?: TrialEntry[] }) {
   return <section className={styles.reports}><h3>迁移任务与学习证据对照</h3><p>查看初次困难、针对性练习和新情境中的表现；完成任务本身不代表能力提升。</p>
     {!sequences.length && <p className="empty-state">教师关联初次作品并发布练习与迁移任务后，证据会显示在这里。</p>}
     {sequences.map((sequence) => {
@@ -115,6 +117,7 @@ export function SequenceReports({ sequences, onStartTask, scheduling }: { sequen
           })}
           {scheduling && sequence.canPlanNext && <TeachingNextStepPlanner sequence={sequence} {...scheduling}/>}
         </section>
+        {scheduling && sequence.canPlanNext && <TrialRecorder sequence={sequence} entries={trialEntries} {...scheduling}/>}
       </details>;
     })}
   </section>;
@@ -159,11 +162,11 @@ function TeacherSequenceSources({ studentUserId, data, act, notify }: { studentU
 }
 
 export function TeacherLearningSequences({ data, act, notify }: { data: WorkspaceData; act: Act; notify: Notify }) {
-  const students = [...new Map(data.enrollments.filter((item) => item.status === "active").map((item) => [String(item.studentUserId), String(item.studentName)])).entries()];
+  const students = [...new Map([...data.enrollments.filter((item) => item.status === "active").map((item) => [String(item.studentUserId), String(item.studentName)] as const), ...(data.learningSequences ?? []).filter((item) => item.canPlanNext).map((item) => [item.studentUserId, item.studentName] as const)]).entries()];
   const [studentId, setStudentId] = useState(students[0]?.[0] ?? "");
   const [creating, setCreating] = useState(false);
   return <section className={styles.section}><article className="panel"><div className="panel-heading"><h3>关联初次、练习与迁移</h3><button className="soft-button" type="button" onClick={() => setCreating(!creating)}>{creating ? "关闭创建" : "新增练习与迁移任务"}</button></div>
     <label className={styles.selector}>查看学生<select value={studentId} onChange={(event) => setStudentId(event.target.value)}><option value="">请选择学生</option>{students.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
     {creating && studentId && <TeacherSequenceSources key={studentId} studentUserId={studentId} data={data} act={act} notify={notify}/>}
-  </article><SequenceReports sequences={(data.learningSequences ?? []).filter((item) => item.studentUserId === studentId)} scheduling={{ act, notify }}/></section>;
+  </article><SequenceReports sequences={(data.learningSequences ?? []).filter((item) => item.studentUserId === studentId)} scheduling={{ act, notify }} trialEntries={data.trialEntries}/></section>;
 }

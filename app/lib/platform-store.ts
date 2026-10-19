@@ -187,6 +187,8 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_sequence_decisions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sequence_id TEXT NOT NULL, reference_submission_id TEXT NOT NULL, reference_snapshot_json TEXT NOT NULL, kind TEXT NOT NULL, rationale TEXT NOT NULL, remaining TEXT NOT NULL, next_sequence_id TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_decision_reference_idx ON learning_sequence_decisions (tenant_id,sequence_id,reference_submission_id)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_decision_next_idx ON learning_sequence_decisions (tenant_id,next_sequence_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS learning_trial_records (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sequence_id TEXT NOT NULL, kind TEXT NOT NULL, method TEXT, minutes INTEGER, reference_submission_id TEXT, reference_title TEXT, note TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS trial_records_sequence_idx ON learning_trial_records (tenant_id,sequence_id,created_at)"),
   ]);
   for (const statement of [
     "ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT",
@@ -327,7 +329,7 @@ export function platformApiError(error: unknown) {
         ? 404
         : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
-          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict", "sequence_retest_required", "sequence_retest_not_open", "sequence_retest_already_scheduled", "sequence_decision_id_conflict", "sequence_decision_already_published"].includes(message) ? 409
+          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict", "sequence_retest_required", "sequence_retest_not_open", "sequence_retest_already_scheduled", "sequence_decision_id_conflict", "sequence_decision_already_published", "trial_record_id_conflict", "trial_record_already_voided"].includes(message) ? 409
           : message.startsWith("invalid_") ? 400
       : message === "authentication_config_missing"
           ? 500

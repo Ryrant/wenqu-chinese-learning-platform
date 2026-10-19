@@ -2,7 +2,7 @@ import { assertSubmissionReviewAccess, submissionAccessClause } from "./access-c
 import type { WorkDiagnosticSnapshot } from "./diagnostic-types";
 import { readFamilyWorkSnapshot } from "./family-task";
 import { validateRubric } from "./learning-loop";
-import { jsonValue, readReviewEvidence, readSequenceWork, SEQUENCE_STAGE_LABELS, TEACHING_DECISION_LABELS, type TeachingDecisionKind, type LearningSequence, type SequenceEvidence, type SequenceSource, type SequenceWorkSnapshot } from "./learning-sequence-types";
+import { jsonValue, readReviewEvidence, readPromptCount, readSequenceWork, SEQUENCE_STAGE_LABELS, TEACHING_DECISION_LABELS, type TeachingDecisionKind, type LearningSequence, type SequenceEvidence, type SequenceSource, type SequenceWorkSnapshot } from "./learning-sequence-types";
 import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 
@@ -59,8 +59,13 @@ function evidence(row: WorkRow): SequenceEvidence {
     rubric: review?.rubric ?? family?.rubric ?? (diagnostic.version === 1 ? diagnostic.rubric ?? null : null),
     helpLevel: row.family_help_level === "prompted" || row.family_help_level === "assisted" ? row.family_help_level
       : review?.helpLevel ?? (row.family_help_level === "independent" ? "independent" : "unknown"),
-    contextConfirmed: review?.contextConfirmed ?? false,
+    contextConfirmed: review?.contextConfirmed ?? false, promptCount: readPromptCount(review?.promptCount),
   };
+}
+
+function snapshotEvidence(value: string): SequenceEvidence {
+  const snapshot = JSON.parse(value) as SequenceEvidence;
+  return { ...snapshot, promptCount: readPromptCount(snapshot.promptCount) };
 }
 
 function source(row: WorkRow): SequenceSource {
@@ -244,12 +249,12 @@ export async function readSequenceWorkspace(db: PlatformDatabase, context: Platf
     id: row.id, studentUserId: row.student_user_id, studentName: row.studentName, assignmentId: row.assignment_id,
     objectiveId: row.objective_id, objectiveTitle: row.objective_title, title: row.title, practicePrompt: row.practice_prompt,
     transferPrompt: row.transfer_prompt, transferContext: row.transfer_context, rubric: JSON.parse(row.rubric_json), medium: row.medium,
-    baseline: JSON.parse(row.baseline_snapshot_json),
+    baseline: snapshotEvidence(row.baseline_snapshot_json),
     retestPrompt: row.retest_prompt, retestContext: row.retest_context, retestAvailableAt: row.retest_available_at, retestReferenceId: row.retest_reference_id,
     retestOpen: !!row.retest_available_at && Date.parse(row.retest_available_at) <= Date.now(),
     canScheduleRetest: context.roles.includes("admin") || (context.roles.includes("teacher") && row.teacherUserId === context.userId),
     canPlanNext: context.roles.includes("admin") || (context.roles.includes("teacher") && row.teacherUserId === context.userId),
-    decisions: decisions.filter((item) => item.sequence_id === row.id).map((item) => ({ id: item.id, reference: JSON.parse(item.reference_snapshot_json), kind: item.kind, rationale: item.rationale,
+    decisions: decisions.filter((item) => item.sequence_id === row.id).map((item) => ({ id: item.id, reference: snapshotEvidence(item.reference_snapshot_json), kind: item.kind, rationale: item.rationale,
       remaining: item.remaining, nextSequenceId: item.next_sequence_id, nextTitle: item.nextTitle, teacherName: item.teacherName, createdAt: item.created_at })),
     origin: (() => { const origin = decisions.find((item) => item.next_sequence_id === row.id); return origin ? { sequenceId: origin.sequence_id, title: rows.find((item) => item.id === origin.sequence_id)!.title, kind: origin.kind } : null; })(),
     practice: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "practice").map(evidence),

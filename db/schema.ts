@@ -191,6 +191,13 @@ export const learningSequenceDecisions = sqliteTable("learning_sequence_decision
   nextSequenceId: text("next_sequence_id").notNull(), createdBy: text("created_by").notNull(), createdAt: createdAt(),
 }, (table) => [uniqueIndex("sequence_decision_reference_idx").on(table.tenantId, table.sequenceId, table.referenceSubmissionId), uniqueIndex("sequence_decision_next_idx").on(table.tenantId, table.nextSequenceId)]);
 
+export const learningTrialRecords = sqliteTable("learning_trial_records", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), sequenceId: text("sequence_id").notNull(),
+  kind: text("kind").notNull(), method: text("method"), minutes: integer("minutes"), referenceSubmissionId: text("reference_submission_id"), referenceTitle: text("reference_title"),
+  note: text("note").notNull(), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+  voidedAt: text("voided_at"), voidedBy: text("voided_by"), voidReason: text("void_reason"),
+}, (table) => [index("trial_records_sequence_idx").on(table.tenantId, table.sequenceId, table.createdAt)]);
+
 export const masterySnapshots = sqliteTable("mastery_snapshots", {
   id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), studentUserId: text("student_user_id").notNull(), objectiveId: text("objective_id").notNull(), mastery: real("mastery").notNull(), evidenceCount: integer("evidence_count").notNull().default(0), measuredAt: createdAt(),
 }, (table) => [index("mastery_student_idx").on(table.tenantId, table.studentUserId)]);

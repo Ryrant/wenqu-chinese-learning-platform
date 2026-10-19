@@ -1,4 +1,5 @@
 import type { LearningSequence, SequenceSource } from "./learning-sequence-types";
+import type { TrialEntry } from "./trial-types";
 
 export type Role = "student" | "teacher" | "guardian" | "admin";
 export type Row = Record<string, unknown>;
@@ -33,6 +34,7 @@ export type WorkspaceData = {
   lessonPlans: Row[]; notifications: Row[]; consents: Row[]; audits: Row[]; invitations: Row[]; members: MemberRow[]; guardianLinks: GuardianLinkRow[];
   learningObjectives: Row[]; diagnosticItems: Row[]; diagnosticSummary: Row | null; recommendations: Row[]; learningPlan: Row[];
   learningSequences: LearningSequence[]; sequenceSources: SequenceSource[];
+  trialEntries: TrialEntry[];
   availableStudents: Array<{ id: string; displayName: string }>; selectedStudent: { id: string; displayName: string } | null;
   weeklyReport: { submittedCount: number; reviewedCount: number; averageScore: number | null; masteryAverage: number; pendingRecommendations: number };
   masteryMatrix: Row[]; qualityMetrics: QualityMetrics | null; enrollments: Row[];

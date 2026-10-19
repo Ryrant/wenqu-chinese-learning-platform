@@ -5,7 +5,7 @@ import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 import { searchPublishedKnowledge } from "./retrieval";
 import { readFamilyWorkSnapshot } from "./family-task";
-import { HELP_LEVEL_LABELS, jsonValue, readSequenceWork, type HelpLevel, type ReviewEvidence } from "./learning-sequence-types";
+import { HELP_LEVEL_LABELS, jsonValue, readPromptCount, readSequenceWork, type HelpLevel, type ReviewEvidence } from "./learning-sequence-types";
 import type { WorkDiagnosticSnapshot } from "./diagnostic-types";
 
 export type ObjectiveReviewScore = { objectiveId: string; score: number };
@@ -82,16 +82,16 @@ export async function suggestTextReview(db: PlatformDatabase, context: PlatformC
   return { submissionId, ...suggestion };
 }
 
-export async function confirmSubmissionReview(db: PlatformDatabase, context: PlatformContext, input: { submissionId: string; score: number; comment: string; objectiveScores?: unknown; dimensionScores?: unknown; helpLevel?: unknown; contextConfirmed?: unknown }): Promise<ConfirmedReview> {
+export async function confirmSubmissionReview(db: PlatformDatabase, context: PlatformContext, input: { submissionId: string; score: number; comment: string; objectiveScores?: unknown; dimensionScores?: unknown; helpLevel?: unknown; contextConfirmed?: unknown; promptCount?: unknown }): Promise<ConfirmedReview> {
   await assertSubmissionReviewAccess(db, context, input.submissionId);
   if (typeof input.score !== "number" || !Number.isFinite(input.score) || input.score < 0 || input.score > 100) throw new Error("invalid_review_score");
   const score = input.score;
   const comment = input.comment.slice(0, 2000);
   const submission = await db.prepare(`SELECT s.student_user_id AS studentUserId,s.review_status AS reviewStatus,
-      s.family_task_id AS familyTaskId,s.family_confirmed_at AS familyConfirmedAt,a.rubric_json AS rubricJson,s.family_snapshot_json AS familySnapshotJson,s.sequence_snapshot_json AS sequenceSnapshotJson,s.diagnostic_snapshot_json AS diagnosticSnapshotJson
+      s.family_task_id AS familyTaskId,s.family_confirmed_at AS familyConfirmedAt,s.family_help_level AS familyHelpLevel,a.rubric_json AS rubricJson,s.family_snapshot_json AS familySnapshotJson,s.sequence_snapshot_json AS sequenceSnapshotJson,s.diagnostic_snapshot_json AS diagnosticSnapshotJson
     FROM submissions s JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id WHERE s.id=? AND s.tenant_id=?`)
     .bind(input.submissionId, context.tenantId)
-    .first<{ studentUserId: string; reviewStatus: string; familyTaskId: string | null; familyConfirmedAt: string | null; rubricJson: string; familySnapshotJson: string; sequenceSnapshotJson: string; diagnosticSnapshotJson: string }>();
+    .first<{ studentUserId: string; reviewStatus: string; familyTaskId: string | null; familyConfirmedAt: string | null; familyHelpLevel: string | null; rubricJson: string; familySnapshotJson: string; sequenceSnapshotJson: string; diagnosticSnapshotJson: string }>();
   if (!submission) throw new Error("submission_not_found");
   if (submission.reviewStatus === "reviewed") throw new Error("submission_already_reviewed");
   if (submission.familyTaskId && !submission.familyConfirmedAt) throw new Error("family_confirmation_required");
@@ -112,7 +112,11 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
   const dimensionScores = scoredItems(input.dimensionScores, "name", rubric.map((item) => item.name)) as DimensionReviewScore[];
   if ((sequence && input.helpLevel === undefined) || (input.helpLevel !== undefined && (typeof input.helpLevel !== "string" || !Object.hasOwn(HELP_LEVEL_LABELS, input.helpLevel)))) throw new Error("invalid_review_help_level");
   if (input.contextConfirmed !== undefined && typeof input.contextConfirmed !== "boolean") throw new Error("invalid_review_context");
-  const reviewEvidence: ReviewEvidence = { version: 1, rubric, objectives, helpLevel: input.helpLevel as HelpLevel ?? "unknown", contextConfirmed: (sequence?.stage === "transfer" || sequence?.stage === "retest") && input.contextConfirmed === true };
+  const promptCount = readPromptCount(input.promptCount);
+  if (input.promptCount != null && promptCount === null) throw new Error("invalid_review_prompt_count");
+  if ((input.helpLevel === "independent" && promptCount !== null && promptCount > 0)
+    || ((input.helpLevel === "prompted" || submission.familyHelpLevel === "prompted") && promptCount === 0)) throw new Error("invalid_review_prompt_observation");
+  const reviewEvidence: ReviewEvidence = { version: 1, rubric, objectives, helpLevel: input.helpLevel as HelpLevel ?? "unknown", promptCount, contextConfirmed: (sequence?.stage === "transfer" || sequence?.stage === "retest") && input.contextConfirmed === true };
   try {
     await db.batch([
       db.prepare(`INSERT INTO submission_review_confirmations

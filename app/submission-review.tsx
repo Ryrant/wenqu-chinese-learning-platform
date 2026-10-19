@@ -11,7 +11,7 @@ import { HELP_LEVEL_LABELS, readSequenceWork, sequenceTime, type HelpLevel } fro
 import { WorkEvidence } from "./learning-sequences";
 import sequenceStyles from "./learning-sequences.module.css";
 
-export type ReviewDraft = { score: string; comment: string; objectiveScores: Record<string, string>; dimensionScores: Record<string, string>; helpLevel?: HelpLevel | ""; contextConfirmed?: boolean };
+export type ReviewDraft = { score: string; comment: string; objectiveScores: Record<string, string>; dimensionScores: Record<string, string>; helpLevel?: HelpLevel | ""; contextConfirmed?: boolean; promptCount?: string };
 
 function scoreMap(value: unknown, key: "objectiveId" | "name") {
   const items = JSON.parse(typeof value === "string" ? value : "[]") as Array<Record<string, string | number>>;
@@ -64,9 +64,12 @@ export function SubmissionReview({ submission, review, data, savedDraft, setDraf
         const value = draft.dimensionScores[item.name];
         return value?.trim() ? [{ name: item.name, score: Number(value) }] : [];
       });
-      await act("confirm_submission_review", { id, score: Number(draft.score), comment: draft.comment, objectiveScores, dimensionScores, helpLevel: draft.helpLevel || "unknown", contextConfirmed: draft.contextConfirmed ?? false });
+      await act("confirm_submission_review", { id, score: Number(draft.score), comment: draft.comment, objectiveScores, dimensionScores, helpLevel: draft.helpLevel || "unknown", contextConfirmed: draft.contextConfirmed ?? false, promptCount: draft.promptCount?.trim() ? Number(draft.promptCount) : null });
       onReviewed(); notify("评分已保存", "仅明确评价的目标已更新掌握度。");
-    } catch (reason) { notify("评分失败", reason instanceof Error ? reason.message : "请重试", "error"); }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : "请重试";
+      notify("评分失败", message === "invalid_review_prompt_count" ? "提示次数需为 0 到 1000 的整数，未核对时请留空。" : message === "invalid_review_prompt_observation" ? "提示次数与已记录的帮助程度不一致，请核对后再保存；输入已保留。" : message, "error");
+    }
     finally { setBusy(false); }
   }
 
@@ -87,6 +90,7 @@ export function SubmissionReview({ submission, review, data, savedDraft, setDraf
       <label>给学生的反馈<textarea value={draft.comment} disabled={busy} onChange={(event) => setDraft({ ...draft, comment: event.target.value })} placeholder="说明优点、改进点与下一步建议" maxLength={2000} required/></label>
       <fieldset className={sequenceStyles.observations} disabled={busy}><legend>完成条件观察</legend><label>教师观察到的帮助程度<select value={draft.helpLevel ?? (sequence ? "" : "unknown")} required={!!sequence} onChange={(event) => setDraft({ ...draft, helpLevel: event.target.value as HelpLevel })}>{sequence && <option value="">请选择实际情况</option>}{Object.entries(HELP_LEVEL_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       {(sequence?.stage === "transfer" || sequence?.stage === "retest") && <label className={sequenceStyles.check}><input type="checkbox" checked={draft.contextConfirmed ?? false} onChange={(event) => setDraft({ ...draft, contextConfirmed: event.target.checked })}/>已核对本次对象或情境与{sequence.stage === "retest" ? "参照迁移作品" : "初次任务"}不同；未勾选时保留“尚待验证”。</label>}</fieldset>
+      <label>提示次数（经教师核对，可留空）<input type="number" min="0" max="1000" step="1" disabled={busy} value={draft.promptCount ?? ""} onChange={(event) => setDraft({ ...draft, promptCount: event.target.value })}/><small>仅记录针对内容提供的提示，不含任务说明。空白为未记录，0 表示已核对没有提示。</small></label>
       {waitingForFamily && <p role="status">确认交流与帮助情况后，可以保存教师评价；同伴或教师替代交流可由本班教师见证确认。</p>}
       <button className="primary-button" disabled={busy || waitingForFamily}>{busy ? "处理中…" : "教师确认并保存"}</button>
     </form>

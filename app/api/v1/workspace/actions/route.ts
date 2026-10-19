@@ -26,6 +26,7 @@ import { createStudentSubmission } from "../../../../lib/submission-service";
 import { assertDiagnosticMedia } from "../../../../lib/diagnostic-media";
 import { suggestIntervention } from "../../../../lib/intervention-support";
 import { createLearningSequence, scheduleDelayedRetest, publishTeachingNextStep } from "../../../../lib/learning-sequence-service";
+import { createTrialRecord, voidTrialRecord } from "../../../../lib/trial-service";
 
 type ActionBody = { action?: string; [key: string]: unknown };
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", update_lesson_plan: "teacher", archive_lesson_plan: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
       create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian", confirm_family_submission: "guardian",
-      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher", create_learning_sequence: "teacher", schedule_delayed_retest: "teacher", publish_teaching_next_step: "teacher",
+      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher", create_learning_sequence: "teacher", schedule_delayed_retest: "teacher", publish_teaching_next_step: "teacher", create_trial_record: "teacher", void_trial_record: "teacher",
       create_invitation: "admin", review_content: "admin", reprocess_content: "admin", archive_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
       submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
     };
@@ -348,6 +349,20 @@ export async function POST(request: Request) {
       return Response.json(result);
     }
 
+    if (action === "create_trial_record") {
+      return Response.json(await createTrialRecord(db, context, {
+        id: requireText(body.id, "trial_record_id", 120), sequenceId: requireText(body.sequenceId, "sequence_id", 120),
+        kind: requireText(body.kind, "trial_kind", 40), method: body.method, minutes: body.minutes,
+        referenceSubmissionId: text(body.referenceSubmissionId, 120) || null, note: requireText(body.note, "trial_note", 2000),
+      }), { status: 201 });
+    }
+
+    if (action === "void_trial_record") {
+      return Response.json(await voidTrialRecord(db, context, {
+        id: requireText(body.id, "trial_record_id", 120), reason: requireText(body.reason, "trial_void_reason", 1000),
+      }));
+    }
+
     if (action === "publish_teaching_next_step") {
       const result = await publishTeachingNextStep(db, context, {
         id: requireText(body.id, "teaching_decision_id", 120), sequenceId: requireText(body.sequenceId, "sequence_id", 120),
@@ -382,7 +397,7 @@ export async function POST(request: Request) {
       const id = requireText(body.id, "submission_id");
       const score = typeof body.score === "number" ? body.score : Number.NaN;
       if (action === "review_submission") await assertSubmissionReviewAccess(db, context, id);
-      const result = await confirmSubmissionReview(db, context, { submissionId: id, score, comment: text(body.comment, 2000), objectiveScores: body.objectiveScores, dimensionScores: body.dimensionScores, helpLevel: body.helpLevel, contextConfirmed: body.contextConfirmed });
+      const result = await confirmSubmissionReview(db, context, { submissionId: id, score, comment: text(body.comment, 2000), objectiveScores: body.objectiveScores, dimensionScores: body.dimensionScores, helpLevel: body.helpLevel, contextConfirmed: body.contextConfirmed, promptCount: body.promptCount });
       await audit(db, tenantId, userId, "submission.reviewed", "submission", id, { score });
       return Response.json({ ...result, id, reviewStatus: "reviewed" });
     }

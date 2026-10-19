@@ -23,6 +23,7 @@ const bundle = await build({
     export { GET as profile } from './app/api/v1/ability-profile/route';
     export { POST as uploadMedia } from './app/api/v1/diagnostic-media/route';
     export { GET as media } from './app/api/v1/diagnostic-media/[id]/route';
+    export { trialSummary } from './app/lib/trial-types';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
@@ -900,6 +901,122 @@ test("teacher-confirmed next rounds retain retest or incomplete transfer evidenc
   }
 });
 
+test("trial records retain actual workload and failure observations without changing grades, with idempotent and atomic writes", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f);
+  const before = await f.db.prepare("SELECT COUNT(*) AS count,SUM(mastery) AS total FROM mastery_snapshots").first();
+  const input = { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "preparation", method: "platform", minutes: 0, referenceSubmissionId: flow.baseline.id, note: "本次复用已完成备课，实际新增备课为零分钟。" };
+  const save = (extra = {}, status = 201) => f.act(f.actors.teacher, "create_trial_record", { ...input, ...extra }, status);
+  for (const extra of [{ id: "bad-id" }, { kind: "improved" }, { method: "automatic" }, { minutes: null }, { minutes: "0" }, { minutes: -1 }, { minutes: 1.5 }, { minutes: 1441 }, { note: " " }]) await save(extra, 400);
+  const unrelated = await f.text();
+  await save({ referenceSubmissionId: unrelated.id }, 400);
+  const another = await reviewedTransfer(f);
+  await save({ referenceSubmissionId: another.transfer.id }, 400);
+  await Promise.all([save(), save()]); await save();
+  await save({ minutes: 12 }, 409);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='trial_record.created' AND target_id=?").bind(input.id).first()).count, 1);
+  for (const kind of ["not_completed", "withdrawn", "no_improvement"]) {
+    await save({ id: crypto.randomUUID(), kind, method: null, minutes: null, referenceSubmissionId: null, note: `实际观察：${kind}，尚需了解具体原因。` });
+    await save({ id: crypto.randomUUID(), kind, method: null, minutes: 0 }, 400);
+  }
+  await f.db.prepare("UPDATE assignments SET title='后来改名' WHERE id=?").bind(f.assignment.id).run();
+  const records = (await f.workspace(f.actors.teacher)).trialEntries;
+  const stored = records.find((item) => item.id === input.id);
+  assert.equal(stored.minutes, 0); assert.equal(stored.referenceTitle, "介绍一道家常菜"); assert.equal(stored.note, input.note);
+  assert.equal(records.length, 4);
+  const summary = api.trialSummary(records, []);
+  assert.deepEqual(summary.workload.find((item) => item.kind === "preparation" && item.method === "platform"), { kind: "preparation", method: "platform", count: 1, minutes: 0 });
+  assert.equal(summary.workload.find((item) => item.method === "previous").minutes, null);
+  assert.deepEqual(summary.observations.map((item) => item.count), [1, 1, 1]);
+  // 另一完整任务组产生三份评分；试用记录本身不增加成绩证据。
+  const after = await f.db.prepare("SELECT COUNT(*) AS count,SUM(mastery) AS total FROM mastery_snapshots").first();
+  assert.equal(after.count, before.count + 3);
+  await f.db.prepare("CREATE TRIGGER fail_trial_audit BEFORE INSERT ON audit_logs WHEN NEW.action='trial_record.created' BEGIN SELECT RAISE(ABORT,'trial_audit_unavailable'); END").run();
+  const failedId = crypto.randomUUID();
+  await save({ id: failedId }, 500);
+  assert.equal(await f.db.prepare("SELECT id FROM learning_trial_records WHERE id=?").bind(failedId).first(), null);
+});
+
+test("trial privacy uses teaching authority independently of guardian roles and retains access for withdrawal documentation", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f);
+  const input = { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "review", method: "platform", minutes: 8, note: "教师本人实记批阅用时。" };
+  await f.act(f.actors.teacher, "create_trial_record", input, 201);
+  const observation = { ...input, id: crypto.randomUUID(), kind: "not_completed", method: null, minutes: null, note: "无法完成：需要更简短的任务说明。" };
+  await f.act(f.actors.teacher, "create_trial_record", observation, 201);
+  for (const actor of ["student", "guardian", "otherTeacher", "otherGuardian"]) {
+    assert.deepEqual((await f.workspace(f.actors[actor])).trialEntries, []);
+    await f.act(f.actors[actor], "create_trial_record", { ...input, id: crypto.randomUUID() }, 403);
+    await f.act(f.actors[actor], "void_trial_record", { id: input.id, reason: "越权撤销" }, 403);
+  }
+  await f.act(f.actors.otherTenant, "create_trial_record", { ...input, id: crypto.randomUUID() }, 404);
+  await f.act(f.actors.otherTenant, "void_trial_record", { id: input.id, reason: "跨租户" }, 404);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "跨角色教师", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  assert.ok((await f.workspace(f.actors.otherTeacher)).learningSequences.some((item) => item.id === flow.sequence.id));
+  assert.deepEqual((await f.workspace(f.actors.otherTeacher)).trialEntries, []);
+  await f.act(f.actors.otherTeacher, "create_trial_record", { ...input, id: crypto.randomUUID() }, 403);
+  // 更换任课教师后，新教师只能读班级观察，不能读前任教师个人耗时，也不能撤销其记录。
+  await f.db.prepare("UPDATE classes SET teacher_user_id=? WHERE id=?").bind(f.ids.otherTeacher, f.classroom.id).run();
+  const replacement = (await f.workspace(f.actors.otherTeacher)).trialEntries;
+  assert.deepEqual(replacement.map((item) => item.id), [observation.id]); assert.equal(replacement[0].canVoid, false);
+  await f.act(f.actors.otherTeacher, "void_trial_record", { id: observation.id, reason: "不是本人记录" }, 403);
+  await f.act(f.actors.teacher, "void_trial_record", { id: input.id, reason: "已失去班级权限" }, 403);
+  assert.equal((await f.workspace(f.actors.admin)).trialEntries.length, 2);
+  await f.db.prepare("UPDATE classes SET teacher_user_id=? WHERE id=?").bind(f.ids.teacher, f.classroom.id).run();
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: f.classroom.id, studentUserIds: [f.ids.stranger] });
+  await f.act(f.actors.teacher, "create_trial_record", { ...observation, id: crypto.randomUUID(), kind: "withdrawn", note: "学生离班后补记退出原因。" }, 201);
+  assert.ok((await f.workspace(f.actors.teacher)).learningSequences.some((item) => item.id === flow.sequence.id));
+});
+
+test("voided trial records keep reasons, exclude summaries, and do not duplicate audit events on retries", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f);
+  const input = { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "ai_revision", method: "previous", minutes: 12, note: "记录方式填错，需保留更正过程。" };
+  await f.act(f.actors.teacher, "create_trial_record", input, 201);
+  const voided = { id: input.id, reason: "工作方式应为平台辅助；撤销后另记。" };
+  await f.act(f.actors.teacher, "void_trial_record", { ...voided, reason: " " }, 400);
+  await Promise.all([f.act(f.actors.teacher, "void_trial_record", voided), f.act(f.actors.teacher, "void_trial_record", voided)]);
+  await f.act(f.actors.teacher, "void_trial_record", voided);
+  await f.act(f.actors.admin, "void_trial_record", { ...voided, reason: "不得覆盖原撤销原因" }, 409);
+  const entries = (await f.workspace(f.actors.admin)).trialEntries;
+  assert.equal(entries.length, 1); assert.ok(entries[0].voidedAt); assert.equal(entries[0].voidReason, voided.reason); assert.equal(entries[0].canVoid, false);
+  assert.ok(api.trialSummary(entries, []).workload.every((item) => item.count === 0 && item.minutes === null));
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='trial_record.voided' AND target_id=?").bind(input.id).first()).count, 1);
+});
+
+test("teacher prompt counts stay optional, validate actual help, freeze across next rounds and remain visible in text and audio evidence", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f);
+  const work = await flow.submit("transfer");
+  for (const promptCount of ["0", -1, 0.5, 1001]) await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { helpLevel: "unknown", promptCount }), 400);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { helpLevel: "independent", promptCount: 1 }), 400);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { helpLevel: "prompted", promptCount: 0 }), 400);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(work.id, { helpLevel: "prompted", promptCount: 2, contextConfirmed: true, objectiveScores: [{ objectiveId: f.goals[0], score: 65 }] }));
+  const next = await f.act(f.actors.teacher, "publish_teaching_next_step", { id: crypto.randomUUID(), sequenceId: flow.sequence.id, referenceSubmissionId: work.id, kind: "fade_support", rationale: "仍需两次提示，下一轮逐步减少支持。", remaining: "观察新对象下的独立表达。", title: "减少提示的后续练习", practicePrompt: "借助关键词练习说明。", transferPrompt: "向新邻居介绍另一道菜。", transferContext: "改变菜品及对象。" }, 201);
+  for (const actor of ["student", "guardian", "teacher", "admin"]) {
+    const sequences = (await f.workspace(f.actors[actor])).learningSequences;
+    const parent = sequences.find((item) => item.id === flow.sequence.id);
+    assert.equal(parent.baseline.promptCount, null); assert.equal(parent.transfer.find((item) => item.id === work.id).promptCount, 2);
+    assert.equal(parent.decisions[0].reference.promptCount, 2); assert.equal(sequences.find((item) => item.id === next.nextSequenceId).baseline.promptCount, 2);
+    assert.deepEqual(api.trialSummary([], sequences).prompts, { known: 1, missing: 3 });
+  }
+  // 历史快照缺字段保持未知，读取不回填或改写历史 JSON。
+  await f.db.prepare("UPDATE learning_sequence_decisions SET reference_snapshot_json=json_remove(reference_snapshot_json,'$.promptCount') WHERE next_sequence_id=?").bind(next.nextSequenceId).run();
+  const legacy = (await f.workspace(f.actors.guardian)).learningSequences.find((item) => item.id === flow.sequence.id);
+  assert.equal(legacy.decisions[0].reference.promptCount, null);
+  const audio = await reviewedTransfer(f, true);
+  const spoken = await audio.submit("transfer");
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(spoken.id, { helpLevel: "independent", promptCount: 0, contextConfirmed: true }));
+  const evidence = (await f.workspace(f.actors.guardian)).learningSequences.find((item) => item.id === audio.sequence.id).transfer[0];
+  assert.equal(evidence.promptCount, 0); assert.deepEqual(evidence.objectives, []); assert.equal((await f.readAudio(f.actors.guardian, spoken.id)).status, 200);
+  const family = await f.act(f.actors.guardian, "create_family_task", { studentUserId: f.ids.student, objectiveId: f.goals[0], assignmentId: f.assignment.id, title: "核对家庭交流提示次数", detail: "交流后说明实际提供的提示。" }, 201);
+  const familyWork = await f.text(family.id);
+  await f.act(f.actors.guardian, "confirm_family_submission", { submissionId: familyWork.id, helpLevel: "prompted" });
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(familyWork.id, { helpLevel: "unknown", promptCount: 0 }), 400);
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(familyWork.id, { helpLevel: "unknown", promptCount: 3 }));
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {
@@ -919,6 +1036,8 @@ test("additive migration upgrades existing data and runtime initialization is re
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0009_learning_sequences.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0010_delayed_retest.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0011_teaching_next_steps.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0012_trial_records.sql'").get());
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_trial_records").get().count, 0);
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_sequence_decisions").get().count, 0);
     assert.deepEqual({ ...db.prepare("SELECT title,retest_prompt,retest_context,retest_available_at,retest_reference_id FROM learning_sequences WHERE id='legacy-sequence'").get() }, { title: "旧任务组", retest_prompt: "", retest_context: "", retest_available_at: null, retest_reference_id: null });
     assert.deepEqual({ ...db.prepare("SELECT score,sequence_id,sequence_stage,sequence_snapshot_json FROM submissions WHERE id='legacy-exchange'").get() }, { score: 81, sequence_id: null, sequence_stage: null, sequence_snapshot_json: "{}" });
@@ -926,6 +1045,9 @@ test("additive migration upgrades existing data and runtime initialization is re
     db.exec("ALTER TABLE learning_sequence_decisions RENAME COLUMN remaining TO incomplete_remaining; DELETE FROM d1_migrations WHERE name='0011_teaching_next_steps.sql'");
     db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
     assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0011_teaching_next_steps.sql'").get(), undefined, "incomplete structures must not be registered as applied migrations");
+    db.exec("ALTER TABLE learning_trial_records RENAME COLUMN void_reason TO incomplete_void_reason; DELETE FROM d1_migrations WHERE name='0012_trial_records.sql'");
+    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
+    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0012_trial_records.sql'").get(), undefined);
   } finally { db.close(); }
   const runtimeDb = new api.NodeSqliteDatabase("file::memory:");
   try { await api.ensurePlatformSchema(runtimeDb); await api.ensurePlatformSchema(runtimeDb); } finally { runtimeDb.close(); }

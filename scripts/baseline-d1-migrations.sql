@@ -114,3 +114,8 @@ WHERE EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='learning_
 AND (SELECT COUNT(*) FROM pragma_table_info('learning_sequence_decisions') WHERE name IN ('id','tenant_id','sequence_id','reference_submission_id','reference_snapshot_json','kind','rationale','remaining','next_sequence_id','created_by','created_at'))=11
 AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='sequence_decision_reference_idx')
 AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='sequence_decision_next_idx');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0012_trial_records.sql'
+WHERE (SELECT COUNT(*) FROM pragma_table_info('learning_trial_records') WHERE name IN ('id','tenant_id','sequence_id','kind','method','minutes','reference_submission_id','reference_title','note','created_by','created_at','voided_at','voided_by','void_reason'))=14
+AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='trial_records_sequence_idx');

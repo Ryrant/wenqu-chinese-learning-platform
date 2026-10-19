@@ -6,6 +6,7 @@ import { loadPlatformSettings, publicPlatformSettings } from "../../../lib/platf
 import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
 import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
 import { readSequenceWorkspace } from "../../../lib/learning-sequence-service";
+import { readTrialEntries } from "../../../lib/trial-service";
 import { SEQUENCE_STAGE_LABELS, sequenceTaskId, nextSequenceStage } from "../../../lib/learning-sequence-types";
 
 export const dynamic = "force-dynamic";
@@ -325,6 +326,7 @@ export async function GET(request: Request) {
       recommendations: recommendations.results,
       learningPlan: rankLearningPlan(planCandidates),
       ...sequenceWorkspace,
+      trialEntries: await readTrialEntries(db, context),
       availableStudents: availableStudentsResult.results,
       selectedStudent,
       weeklyReport,

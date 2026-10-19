@@ -1,5 +1,6 @@
 "use client";
 import { TeacherLearningSequences, SequenceReports } from "./learning-sequences";
+import { TrialOverview } from "./trial-records";
 import { readSequenceWork } from "./lib/learning-sequence-types";
 
 import { AbilityEvidenceProfile, TeacherAbilityProfiles } from "./diagnostic-evidence";
@@ -60,6 +61,7 @@ const TARGET_LABELS: Record<string, string> = {
   user: "成员账号",
   learning_recommendation: "学习与家庭任务",
   learning_sequence: "迁移任务组",
+  trial_record: "试用记录",
   source_document: "内容资料",
   invitation: "成员邀请",
   consent: "监护授权",
@@ -79,6 +81,8 @@ const AUDIT_LABELS: Record<string, string> = {
   "learning_sequence.created": "发布练习与迁移任务",
   "learning_sequence.retest_scheduled": "安排延后复测",
   "learning_sequence.next_step_published": "发布后续教学安排",
+  "trial_record.created": "添加试用记录",
+  "trial_record.voided": "撤销试用记录",
   "family_submission.confirmed": "家长确认交流与帮助",
   "family_submission.witnessed": "教师见证替代交流与帮助",
   "family_task.updated": "编辑家庭任务",
@@ -256,7 +260,7 @@ export function AdminView(props: AdminProps) {
   const { nav, data, act, notify } = props;
   if (nav === "内容中心") return <><LegacyAdminView {...props}/><AdminObjectiveLibrary data={data} act={act} notify={notify}/></>;
   if (nav === "成员管理") return <><LegacyAdminView {...props}/><section className="loop-section enrollment-section"><AdminEnrollmentEditor data={data} act={act} notify={notify}/></section></>;
-  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/></>;
+  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/></article></>;
   return <LegacyAdminView {...props}/>;
 }
 
