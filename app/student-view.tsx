@@ -13,9 +13,9 @@ import familyStyles from "./family-task-guide.module.css";
 import { SequenceReports } from "./learning-sequences";
 import { SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, sequencePrompt, sequenceTime, readSequenceWork, type SequenceStage } from "./lib/learning-sequence-types";
 
-export function ProgressRing({ value, label }: { value: number; label: string }) {
-  return <div className="progress-ring" style={{ "--progress": `${value * 3.6}deg` } as React.CSSProperties}>
-    <div><strong>{value}%</strong><span>{label}</span></div>
+export function ProgressRing({ value, label }: { value: number | null; label: string }) {
+  return <div className="progress-ring" style={{ "--progress": `${(value ?? 0) * 3.6}deg` } as React.CSSProperties}>
+    <div><strong>{value === null ? "待评估" : `${value}%`}</strong><span>{label}</span></div>
   </div>;
 }
 
@@ -44,6 +44,8 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const mounted = useRef(true);
+  const recordingRequest = useRef(0);
+  const textRequests = useRef(new Map<string, { key: string; id: string }>());
   const published = data.assignments.filter((item) => item.status === "published");
   const familyTasks = data.recommendations.filter((item) => item.source_type === "family" && item.status === "pending" && item.assignment_id && (!item.familyReviewStatus || item.familyReviewStatus === "reviewed"));
   const familyTask = familyTasks.find((item) => `family:${item.id}` === selectedAssignment);
@@ -83,7 +85,11 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
     };
   }, []);
   useEffect(() => () => { if (recordingDraftUrl) URL.revokeObjectURL(recordingDraftUrl); }, [recordingDraftUrl]);
-  useEffect(() => { if (recorder.current?.state === "recording") recorder.current.stop(); }, [nav]);
+  useEffect(() => {
+    // 页面或任务已切换时，尚未返回的麦克风授权也必须失效。
+    recordingRequest.current++;
+    if (recorder.current?.state === "recording") recorder.current.stop();
+  }, [nav, selectedAssignment]);
   async function refreshRetestStatus() {
     if (retestRefreshing) return;
     setRetestRefreshing(true);
@@ -103,7 +109,7 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
   }, [data.learningSequences, data.generatedAt, data.user.id, receivedAt]);
   const masteryAverage = data.mastery.length
     ? Math.round(data.mastery.reduce((sum, row) => sum + numberValue(row.mastery) * 100, 0) / data.mastery.length)
-    : 0;
+    : null;
 
   function speak() {
     if (!("speechSynthesis" in window)) return notify("无法播放", "当前浏览器不支持系统语音合成。", "error");
@@ -155,12 +161,18 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
   async function submitText(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
+    const target = selectedAssignment;
+    const payload = { assignmentId, familyTaskId: familyTask?.id ?? null, answer: textAnswer,
+      ...(sequence ? { sequenceId: sequence.id, sequenceStage } : {}),
+      ...(familyTask ? { familyPartner, familyRevision: textDrafts[target]?.familyRevision ?? familyRevision } : {}) };
+    const key = JSON.stringify(payload);
+    let request = textRequests.current.get(target);
+    if (!request || request.key !== key) { request = { key, id: crypto.randomUUID() }; textRequests.current.set(target, request); }
     try {
-      await act("submit_text", { assignmentId, familyTaskId: familyTask?.id ?? null, answer: textAnswer,
-        ...(sequence ? { sequenceId: sequence.id, sequenceStage } : {}),
-        ...(familyTask ? { familyPartner, familyRevision: textDrafts[selectedAssignment]?.familyRevision ?? familyRevision } : {}) });
+      await act("submit_text", { ...payload, submissionId: request.id });
+      textRequests.current.delete(target);
       setTextAnswer("");
-      if (familyTask || sequence) setSelectedAssignment("");
+      if (familyTask || sequence) setSelectedAssignment((current) => current === target ? "" : current);
       notify("作业已提交", "答案已进入教师人工审核队列。没有伪造自动分数。");
     } catch (reason) {
       notify("提交失败", reason instanceof Error && reason.message === "family_task_changed" ? "交流任务已更新，请核对新要求后再提交；文字已保留。" : reason instanceof Error ? reason.message : "请重试", "error");
@@ -174,13 +186,15 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
 
   async function toggleRecording() {
     if (recording && recorder.current) { if (recorder.current.state !== "inactive") recorder.current.stop(); return; }
+    if (recordingBusy) return;
     if (!assignment || !sequenceReady) return notify("请先选择可提交的任务", "练习经教师评价后才能提交迁移作品；待评作品不能重复提交。", "error");
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return notify("无法录音", "当前浏览器不支持麦克风录音。", "error");
     let stream: MediaStream | null = null;
+    const request = ++recordingRequest.current;
     setRecordingBusy(true);
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!mounted.current) { stream.getTracks().forEach((track) => track.stop()); return; }
+      if (!mounted.current || request !== recordingRequest.current) { stream.getTracks().forEach((track) => track.stop()); return; }
       const mediaRecorder = new MediaRecorder(stream);
       recorder.current = mediaRecorder;
       chunks.current = [];
@@ -204,7 +218,7 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
       setRecording(true);
     } catch (reason) {
       stream?.getTracks().forEach((track) => track.stop());
-      notify("无法开始录音", reason instanceof Error ? reason.message : "请检查麦克风权限后重试。", "error");
+      if (mounted.current && request === recordingRequest.current) notify("无法开始录音", reason instanceof Error ? reason.message : "请检查麦克风权限后重试。", "error");
     } finally { if (mounted.current) setRecordingBusy(false); }
   }
 
@@ -306,7 +320,7 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
     <StudentCaseTimeline view="student" studentId={data.user.id} revision={data.generatedAt}/>
     <FamilyPortfolio studentId={data.user.id} revision={data.generatedAt}/>
     <SequenceReports sequences={sequences} onStartTask={(id) => { if (recording || recordingBusy || busy) return; setSelectedAssignment(id); navigate("学习任务"); }}/>
-    <StudentReviewCenter data={data} act={act} notify={notify}/>
+    <StudentReviewCenter data={data} act={act} refresh={refresh} notify={notify}/>
     <section className="metric-grid">{data.mastery.map((item) => <article className="metric-card" key={String(item.objectiveId ?? item.skill)}>
       <span>{stringValue(item.skill)}</span><strong>{Math.round(numberValue(item.mastery) * 100)}</strong><small>{numberValue(item.evidenceCount)} 条学习证据</small>
     </article>)}</section>

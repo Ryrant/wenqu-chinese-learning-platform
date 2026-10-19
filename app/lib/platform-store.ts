@@ -339,6 +339,7 @@ export function platformApiError(error: unknown) {
         : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
           : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict", "sequence_retest_required", "sequence_retest_not_open", "sequence_retest_already_scheduled", "sequence_decision_id_conflict", "sequence_decision_already_published", "trial_record_id_conflict", "trial_record_already_voided"].includes(message) ? 409
+          : message === "review_item_changed" ? 409
           : message.startsWith("invalid_") ? 400
       : message === "authentication_config_missing"
           ? 500

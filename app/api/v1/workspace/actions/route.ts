@@ -238,7 +238,7 @@ export async function POST(request: Request) {
     if (action === "submit_text") {
       const assignmentId = requireText(body.assignmentId, "assignment_id");
       const answer = requireText(body.answer, "answer", 10000);
-      const result = await createStudentSubmission(db, context, { assignmentId, textAnswer: answer, familyTaskId: text(body.familyTaskId, 120) || null,
+      const result = await createStudentSubmission(db, context, { id: body.submissionId === undefined ? undefined : requireText(body.submissionId, "submission_id", 120), assignmentId, textAnswer: answer, familyTaskId: text(body.familyTaskId, 120) || null,
         sequenceId: text(body.sequenceId, 120) || null, sequenceStage: body.sequenceStage === undefined ? undefined : requireText(body.sequenceStage, "sequence_stage", 30),
         familyPartner: body.familyPartner === undefined ? undefined : requireText(body.familyPartner, "exchange_partner", 30),
         familyRevision: body.familyRevision === undefined ? undefined : Number(body.familyRevision) });
@@ -259,6 +259,7 @@ export async function POST(request: Request) {
       const result = await answerReviewItem(db, context, {
         recommendationId: requireText(body.id, "recommendation_id", 120),
         selectedOption: number(body.selectedOption, -1),
+        revision: number(body.revision, -1),
       });
       await audit(db, tenantId, userId, "review_item.answered", "learning_recommendation", result.id, { correct: result.correct });
       return Response.json(result);

@@ -35,7 +35,8 @@ export async function readLearningPlan(context: PlatformContext, studentId: stri
         WHERE latest.tenant_id=lr.tenant_id AND latest.family_task_id=lr.id AND latest.student_user_id=lr.student_user_id
         ORDER BY latest.created_at DESC,latest.rowid DESC LIMIT 1)
       WHERE lr.tenant_id=? AND lr.student_user_id=? AND lr.status='pending' AND lr.archived_at IS NULL
-        AND lr.source_type IN ('teacher','family','diagnostic')`).bind(tenantId, studentId).all<Row>(),
+        AND lr.source_type IN ('teacher','family','diagnostic')
+        AND (lr.source_type!='diagnostic' OR lr.objective_id=di.objective_id)`).bind(tenantId, studentId).all<Row>(),
   ]);
   const eligible = new Map(assignments.results.map((item) => [text(item.id), item]));
   const goals = new Map(objectives.map((item) => [text(item.id), item]));

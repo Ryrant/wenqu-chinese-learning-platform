@@ -37,7 +37,7 @@ export type WorkspaceData = {
   learningSequences: LearningSequence[]; sequenceSources: SequenceSource[];
   trialEntries: TrialEntry[];
   availableStudents: Array<{ id: string; displayName: string }>; selectedStudent: { id: string; displayName: string } | null;
-  weeklyReport: { submittedCount: number; reviewedCount: number; averageScore: number | null; masteryAverage: number; pendingRecommendations: number };
+  weeklyReport: { submittedCount: number; reviewedCount: number; averageScore: number | null; masteryAverage: number | null; pendingRecommendations: number };
   masteryMatrix: Row[]; qualityMetrics: QualityMetrics | null; enrollments: Row[];
   services: Record<string, { status: string; label: string }>;
   platformSettings?: PublicPlatformSettings;

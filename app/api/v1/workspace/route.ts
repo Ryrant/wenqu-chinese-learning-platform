@@ -198,12 +198,13 @@ export async function GET(request: Request) {
         .bind(tenantId, admin ? 1 : 0, userId)
       : null;
     const recommendationsQuery = db.prepare(`SELECT lr.*,lo.title AS objectiveTitle,di.prompt AS reviewPrompt,
-      di.options_json AS reviewOptionsJson,di.ability AS reviewAbility,di.media_id AS reviewMediaId,fs.review_status AS familyReviewStatus,fs.family_confirmed_at AS familyConfirmedAt
+      di.options_json AS reviewOptionsJson,di.ability AS reviewAbility,di.media_id AS reviewMediaId,di.revision AS reviewRevision,fs.review_status AS familyReviewStatus,fs.family_confirmed_at AS familyConfirmedAt
       FROM learning_recommendations lr
       LEFT JOIN learning_objectives lo ON lo.id=lr.objective_id AND lo.tenant_id=lr.tenant_id
       LEFT JOIN diagnostic_items di ON di.id=lr.source_id AND di.tenant_id=lr.tenant_id
       LEFT JOIN submissions fs ON fs.id=(SELECT latest.id FROM submissions latest WHERE latest.tenant_id=lr.tenant_id AND latest.family_task_id=lr.id ORDER BY latest.created_at DESC,latest.rowid DESC LIMIT 1)
-      WHERE lr.tenant_id=? AND lr.student_user_id=? AND lr.archived_at IS NULL ORDER BY
+      WHERE lr.tenant_id=? AND lr.student_user_id=? AND lr.archived_at IS NULL
+        AND (lr.source_type!='diagnostic' OR lr.objective_id=di.objective_id) ORDER BY
       CASE lr.status WHEN 'pending' THEN 0 ELSE 1 END,COALESCE(lr.due_at,'9999-12-31'),lr.created_at DESC`)
       .bind(tenantId, focusStudentId);
     const diagnosticItemsQuery = admin
@@ -270,7 +271,7 @@ export async function GET(request: Request) {
 
     const masteryAverage = mastery.results.length
       ? Math.round(mastery.results.reduce((sum, item) => sum + Number(item.mastery ?? 0), 0) / mastery.results.length * 100)
-      : 0;
+      : null;
     const weeklyReport = {
       submittedCount: Number(weeklyStats?.submittedCount ?? 0),
       reviewedCount: Number(weeklyStats?.reviewedCount ?? 0),
@@ -322,8 +323,8 @@ export async function GET(request: Request) {
         storage: { status: "available", label: "R2 文件存储" },
         retrieval: { status: "available", label: "已发布知识片段检索" },
         generation: settings.openAiKey || settings.aiKey ? { status: "configured", label: `外部模型已配置：${settings.aiModel}` } : { status: "template", label: "未配置外部模型，使用来源化教学模板" },
-        speech: settings.speechKey ? { status: "configured", label: "语音评分已配置" } : { status: "manual", label: "录音真实保存，评分转教师复核" },
-        moderation: settings.moderationKey ? { status: "configured", label: "内容审核服务已配置" } : { status: "rules", label: "未配置内容审核服务，使用基础规则" },
+        speech: { status: "manual", label: settings.speechKey ? "语音凭据已保存，当前录音仍由教师人工评价" : "录音真实保存，评分转教师复核" },
+        moderation: { status: "rules", label: settings.moderationKey ? "审核凭据已保存，当前使用基础规则" : "未配置内容审核服务，使用基础规则" },
       },
       generatedAt: new Date().toISOString(),
     }, { headers: { "cache-control": "no-store" } });
