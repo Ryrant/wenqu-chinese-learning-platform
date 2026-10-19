@@ -8,6 +8,7 @@ import { AbilityEvidenceProfile, DiagnosticStimulus } from "./diagnostic-evidenc
 import { EXCHANGE_PARTNERS, readFamilyPlan, readFamilyWorkSnapshot, type ExchangePartner } from "./lib/family-task";
 import { FamilyTaskGuide } from "./family-task-guide";
 import { FamilyPortfolio } from "./family-portfolio";
+import { StudentCaseTimeline } from "./student-case-timeline";
 import familyStyles from "./family-task-guide.module.css";
 import { SequenceReports } from "./learning-sequences";
 import { SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, sequencePrompt, sequenceTime, readSequenceWork, type SequenceStage } from "./lib/learning-sequence-types";
@@ -302,6 +303,7 @@ export function StudentView({ nav, data, receivedAt, act, refresh, notify, navig
     <PageTitle eyebrow="来自掌握度快照与作业记录" title="成长档案" detail="每一项都能追溯到真实学习证据。"/>
     {retestRefreshNotice}
     <AbilityEvidenceProfile studentId={data.user.id} revision={data.generatedAt}/>
+    <StudentCaseTimeline view="student" studentId={data.user.id} revision={data.generatedAt}/>
     <FamilyPortfolio studentId={data.user.id} revision={data.generatedAt}/>
     <SequenceReports sequences={sequences} onStartTask={(id) => { if (recording || recordingBusy || busy) return; setSelectedAssignment(id); navigate("学习任务"); }}/>
     <StudentReviewCenter data={data} act={act} notify={notify}/>

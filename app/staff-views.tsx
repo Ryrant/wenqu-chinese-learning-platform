@@ -3,6 +3,7 @@ import { TeacherLearningSequences, SequenceReports } from "./learning-sequences"
 import { TrialOverview } from "./trial-records";
 import { UnitReportIndex } from "./unit-report-links";
 import { FamilyPortfolio } from "./family-portfolio";
+import { StudentCaseTimeline } from "./student-case-timeline";
 import { FamilyFeedbackPanel } from "./family-feedback";
 import { TrialBatches } from "./trial-batches";
 import { TeachingFollowups, initialFollowupView } from "./teaching-followups";
@@ -225,6 +226,7 @@ export function TeacherView({ nav, data: workspace, act, notify, refresh, naviga
     <TrialBatches revision={data.generatedAt} notify={notify}/>
     <TeacherMasteryHeatmap data={data}/>
     <TeacherAbilityProfiles data={data}/>
+    <StudentCaseTimeline view="teaching" revision={data.generatedAt}/>
     <FamilyPortfolio revision={data.generatedAt}/>
   </section>;
 
@@ -274,6 +276,7 @@ export function GuardianView({ nav, data, act, notify, selectStudent }: Guardian
     <PageTitle eyebrow="可追溯学情" title="成长报告" detail="周报只使用最近 7 天真实作业、教师确认成绩、最新掌握度和待复习项。" action={childSwitch}/>
     <GuardianWeeklyReport data={data}/>
     <AbilityEvidenceProfile key={data.selectedStudent?.id} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
+    <StudentCaseTimeline key={data.selectedStudent?.id} view="guardian" studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
     <FamilyPortfolio key={data.selectedStudent?.id} studentId={data.selectedStudent?.id ?? ""} revision={data.generatedAt}/>
     <SequenceReports sequences={(data.learningSequences ?? []).filter((item) => item.studentUserId === data.selectedStudent?.id)}/>
     <article className="panel reviewed-work-list"><h3>已审核作品</h3>{reviewed.length ? reviewed.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{readSequenceWork(item.sequence_snapshot_json)?.title ?? stringValue(item.assignmentTitle)}</strong><small>{localDate(item.reviewed_at ?? item.created_at)} · 学习目标：{readSequenceWork(item.sequence_snapshot_json)?.objectiveTitle ?? stringValue(item.objectiveTitles, "未关联目标")}</small><p>教师反馈：{textSummary(item.feedback, "教师暂未填写文字反馈")}</p></div><span className="status published">{numberValue(item.score)} 分</span></div>) : <p className="empty-state">当前孩子最近还没有教师确认的作品。</p>}</article>
@@ -297,7 +300,7 @@ export function AdminView(props: AdminProps) {
   const { nav, data, act, notify } = props;
   if (nav === "内容中心") return <><LegacyAdminView {...props}/><AdminObjectiveLibrary data={data} act={act} notify={notify}/></>;
   if (nav === "成员管理") return <><LegacyAdminView {...props}/><section className="loop-section enrollment-section"><AdminEnrollmentEditor data={data} act={act} notify={notify}/></section></>;
-  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/><UnitReportIndex sequences={data.learningSequences ?? []}/></article><TrialBatches revision={data.generatedAt} notify={notify}/><FamilyFeedbackPanel view="teaching" revision={data.generatedAt} notify={notify}/><FamilyPortfolio revision={data.generatedAt}/></>;
+  if (nav === "机构总览") return <><LegacyAdminView {...props}/><AdminQualityDashboard data={data}/><article className="panel"><TrialOverview entries={data.trialEntries ?? []} sequences={data.learningSequences ?? []} controls={{ act, notify }}/><UnitReportIndex sequences={data.learningSequences ?? []}/></article><TrialBatches revision={data.generatedAt} notify={notify}/><FamilyFeedbackPanel view="teaching" revision={data.generatedAt} notify={notify}/><StudentCaseTimeline view="teaching" revision={data.generatedAt}/><FamilyPortfolio revision={data.generatedAt}/></>;
   return <LegacyAdminView {...props}/>;
 }
 

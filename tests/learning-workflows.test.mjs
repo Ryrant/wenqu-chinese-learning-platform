@@ -34,6 +34,8 @@ const bundle = await build({
     export { GET as batchReport } from './app/api/v1/trial-batches/[id]/report/route';
     export { batchSummary } from './app/lib/trial-batch-types';
     export { feedbackCaseState } from './app/lib/family-feedback-types';
+    export { GET as studentCase } from './app/api/v1/student-cases/route';
+    export { caseTimestamp } from './app/lib/student-case-types';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
@@ -146,7 +148,11 @@ async function fixture(t) {
     const response = await api.batchAction(new Request("http://127.0.0.1/api/v1/trial-batches", { method: "POST", headers: { ...(cookie ? { cookie } : {}), "content-type": "application/json" }, body: JSON.stringify(body) }));
     const data = await response.json(); assert.equal(response.status, expectedStatus, JSON.stringify(data)); return data;
   };
-  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups, feedback, feedbackAction, batches, batchAction };
+  const studentCase = async (cookie = actors.teacher, view = "teaching", studentId = ids.student, status = 200) => {
+    const response = await api.studentCase(new Request(`http://127.0.0.1/api/v1/student-cases?view=${view}${studentId === null ? "" : `&studentId=${encodeURIComponent(studentId)}`}`, { headers: cookie ? { cookie } : {} }));
+    const data = await response.json(); assert.equal(response.status, status, JSON.stringify(data)); return { response, data };
+  };
+  return { db, act, actors, ids, tenantId, goals, assignment, classroom, text, review, upload, readAudio, workspace, profile, uploadMedia, readMedia, unitReport, internalReport, portfolio, followups, feedback, feedbackAction, batches, batchAction, studentCase };
 }
 
 test("unconfigured and invalid AI suggestions leave grades and mastery unset; structured REST output is validated", async (t) => {
@@ -1920,6 +1926,126 @@ test("family support reads complete ordered histories and trial reports include 
   const latest = (await f.feedback()).data.entries; const latestRoot = latest.find((entry) => entry.id === original.id);
   assert.equal(latestRoot.responses[0].id, "support-history-55", "same-second ties retain insertion order");
   assert.equal(api.feedbackCaseState(latestRoot, latest), "awaiting", "latest support cannot inherit a resolved outcome from an older response");
+});
+
+test("student case timeline connects original choices, support, family feedback, audio works, retests and teacher decisions without creating learning effects", async (t) => {
+  const f = await fixture(t); const flow = await reviewedTransfer(f, true);
+  const question = await f.act(f.actors.admin, "upsert_diagnostic_item", { objectiveId: f.goals[0], level: "B1", prompt: "原始目标题面", options: ["甲", "乙", "丙", "丁"], correctOption: 0 }, 201);
+  const otherQuestion = await f.act(f.actors.admin, "upsert_diagnostic_item", { objectiveId: f.goals[1], level: "B1", prompt: "另一目标题面", options: ["一", "二", "三", "四"], correctOption: 0 }, 201);
+  await f.act(f.actors.student, "submit_diagnostic", { level: "B1", answers: [{ itemId: question.id, selectedOption: 1, revision: 1 }, { itemId: otherQuestion.id, selectedOption: 0, revision: 1 }] }, 201);
+  const support = await f.act(f.actors.teacher, "create_intervention", { studentUserId: f.ids.student, objectiveId: f.goals[0], title: "关键词支持", detail: "先用关键词复述，再逐步减少提示。" }, 201);
+  const task = await feedbackTask(f); const original = familyFeedbackInput(task.id); await f.feedbackAction(f.actors.guardian, original);
+  const response = supportInput(original.id); await f.feedbackAction(f.actors.teacher, response);
+  const followup = familyFeedbackInput(task.id, { responseId: response.id, followupOutcome: "unresolved" }); await f.feedbackAction(f.actors.guardian, followup);
+  await f.feedbackAction(f.actors.teacher, { action: "void_response", id: response.id, reason: "原指引需补充" }, 200);
+  const availableAt = new Date(Date.now() + 60_000).toISOString();
+  await f.act(f.actors.teacher, "schedule_delayed_retest", { sequenceId: flow.sequence.id, referenceSubmissionId: flow.transfer.id, prompt: "延后向新邻居推荐另一道菜。", context: "间隔时间且改变对象和菜品。", availableAt }, 201);
+  t.mock.method(Date, "now", () => Date.parse(availableAt));
+  const retest = await flow.submit("retest");
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(retest.id, { score: 0, helpLevel: "independent", promptCount: 0, contextConfirmed: true, objectiveScores: [{ objectiveId: f.goals[0], score: 0 }], dimensionScores: [{ name: "语言表达", score: 0 }] }));
+  const decision = await f.act(f.actors.teacher, "publish_teaching_next_step", { id: crypto.randomUUID(), sequenceId: flow.sequence.id, referenceSubmissionId: retest.id, kind: "collect_evidence", rationale: "本次目标为 0，继续观察。", remaining: "独立迁移的稳定性仍待验证。", title: "下一轮证据", practicePrompt: "减少支持练习。", transferPrompt: "向新同学推荐早餐。", transferContext: "改变对象与食物。" }, 201);
+  const before = await f.db.prepare("SELECT id,score,review_status,family_confirmed_at FROM submissions ORDER BY id").all();
+  const masteryBefore = await f.db.prepare("SELECT * FROM mastery_snapshots ORDER BY id").all();
+  const { data, response: http } = await f.studentCase();
+  assert.equal(http.headers.get("cache-control"), "private, no-store"); assert.equal(data.student.id, f.ids.student);
+  const kinds = new Set(data.events.map((event) => event.kind));
+  for (const kind of ["choice", "work", "review", "sequence", "retest", "decision", "feedback", "support", "withdrawal"]) assert.ok(kinds.has(kind), kind);
+  assert.ok(data.events.every((event, index) => index === 0 || api.caseTimestamp(data.events[index - 1].at) <= api.caseTimestamp(event.at)));
+  const choices = data.events.filter((event) => event.kind === "choice");
+  assert.equal(choices.length, 2); assert.ok(choices.every((event) => event.goals.length === 1));
+  assert.equal(choices.find((event) => event.snapshot.prompt === "原始目标题面").correct, false);
+  const work = data.events.find((event) => event.kind === "work" && event.work.id === retest.id);
+  assert.equal(work.stage, "延后复测"); assert.equal(work.work.hasAudio, true); assert.equal(work.work.objectives[0].score, 0); assert.equal(work.work.promptCount, 0);
+  assert.ok(work.sequenceIds.includes(flow.sequence.id)); assert.equal((await f.readAudio(f.actors.guardian, retest.id)).status, 200);
+  assert.equal(data.events.find((event) => event.kind === "decision").decision.nextSequenceId, decision.nextSequenceId);
+  assert.equal(data.events.find((event) => event.kind === "retest").referenceId, flow.transfer.id);
+  assert.equal(data.events.find((event) => event.kind === "feedback" && event.entry.id === followup.id).entry.responseId, response.id);
+  assert.equal(data.events.find((event) => event.kind === "support").feedbackId, original.id);
+  assert.ok(data.events.some((event) => event.kind === "withdrawal" && event.sourceId === response.id));
+  assert.ok(data.tasks.some((item) => item.id === support.id && item.kind === "teacher"));
+  assert.deepEqual(await f.db.prepare("SELECT id,score,review_status,family_confirmed_at FROM submissions ORDER BY id").all(), before);
+  assert.deepEqual(await f.db.prepare("SELECT * FROM mastery_snapshots ORDER BY id").all(), masteryBefore);
+  const student = (await f.studentCase(f.actors.student, "student")).data;
+  assert.ok(!student.events.some((event) => ["feedback", "support", "withdrawal"].includes(event.kind)));
+  assert.ok(student.events.some((event) => event.kind === "work" && event.work.id === retest.id));
+});
+
+test("student case timeline isolates viewing roles, original class history, revoked guardian links, tenant scope and password gates", async (t) => {
+  const f = await fixture(t); const task = await feedbackTask(f); const feedback = familyFeedbackInput(task.id); await f.feedbackAction(f.actors.guardian, feedback);
+  const diagnostic = await diagnosticTask(f, "writing");
+  await f.act(f.actors.student, "submit_text", { assignmentId: diagnostic.id, answer: "自己的原始诊断作品" }, 201);
+  await f.studentCase(null, "teaching", f.ids.student, 401);
+  await f.studentCase(f.actors.guardian, "teaching", f.ids.student, 403);
+  await f.studentCase(f.actors.teacher, "student", f.ids.student, 403);
+  await f.studentCase(f.actors.student, "student", f.ids.stranger, 404);
+  await f.studentCase(f.actors.otherTeacher, "teaching", f.ids.student, 404);
+  await f.studentCase(f.actors.otherTenant, "teaching", f.ids.student, 404);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "复合教师监护人", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  assert.ok((await f.studentCase(f.actors.otherTeacher, "guardian")).data.events.some((event) => event.kind === "feedback"));
+  await f.studentCase(f.actors.otherTeacher, "teaching", f.ids.student, 404);
+  assert.deepEqual((await f.studentCase(f.actors.otherTeacher, "teaching", null)).data.students, []);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.guardian, studentUserIds: [] });
+  await f.studentCase(f.actors.guardian, "guardian", f.ids.student, 404);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: f.classroom.id, studentUserIds: [] });
+  assert.ok((await f.studentCase()).data.events.some((event) => event.kind === "feedback"), "former students retain original-class historical records");
+  await f.db.prepare("UPDATE classes SET teacher_user_id=? WHERE id=?").bind(f.ids.otherTeacher, f.classroom.id).run();
+  await f.studentCase(f.actors.teacher, "teaching", f.ids.student, 404);
+  assert.ok((await f.studentCase(f.actors.otherTeacher)).data.events.some((event) => event.kind === "feedback"));
+  await f.db.prepare("UPDATE users SET must_change_password=1 WHERE id=?").bind(f.ids.otherTeacher).run();
+  assert.equal((await f.studentCase(f.actors.otherTeacher, "teaching", f.ids.student, 403)).data.error, "password_change_required");
+  assert.ok((await f.studentCase(f.actors.admin)).data.events.length > 0);
+  for (const view of ["all", "", "administrator"]) await f.studentCase(f.actors.admin, view, f.ids.student, 400);
+  await f.studentCase(f.actors.admin, "teaching", " ", 400);
+});
+
+test("student case timeline keeps complete histories, unknown goals and pending ratings without borrowing current assignment links", async (t) => {
+  const f = await fixture(t); const original = await f.text(); const writing = await diagnosticTask(f, "writing", f.goals[0]);
+  const pending = await f.act(f.actors.student, "submit_text", { assignmentId: writing.id, answer: "原目标的待评价表达" }, 201);
+  await f.db.prepare(`WITH RECURSIVE copies(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM copies WHERE n<55)
+    INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,diagnostic_snapshot_json,created_at)
+    SELECT 'case-history-'||n,tenant_id,assignment_id,student_user_id,'更多原作品 '||n,diagnostic_snapshot_json,'2001-01-01 01:00:00' FROM submissions,copies WHERE id=?`).bind(pending.id).run();
+  await f.db.prepare("DELETE FROM assignment_objectives WHERE assignment_id=? AND objective_id=?").bind(writing.id, f.goals[0]).run();
+  await f.db.prepare("UPDATE assignments SET title='当前新标题' WHERE id=?").bind(writing.id).run();
+  const task = await feedbackTask(f); const old = familyFeedbackInput(task.id); await f.feedbackAction(f.actors.guardian, old);
+  await f.act(f.actors.guardian, "update_family_task", { id: task.id, assignmentId: f.assignment.id, objectiveId: f.goals[1], title: "新目标家庭任务", detail: "目标改版后的说明", partner: "teacher", revision: 1 });
+  await f.feedbackAction(f.actors.guardian, familyFeedbackInput(task.id, { revision: 2 }));
+  const addedGoal = await f.act(f.actors.admin, "upsert_learning_objective", { code: "CASE-NEW", title: "提交以后新增的目标", skill: "阅读", level: "A2" }, 201);
+  await f.db.prepare("DELETE FROM assignment_objectives WHERE assignment_id=?").bind(f.assignment.id).run();
+  await f.db.prepare("INSERT INTO assignment_objectives (tenant_id,assignment_id,objective_id) VALUES (?,?,?)").bind(f.tenantId, f.assignment.id, addedGoal.id).run();
+  await f.act(f.actors.teacher, "confirm_submission_review", f.review(original.id));
+  const data = (await f.studentCase()).data;
+  assert.equal(data.events.filter((event) => event.kind === "work").length, 57);
+  const unknown = data.events.find((event) => event.kind === "work" && event.work.id === original.id);
+  assert.deepEqual(unknown.goals, [], "total-only review must not assign an ordinary old work to goals added after submission");
+  assert.deepEqual(data.events.find((event) => event.kind === "review" && event.work.id === original.id).goals, []);
+  const writingEvent = data.events.find((event) => event.kind === "work" && event.work.id === pending.id);
+  assert.equal(writingEvent.goals[0].id, f.goals[0]); assert.notEqual(writingEvent.work.title, "当前新标题"); assert.equal(writingEvent.work.score, null);
+  assert.equal(writingEvent.work.objectives.length, 0); assert.equal(writingEvent.work.promptCount, null);
+  assert.equal(data.events.find((event) => event.kind === "feedback" && event.entry.id === old.id).goals[0].id, f.goals[0]);
+  assert.ok(data.events.some((event) => event.kind === "feedback" && event.entry.revision === 2 && event.goals[0].id === f.goals[1]));
+  assert.equal(data.tasks.find((item) => item.id === task.id).revision, 2); assert.equal(data.tasks.find((item) => item.id === task.id).goal.id, f.goals[1]);
+  assert.ok(data.objectives.some((item) => item.id === f.goals[0]) && data.objectives.some((item) => item.id === f.goals[1]));
+  assert.equal(data.events.filter((event) => event.kind === "review").length, 1);
+});
+
+test("student case timeline separates internal trial records and other-class family versions from authorised learner evidence", async (t) => {
+  const f = await fixture(t); const flow = await reviewedTransfer(f); const task = await feedbackTask(f);
+  const feedback = familyFeedbackInput(task.id); await f.feedbackAction(f.actors.guardian, feedback);
+  await f.act(f.actors.teacher, "create_trial_record", { id: crypto.randomUUID(), sequenceId: flow.sequence.id, kind: "preparation", method: "platform", minutes: 12, note: "仅内部用时细节，不进入案例" }, 201);
+  const otherClass = await f.act(f.actors.otherTeacher, "create_class", { name: "另一班级案例", level: "A2" }, 201);
+  await f.act(f.actors.admin, "set_class_enrollments", { classId: otherClass.id, studentUserIds: [f.ids.student] });
+  const assignment = await f.act(f.actors.otherTeacher, "create_assignment", { classId: otherClass.id, title: "新班教学任务", activityType: "文字", objectiveIds: [f.goals[1]], rubric }, 201);
+  await f.act(f.actors.otherTeacher, "publish_assignment", { id: assignment.id });
+  await f.act(f.actors.guardian, "update_family_task", { id: task.id, assignmentId: assignment.id, objectiveId: f.goals[1], title: "另一班的新家庭版本", detail: "新班要求不能转移旧反馈的权限。", partner: "teacher", revision: 1 });
+  const newer = familyFeedbackInput(task.id, { revision: 2 }); await f.feedbackAction(f.actors.guardian, newer);
+  const teacher = (await f.studentCase()).data; const other = (await f.studentCase(f.actors.otherTeacher)).data;
+  assert.ok(teacher.events.some((event) => event.kind === "feedback" && event.entry.id === feedback.id));
+  assert.ok(!teacher.events.some((event) => event.kind === "feedback" && event.entry.id === newer.id));
+  assert.ok(!teacher.tasks.some((item) => item.id === task.id));
+  assert.ok(other.events.some((event) => event.kind === "feedback" && event.entry.id === newer.id));
+  assert.ok(!other.events.some((event) => event.kind === "feedback" && event.entry.id === feedback.id));
+  for (const [actor, view] of [["student", "student"], ["guardian", "guardian"], ["teacher", "teaching"], ["admin", "teaching"]]) assert.ok(!JSON.stringify((await f.studentCase(f.actors[actor], view)).data).includes("仅内部用时细节"));
 });
 
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
