@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FollowupAction } from "./lib/teaching-followup-types";
 import { isRecommendationDue } from "./lib/learning-loop";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
@@ -38,9 +38,9 @@ function dueLabel(value: unknown) {
 function fullDateLabel(value: unknown) {
   const raw = stringValue(value, "");
   if (!raw) return "暂无更新时间";
-  const date = new Date(raw);
+  const date = new Date(raw.includes("T") || raw.endsWith("Z") ? raw : `${raw.replace(" ", "T")}Z`);
   return Number.isNaN(date.getTime()) ? raw : date.toLocaleString("zh-CN", {
-    year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+    timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
   });
 }
 
@@ -50,6 +50,7 @@ export function StudentDiagnostic({ data, act, notify, onStartAssignment }: Loop
   const items = data.diagnosticItems.filter((item) => stringValue(item.level, "A2") === selectedLevel);
   const [answers, setAnswers] = useState<Record<string, { selectedOption: number; revision: number }>>({});
   const [busy, setBusy] = useState(false);
+  const pendingAttempt = useRef<{ key: string; id: string } | null>(null);
   const level = selectedLevel;
 
   async function submit(event: React.FormEvent) {
@@ -60,10 +61,13 @@ export function StudentDiagnostic({ data, act, notify, onStartAssignment }: Loop
     }
     setBusy(true);
     try {
+      const submittedAnswers = items.map((item) => ({ itemId: String(item.id), ...answers[String(item.id)] }));
+      const key = JSON.stringify({ level, answers: submittedAnswers });
+      if (pendingAttempt.current?.key !== key) pendingAttempt.current = { key, id: crypto.randomUUID() };
       const result = await act("submit_diagnostic", {
-        level,
-        answers: items.map((item) => ({ itemId: String(item.id), ...answers[String(item.id)] })),
+        attemptId: pendingAttempt.current.id, level, answers: submittedAnswers,
       });
+      pendingAttempt.current = null;
       setAnswers({});
       notify("诊断已完成", `本次正确率 ${Math.round(numberValue(result.score) * 100)}%，错题已加入复习中心。`);
     } catch (reason) {

@@ -250,8 +250,7 @@ export async function POST(request: Request) {
         const item = value && typeof value === "object" ? value as Record<string, unknown> : {};
         return { itemId: text(item.itemId, 120), selectedOption: number(item.selectedOption, -1), revision: number(item.revision, -1) };
       }) : [];
-      const result = await submitDiagnostic(db, context, { level: text(body.level, 20) || "A2", answers });
-      await audit(db, tenantId, userId, "diagnostic.completed", "diagnostic_attempt", result.attemptId, { score: result.score, incorrectCount: result.incorrectCount });
+      const result = await submitDiagnostic(db, context, { id: body.attemptId === undefined ? undefined : requireText(body.attemptId, "diagnostic_attempt_id", 120), level: text(body.level, 20) || "A2", answers });
       return Response.json(result, { status: 201 });
     }
 
@@ -399,7 +398,6 @@ export async function POST(request: Request) {
       const score = typeof body.score === "number" ? body.score : Number.NaN;
       if (action === "review_submission") await assertSubmissionReviewAccess(db, context, id);
       const result = await confirmSubmissionReview(db, context, { submissionId: id, score, comment: text(body.comment, 2000), objectiveScores: body.objectiveScores, dimensionScores: body.dimensionScores, helpLevel: body.helpLevel, contextConfirmed: body.contextConfirmed, promptCount: body.promptCount });
-      await audit(db, tenantId, userId, "submission.reviewed", "submission", id, { score });
       return Response.json({ ...result, id, reviewStatus: "reviewed" });
     }
 

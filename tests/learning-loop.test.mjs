@@ -152,7 +152,7 @@ test("teacher confirmation is one atomic batch guarded by a durable unique fact"
   });
   assert.equal(firstCount, 1);
   assert.equal(allCount, 1);
-  assert.equal(batched.length, 4);
+  assert.ok(batched.some((statement) => /INSERT INTO audit_logs/.test(statement.sql)), "审计必须与评分在同一事务提交");
   assert.match(batched[0].sql, /submission_review_confirmations/);
   assert.match(batched[1].sql, /submission_reviews/);
   assert.match(batched[2].sql, /UPDATE submissions/);

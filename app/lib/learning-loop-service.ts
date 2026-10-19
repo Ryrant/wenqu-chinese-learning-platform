@@ -77,12 +77,30 @@ export function prepareMasteryEvidenceInsert(db: PlatformDatabase, input: {
     );
 }
 
-export async function submitDiagnostic(db: PlatformDatabase, context: PlatformContext, input: { level: string; answers: DiagnosticAnswerInput[] }) {
+export async function submitDiagnostic(db: PlatformDatabase, context: PlatformContext, input: { id?: string; level: string; answers: DiagnosticAnswerInput[] }) {
+  if (input.id !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.id)) throw new Error("invalid_diagnostic_attempt_id");
   if (!input.answers.length || input.answers.length > 30) throw new Error("invalid_diagnostic_answers");
   const unique = new Map(input.answers.map((answer) => [answer.itemId, answer]));
   if (unique.size !== input.answers.length || [...unique.values()].some((answer) => !Number.isInteger(answer.selectedOption) || answer.selectedOption < 0 || answer.selectedOption > 3)) {
     throw new Error("invalid_diagnostic_answers");
   }
+  const readExisting = async () => {
+    if (!input.id) return null;
+    const existing = await db.prepare("SELECT tenant_id AS tenantId,student_user_id AS studentUserId,level,score FROM diagnostic_attempts WHERE id=?")
+      .bind(input.id).first<{ tenantId: string; studentUserId: string; level: string; score: number }>();
+    if (!existing) return null;
+    if (existing.tenantId !== context.tenantId || existing.studentUserId !== context.userId || existing.level !== input.level) throw new Error("diagnostic_attempt_id_conflict");
+    const answers = await db.prepare(`SELECT item_id AS itemId,selected_option AS selectedOption,is_correct AS isCorrect,
+        json_extract(evidence_json,'$.revision') AS revision,json_extract(evidence_json,'$.objectiveId') AS objectiveId
+      FROM diagnostic_answers WHERE attempt_id=? AND tenant_id=?`)
+      .bind(input.id, context.tenantId).all<{ itemId: string; selectedOption: number; isCorrect: number; revision: number; objectiveId: string }>();
+    if (answers.results.length !== unique.size || answers.results.some((item) => unique.get(item.itemId)?.selectedOption !== item.selectedOption || unique.get(item.itemId)?.revision !== item.revision)) throw new Error("diagnostic_attempt_id_conflict");
+    const evidence = answers.results.map((item) => ({ objectiveId: item.objectiveId, isCorrect: !!item.isCorrect }));
+    return { attemptId: input.id, score: existing.score, objectiveScores: calculateDiagnosticScores(evidence), incorrectCount: evidence.filter((item) => !item.isCorrect).length };
+  };
+  // 响应丢失后按原请求读取快照，题库后续改版也不能把一次提交记成两份证据。
+  const existing = await readExisting();
+  if (existing) return existing;
   const rows = await db.prepare(`WITH ranked AS (
       SELECT id,objective_id,prompt,correct_option,options_json,ability,media_id,revision,
         ROW_NUMBER() OVER (ORDER BY sort_order,created_at,id) AS rn
@@ -98,44 +116,47 @@ export async function submitDiagnostic(db: PlatformDatabase, context: PlatformCo
   // 题目 ID 不变也可能换题面；按学生实际作答的版本核验，不能把旧选择套到新选项。
   if (rows.results.some((item) => unique.get(item.id)!.revision !== item.revision)) throw new Error("invalid_diagnostic_revision");
 
-  const attemptId = crypto.randomUUID();
+  const attemptId = input.id ?? crypto.randomUUID();
   const evidence = rows.results.map((item) => ({
     objectiveId: item.objectiveId,
     isCorrect: unique.get(item.id)!.selectedOption === Number(item.correctOption),
   }));
   const score = evidence.filter((item) => item.isCorrect).length / evidence.length;
-  await db.batch([
-    db.prepare(`INSERT INTO diagnostic_attempts (id,tenant_id,student_user_id,level,score,status)
-      VALUES (?,?,?,?,?,'completed')`).bind(attemptId, context.tenantId, context.userId, input.level, score),
-    ...rows.results.map((item) => {
-      const selectedOption = unique.get(item.id)!.selectedOption;
-      const snapshot: ChoiceSnapshot = { version: 1, revision: item.revision, ability: item.ability, objectiveId: item.objectiveId, objectiveTitle: item.objectiveTitle,
-        prompt: item.prompt, options: JSON.parse(item.optionsJson), correctOption: Number(item.correctOption), mediaId: item.mediaId };
-      return db.prepare(`INSERT INTO diagnostic_answers (id,tenant_id,attempt_id,item_id,selected_option,is_correct,evidence_json)
-        VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), context.tenantId, attemptId, item.id, selectedOption, selectedOption === Number(item.correctOption) ? 1 : 0, JSON.stringify(snapshot));
-    }),
-  ]);
-
   const objectiveScores = calculateDiagnosticScores(evidence);
-  for (const [objectiveId, result] of Object.entries(objectiveScores)) {
-    await updateMasteryEvidence(db, {
-      tenantId: context.tenantId,
-      studentUserId: context.userId,
-      objectiveId,
-      score: result.score,
-      evidenceCount: result.evidenceCount,
-    });
+  const incorrectCount = evidence.filter((item) => !item.isCorrect).length;
+  try {
+    await db.batch([
+      db.prepare(`INSERT INTO diagnostic_attempts (id,tenant_id,student_user_id,level,score,status)
+        VALUES (?,?,?,?,?,'completed')`).bind(attemptId, context.tenantId, context.userId, input.level, score),
+      ...rows.results.map((item) => {
+        const selectedOption = unique.get(item.id)!.selectedOption;
+        const snapshot: ChoiceSnapshot = { version: 1, revision: item.revision, ability: item.ability, objectiveId: item.objectiveId, objectiveTitle: item.objectiveTitle,
+          prompt: item.prompt, options: JSON.parse(item.optionsJson), correctOption: Number(item.correctOption), mediaId: item.mediaId };
+        return db.prepare(`INSERT INTO diagnostic_answers (id,tenant_id,attempt_id,item_id,selected_option,is_correct,evidence_json)
+          VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), context.tenantId, attemptId, item.id, selectedOption, selectedOption === Number(item.correctOption) ? 1 : 0, JSON.stringify(snapshot));
+      }),
+      ...Object.entries(objectiveScores).map(([objectiveId, result]) => prepareMasteryEvidenceInsert(db, {
+        tenantId: context.tenantId,
+        studentUserId: context.userId,
+        objectiveId,
+        score: result.score,
+        evidenceCount: result.evidenceCount,
+      })),
+      ...rows.results.filter((row) => unique.get(row.id)!.selectedOption !== Number(row.correctOption)).map((item) => db.prepare(`INSERT INTO learning_recommendations
+        (id,tenant_id,student_user_id,objective_id,source_type,source_id,title,detail,due_at,status,created_by)
+        VALUES (?,?,?,?,?,?,?,?,?,'pending',?)
+        ON CONFLICT(tenant_id,student_user_id,source_type,source_id)
+        DO UPDATE SET objective_id=excluded.objective_id,title=excluded.title,detail=excluded.detail,status='pending',due_at=excluded.due_at,completed_at=NULL`)
+        .bind(crypto.randomUUID(), context.tenantId, context.userId, item.objectiveId, "diagnostic", item.id, `错题复习：${item.prompt.slice(0, 60)}`, "重新作答诊断错题，答对后完成。", new Date().toISOString(), context.userId)),
+      db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,'diagnostic.completed','diagnostic_attempt',?,?)")
+        .bind(crypto.randomUUID(), context.tenantId, context.userId, attemptId, JSON.stringify({ score, incorrectCount })),
+    ]);
+  } catch (error) {
+    const saved = await readExisting();
+    if (saved) return saved;
+    throw error;
   }
-  for (const item of rows.results.filter((row) => unique.get(row.id)!.selectedOption !== Number(row.correctOption))) {
-    await db.prepare(`INSERT INTO learning_recommendations
-      (id,tenant_id,student_user_id,objective_id,source_type,source_id,title,detail,due_at,status,created_by)
-      VALUES (?,?,?,?,?,?,?,?,?,'pending',?)
-      ON CONFLICT(tenant_id,student_user_id,source_type,source_id)
-      DO UPDATE SET objective_id=excluded.objective_id,title=excluded.title,detail=excluded.detail,status='pending',due_at=excluded.due_at,completed_at=NULL`)
-      .bind(crypto.randomUUID(), context.tenantId, context.userId, item.objectiveId, "diagnostic", item.id, `错题复习：${item.prompt.slice(0, 60)}`, "重新作答诊断错题，答对后完成。", new Date().toISOString(), context.userId)
-      .run();
-  }
-  return { attemptId, score, objectiveScores, incorrectCount: evidence.filter((item) => !item.isCorrect).length };
+  return { attemptId, score, objectiveScores, incorrectCount };
 }
 
 export async function answerReviewItem(db: PlatformDatabase, context: PlatformContext, input: { recommendationId: string; selectedOption: number; revision?: number }) {
