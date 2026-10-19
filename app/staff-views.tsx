@@ -77,6 +77,7 @@ const AUDIT_LABELS: Record<string, string> = {
   "member.created": "创建成员",
   "family_task.created": "创建家庭任务",
   "learning_sequence.created": "发布练习与迁移任务",
+  "learning_sequence.retest_scheduled": "安排延后复测",
   "family_submission.confirmed": "家长确认交流与帮助",
   "family_submission.witnessed": "教师见证替代交流与帮助",
   "family_task.updated": "编辑家庭任务",

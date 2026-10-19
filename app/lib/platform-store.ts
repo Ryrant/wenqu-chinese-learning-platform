@@ -212,6 +212,10 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     "ALTER TABLE submissions ADD COLUMN sequence_stage TEXT",
     "ALTER TABLE submissions ADD COLUMN sequence_snapshot_json TEXT NOT NULL DEFAULT '{}'",
     "ALTER TABLE submission_reviews ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE learning_sequences ADD COLUMN retest_prompt TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE learning_sequences ADD COLUMN retest_context TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE learning_sequences ADD COLUMN retest_available_at TEXT",
+    "ALTER TABLE learning_sequences ADD COLUMN retest_reference_id TEXT",
   ]) await trySchema(db, statement);
   await db.batch([
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_submission_pending_idx ON submissions (tenant_id,family_task_id) WHERE family_task_id IS NOT NULL AND review_status!='reviewed'"),
@@ -320,7 +324,7 @@ export function platformApiError(error: unknown) {
         ? 404
         : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
           ? 409
-          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict"].includes(message) ? 409
+          : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict", "sequence_retest_required", "sequence_retest_not_open", "sequence_retest_already_scheduled"].includes(message) ? 409
           : message.startsWith("invalid_") ? 400
       : message === "authentication_config_missing"
           ? 500

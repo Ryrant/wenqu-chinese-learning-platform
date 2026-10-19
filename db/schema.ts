@@ -180,6 +180,8 @@ export const learningSequences = sqliteTable("learning_sequences", {
   baselineSubmissionId: text("baseline_submission_id").notNull(), baselineSnapshotJson: text("baseline_snapshot_json").notNull(),
   title: text("title").notNull(), practicePrompt: text("practice_prompt").notNull(), transferPrompt: text("transfer_prompt").notNull(), transferContext: text("transfer_context").notNull(),
   rubricJson: text("rubric_json").notNull(), medium: text("medium").notNull(), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+  retestPrompt: text("retest_prompt").notNull().default(""), retestContext: text("retest_context").notNull().default(""),
+  retestAvailableAt: text("retest_available_at"), retestReferenceId: text("retest_reference_id"),
 }, (table) => [index("learning_sequences_student_idx").on(table.tenantId, table.studentUserId)]);
 
 export const masterySnapshots = sqliteTable("mastery_snapshots", {

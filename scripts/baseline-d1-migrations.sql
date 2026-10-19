@@ -100,3 +100,10 @@ AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='sequence_
 AND EXISTS (SELECT 1 FROM pragma_table_info('submissions') WHERE name='sequence_snapshot_json')
 AND EXISTS (SELECT 1 FROM pragma_table_info('submission_reviews') WHERE name='evidence_json')
 AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='sequence_submission_pending_idx');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0010_delayed_retest.sql'
+WHERE EXISTS (SELECT 1 FROM pragma_table_info('learning_sequences') WHERE name='retest_prompt')
+AND EXISTS (SELECT 1 FROM pragma_table_info('learning_sequences') WHERE name='retest_context')
+AND EXISTS (SELECT 1 FROM pragma_table_info('learning_sequences') WHERE name='retest_available_at')
+AND EXISTS (SELECT 1 FROM pragma_table_info('learning_sequences') WHERE name='retest_reference_id');

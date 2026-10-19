@@ -25,7 +25,7 @@ import { searchPublishedKnowledge } from "../../../../lib/retrieval";
 import { createStudentSubmission } from "../../../../lib/submission-service";
 import { assertDiagnosticMedia } from "../../../../lib/diagnostic-media";
 import { suggestIntervention } from "../../../../lib/intervention-support";
-import { createLearningSequence } from "../../../../lib/learning-sequence-service";
+import { createLearningSequence, scheduleDelayedRetest } from "../../../../lib/learning-sequence-service";
 
 type ActionBody = { action?: string; [key: string]: unknown };
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       create_class: "teacher", create_assignment: "teacher", publish_assignment: "teacher", generate_lesson: "teacher", update_lesson_plan: "teacher", archive_lesson_plan: "teacher", review_submission: "teacher", suggest_text_review: "teacher", confirm_submission_review: "teacher",
       create_reminder: "guardian", update_consent: "guardian",
       create_family_task: "guardian", update_family_task: "guardian", archive_family_task: "guardian", confirm_family_submission: "guardian",
-      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher", create_learning_sequence: "teacher",
+      create_intervention: "teacher", suggest_intervention: "teacher", confirm_alternative_exchange: "teacher", create_learning_sequence: "teacher", schedule_delayed_retest: "teacher",
       create_invitation: "admin", review_content: "admin", reprocess_content: "admin", archive_content: "admin", create_member: "admin", reset_member_password: "admin", set_member_status: "admin", set_guardian_links: "admin", upsert_learning_objective: "admin", upsert_diagnostic_item: "admin", set_class_enrollments: "admin", mark_notification: "student",
       submit_text: "student", submit_diagnostic: "student", answer_review_item: "student",
     };
@@ -346,6 +346,15 @@ export async function POST(request: Request) {
       }
       await audit(db, tenantId, userId, "submission.ai_review_suggested", "submission", id);
       return Response.json(result);
+    }
+
+    if (action === "schedule_delayed_retest") {
+      const result = await scheduleDelayedRetest(db, context, {
+        sequenceId: requireText(body.sequenceId, "sequence_id", 120), referenceSubmissionId: requireText(body.referenceSubmissionId, "reference_submission_id", 120),
+        prompt: requireText(body.prompt, "retest_prompt", 2000), context: requireText(body.context, "retest_context", 1000),
+        availableAt: requireText(body.availableAt, "retest_available_at", 80),
+      });
+      return Response.json(result, { status: 201 });
     }
 
     if (action === "create_learning_sequence") {

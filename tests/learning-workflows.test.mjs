@@ -730,12 +730,100 @@ test("legacy baseline criteria remain unknown and sequence evidence is not trunc
   assert.deepEqual(known.work.rubric, rubric, "existing diagnostic criteria are historical evidence, not reconstructed metadata");
 });
 
+async function reviewedTransfer(f, audio = false) {
+  const baseline = audio ? await f.upload(f.actors.student) : await f.text();
+  const assess = (id, score = 70) => f.act(f.actors.teacher, "confirm_submission_review", f.review(id, { helpLevel: "independent", contextConfirmed: true, objectiveScores: [{ objectiveId: f.goals[0], score }], dimensionScores: [{ name: "语言表达", score }] }));
+  await assess(baseline.id, 40);
+  const sequence = await f.act(f.actors.teacher, "create_learning_sequence", { baselineSubmissionId: baseline.id, objectiveId: f.goals[0], title: "家常菜延后验证", practicePrompt: "练习完整解释食材和理由。", transferPrompt: "向同伴推荐一道新菜并回答问题。", transferContext: "改变菜品和交流对象。" }, 201);
+  const submit = (stage, status = 201, actor = "student") => audio ? f.upload(f.actors[actor], { sequenceId: sequence.id, sequenceStage: stage }, status)
+    : f.act(f.actors[actor], "submit_text", { assignmentId: f.assignment.id, sequenceId: sequence.id, sequenceStage: stage, answer: "先说明新菜的食材，再解释推荐理由。" }, status);
+  const practice = await submit("practice"); await assess(practice.id, 55);
+  const transfer = await submit("transfer"); await assess(transfer.id);
+  return { sequence, baseline, practice, transfer, submit, assess };
+}
+
+test("delayed retests require a reviewed transfer and a future zoned time, preserve one fixed reference, and enforce teacher scope", async (t) => {
+  const f = await fixture(t);
+  const flow = await reviewedTransfer(f);
+  const input = { sequenceId: flow.sequence.id, referenceSubmissionId: flow.transfer.id, prompt: "隔一段时间，向新同学介绍另一道菜，独立回答新问题。", context: "更换同学、菜品和问题。", availableAt: new Date(Date.now() + 60_000).toISOString() };
+  const schedule = (extra = {}, actor = "teacher", status = 201) => f.act(f.actors[actor], "schedule_delayed_retest", { ...input, ...extra }, status);
+  const legacy = (await f.workspace(f.actors.student)).learningSequences.find((item) => item.id === flow.sequence.id);
+  assert.equal(legacy.retestAvailableAt, null); assert.equal(legacy.retestOpen, false); assert.deepEqual(legacy.retest, []);
+  await flow.submit("retest", 409);
+  for (const actor of ["student", "guardian", "otherTeacher"]) await schedule({}, actor, 403);
+  await schedule({}, "otherTenant", 404);
+  await f.act(f.actors.admin, "create_member", { email: "otherteacher@school.example", displayName: "跨角色教师", role: "guardian", temporaryPassword: "FixturePassword123" }, 201);
+  await f.act(f.actors.admin, "set_guardian_links", { guardianUserId: f.ids.otherTeacher, studentUserIds: [f.ids.student] });
+  assert.ok((await f.workspace(f.actors.otherTeacher)).learningSequences.some((item) => item.id === flow.sequence.id));
+  assert.equal((await f.workspace(f.actors.otherTeacher)).learningSequences.find((item) => item.id === flow.sequence.id).canScheduleRetest, false);
+  await schedule({}, "otherTeacher", 403);
+  for (const availableAt of ["not-a-time", "2026-12-01T10:00:00", new Date(Date.now() - 1000).toISOString()]) await schedule({ availableAt }, "teacher", 400);
+  await schedule({ referenceSubmissionId: flow.baseline.id }, "teacher", 404);
+  await schedule({ referenceSubmissionId: flow.practice.id }, "teacher", 404);
+  const another = await reviewedTransfer(f);
+  await schedule({ referenceSubmissionId: another.transfer.id }, "teacher", 404);
+  const pending = await flow.submit("transfer");
+  await schedule({ referenceSubmissionId: pending.id }, "teacher", 404);
+  await schedule({ prompt: "向同伴推荐一道新菜并回答问题。" }, "teacher", 400);
+  await schedule(); await schedule();
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE action='learning_sequence.retest_scheduled' AND target_id=?").bind(flow.sequence.id).first()).count, 1);
+  await schedule({ prompt: "不得替换已发布的安排。" }, "teacher", 409);
+  await schedule({ availableAt: new Date(Date.now() + 120_000).toISOString() }, "teacher", 409);
+  await flow.assess(pending.id, 99);
+  const saved = (await f.workspace(f.actors.guardian)).learningSequences.find((item) => item.id === flow.sequence.id);
+  assert.equal(saved.transfer[0].id, pending.id); assert.equal(saved.retestReferenceId, flow.transfer.id);
+  assert.equal(saved.retestOpen, false); assert.equal(saved.retestAvailableAt, input.availableAt);
+  assert.ok(!(await f.workspace(f.actors.student)).learningPlan.some((item) => item.id.endsWith(":retest")));
+});
+
+test("delayed text and audio retests stay locked until due, freeze evidence, and complete through teacher review and all role reports", async (t) => {
+  const f = await fixture(t);
+  const text = await reviewedTransfer(f);
+  const audio = await reviewedTransfer(f, true);
+  const availableAt = new Date(Date.now() + 60_000).toISOString();
+  for (const flow of [text, audio]) await f.act(f.actors.teacher, "schedule_delayed_retest", { sequenceId: flow.sequence.id, referenceSubmissionId: flow.transfer.id, prompt: "独立向新邻居推荐另一道菜，并回答对方的新问题。", context: "更换为邻居与另一道菜。", availableAt }, 201);
+  await text.submit("retest", 409); await audio.submit("retest", 409);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM submissions WHERE sequence_stage='retest'").first()).count, 0);
+  t.mock.method(Date, "now", () => Date.parse(availableAt));
+  // 到达边界后开放；客户端重试已保存的安排仍可恢复原结果。
+  await f.act(f.actors.teacher, "schedule_delayed_retest", { sequenceId: text.sequence.id, referenceSubmissionId: text.transfer.id, prompt: "独立向新邻居推荐另一道菜，并回答对方的新问题。", context: "更换为邻居与另一道菜。", availableAt }, 201);
+  assert.ok((await f.workspace(f.actors.student)).learningPlan.some((item) => item.id === `sequence:${text.sequence.id}:retest` && !item.waitingReview));
+  await text.submit("retest", 404, "stranger"); await audio.submit("retest", 404, "stranger");
+  await f.db.prepare("UPDATE assignments SET rubric_json='[]',title='课程后来变更' WHERE id=?").bind(f.assignment.id).run();
+  for (const flow of [text, audio]) {
+    const retest = await flow.submit("retest"); await flow.submit("retest", 409);
+    const raw = await f.db.prepare("SELECT sequence_snapshot_json,score FROM submissions WHERE id=?").bind(retest.id).first();
+    const snapshot = JSON.parse(raw.sequence_snapshot_json);
+    assert.equal(raw.score, null); assert.equal(snapshot.referenceSubmissionId, flow.transfer.id); assert.equal(snapshot.availableAt, availableAt);
+    assert.equal(snapshot.objectiveId, f.goals[0]); assert.deepEqual(snapshot.rubric, rubric); assert.equal(snapshot.stage, "retest");
+    assert.equal(snapshot.context, "更换为邻居与另一道菜。");
+    assert.ok((await f.workspace(f.actors.student)).learningPlan.some((item) => item.id === `sequence:${flow.sequence.id}:retest` && item.waitingReview));
+    await f.act(f.actors.teacher, "confirm_submission_review", f.review(retest.id), 400);
+    if (flow === text) await flow.assess(retest.id, 75);
+    else {
+      await f.upload(f.actors.student, { id: retest.id, sequenceId: flow.sequence.id, sequenceStage: "retest" }, 200);
+      assert.equal((await f.readAudio(f.actors.guardian, retest.id)).status, 200);
+      assert.equal((await f.readAudio(f.actors.otherGuardian, retest.id)).status, 404);
+      await f.act(f.actors.teacher, "confirm_submission_review", f.review(retest.id, { helpLevel: "unknown", contextConfirmed: false }));
+    }
+    for (const actor of ["student", "teacher", "guardian", "admin"]) {
+      const saved = (await f.workspace(f.actors[actor])).learningSequences.find((item) => item.id === flow.sequence.id);
+      assert.equal(saved.retestOpen, true); assert.equal(saved.retestReferenceId, flow.transfer.id); assert.equal(saved.retest[0].id, retest.id);
+      assert.deepEqual(saved.retest[0].rubric, rubric); assert.equal(saved.retest[0].reviewed, true);
+      assert.equal(saved.retest[0].helpLevel, flow === text ? "independent" : "unknown"); assert.equal(saved.retest[0].contextConfirmed, flow === text);
+      assert.equal(saved.retest[0].objectives.length, flow === text ? 1 : 0); assert.equal(saved.retest[0].dimensions.length, flow === text ? 1 : 0);
+    }
+    assert.ok(!(await f.workspace(f.actors.student)).learningPlan.some((item) => item.id === `sequence:${flow.sequence.id}:retest`));
+  }
+});
+
 test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
   const db = new DatabaseSync(":memory:");
   try {
     const files = (await readdir(path.join(root, "drizzle"))).filter((name) => /^\d+.*\.sql$/.test(name)).sort();
     for (const name of files) {
       if (name === "0008_family_exchange.sql") db.exec(`INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,score,review_status) VALUES ('legacy-exchange','legacy-tenant','legacy-assignment','legacy-student',81,'reviewed')`);
+      if (name === "0010_delayed_retest.sql") db.exec(`INSERT INTO learning_sequences (id,tenant_id,student_user_id,assignment_id,objective_id,objective_title,baseline_submission_id,baseline_snapshot_json,title,practice_prompt,transfer_prompt,transfer_context,rubric_json,medium,created_by) VALUES ('legacy-sequence','legacy-tenant','legacy-student','legacy-assignment','goal','旧目标','legacy-exchange','{}','旧任务组','原练习','原迁移','原情境','[]','text','legacy-teacher')`);
       db.exec(await readFile(path.join(root, "drizzle", name), "utf8"));
     }
     assert.deepEqual({ ...db.prepare("SELECT score,family_snapshot_json,family_confirmed_by,family_confirmation_role FROM submissions WHERE id='legacy-exchange'").get() }, { score: 81, family_snapshot_json: "{}", family_confirmed_by: null, family_confirmation_role: null });
@@ -746,6 +834,8 @@ test("additive migration upgrades existing data and runtime initialization is re
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0007_ability_evidence.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0008_family_exchange.sql'").get());
     assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0009_learning_sequences.sql'").get());
+    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0010_delayed_retest.sql'").get());
+    assert.deepEqual({ ...db.prepare("SELECT title,retest_prompt,retest_context,retest_available_at,retest_reference_id FROM learning_sequences WHERE id='legacy-sequence'").get() }, { title: "旧任务组", retest_prompt: "", retest_context: "", retest_available_at: null, retest_reference_id: null });
     assert.deepEqual({ ...db.prepare("SELECT score,sequence_id,sequence_stage,sequence_snapshot_json FROM submissions WHERE id='legacy-exchange'").get() }, { score: 81, sequence_id: null, sequence_stage: null, sequence_snapshot_json: "{}" });
     assert.ok(db.prepare("SELECT name FROM pragma_table_info('submissions') WHERE name='diagnostic_snapshot_json'").get());
   } finally { db.close(); }

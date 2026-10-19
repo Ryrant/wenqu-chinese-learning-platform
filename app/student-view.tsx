@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { StudentDiagnostic, StudentReviewCenter, StudentTodayPlan } from "./learning-loop-views";
 import type { Act, Notify, WorkspaceData } from "./lib/platform-types";
 import { FAMILY_HELP_LABELS, numberValue, stringValue } from "./lib/platform-types";
@@ -9,7 +9,7 @@ import { EXCHANGE_PARTNERS, readFamilyPlan, readFamilyWorkSnapshot, type Exchang
 import { FamilyTaskGuide, FamilyWorkEvidence } from "./family-task-guide";
 import familyStyles from "./family-task-guide.module.css";
 import { SequenceReports } from "./learning-sequences";
-import { SEQUENCE_STAGE_LABELS, sequenceTaskId, readSequenceWork, type SequenceStage } from "./lib/learning-sequence-types";
+import { SEQUENCE_STAGE_LABELS, sequenceTaskId, sequenceStages, sequenceStageReady, sequencePrompt, sequenceTime, readSequenceWork, type SequenceStage } from "./lib/learning-sequence-types";
 
 export function ProgressRing({ value, label }: { value: number; label: string }) {
   return <div className="progress-ring" style={{ "--progress": `${value * 3.6}deg` } as React.CSSProperties}>
@@ -17,14 +17,14 @@ export function ProgressRing({ value, label }: { value: number; label: string })
   </div>;
 }
 
-type Props = { nav: string; data: WorkspaceData; act: Act; refresh: () => Promise<void>; notify: Notify; navigate: (target: string) => void };
+type Props = { nav: string; data: WorkspaceData; receivedAt: number; act: Act; refresh: () => Promise<void>; notify: Notify; navigate: (target: string) => void };
 type RecordingDraft = { id: string; blob: Blob; url: string; assignmentId: string; familyTaskId: string | null; title: string; familyPartner?: ExchangePartner; familyRevision?: number; sequenceId?: string; sequenceStage?: SequenceStage };
 
 function PageTitle({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
   return <section className="welcome-row"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{detail}</p></div></section>;
 }
 
-export function StudentView({ nav, data, act, refresh, notify, navigate }: Props) {
+export function StudentView({ nav, data, receivedAt, act, refresh, notify, navigate }: Props) {
   const [question, setQuestion] = useState("中秋节为什么代表团圆？");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
@@ -35,6 +35,8 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const [partners, setPartners] = useState<Record<string, ExchangePartner>>({});
   const [recording, setRecording] = useState(false);
   const [recordingBusy, setRecordingBusy] = useState(false);
+  const [retestRefreshing, setRetestRefreshing] = useState(false);
+  const [failedRetestRead, setFailedRetestRead] = useState<number | null>(null);
   const [recordingDraft, setRecordingDraft] = useState<RecordingDraft | null>(null);
   const recordingDraftUrl = recordingDraft?.url;
   const recorder = useRef<MediaRecorder | null>(null);
@@ -47,9 +49,9 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const familyRevision = familyPlan?.revision ?? 0;
   const familyPartner = partners[selectedAssignment] ?? familyPlan?.partner ?? "family";
   const sequences = (data.learningSequences ?? []).filter((item) => item.studentUserId === data.user.id);
-  const sequence = sequences.find((item) => (["practice", "transfer"] as const).some((stage) => sequenceTaskId(item.id, stage) === selectedAssignment));
-  const sequenceStage: SequenceStage = selectedAssignment.endsWith(":transfer") ? "transfer" : "practice";
-  const sequenceReady = !sequence || ((sequenceStage === "practice" || sequence.practice.some((work) => work.reviewed)) && !sequence[sequenceStage].some((work) => !work.reviewed));
+  const sequence = sequences.find((item) => sequenceStages(item).some((stage) => sequenceTaskId(item.id, stage) === selectedAssignment));
+  const sequenceStage: SequenceStage = selectedAssignment.endsWith(":retest") ? "retest" : selectedAssignment.endsWith(":transfer") ? "transfer" : "practice";
+  const sequenceReady = !sequence || (sequenceStageReady(sequence, sequenceStage) && !sequence[sequenceStage].some((work) => !work.reviewed));
   const setTextAnswer = (value: string) => setTextDrafts((drafts) => {
     const next = { ...drafts };
     if (!value) delete next[selectedAssignment];
@@ -65,7 +67,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const targetSelector = <label>提交任务<select value={selectedAssignment} onChange={(event) => setSelectedAssignment(event.target.value)} required disabled={recording || recordingBusy || busy}>
     <option value="">请选择任务</option>{published.map((item) => <option value={String(item.id)} key={String(item.id)}>{stringValue(item.title)}</option>)}
     {familyTasks.map((item) => <option value={`family:${item.id}`} key={`family:${item.id}`}>家庭：{stringValue(item.title)}</option>)}
-    {sequences.filter((item) => published.some((task) => task.id === item.assignmentId)).flatMap((item) => (["practice", "transfer"] as const).map((stage) => <option key={sequenceTaskId(item.id, stage)} value={sequenceTaskId(item.id, stage)} disabled={(stage === "transfer" && !item.practice.some((work) => work.reviewed)) || item[stage].some((work) => !work.reviewed)}>{SEQUENCE_STAGE_LABELS[stage]}：{item.title}</option>))}
+    {sequences.filter((item) => published.some((task) => task.id === item.assignmentId)).flatMap((item) => sequenceStages(item).map((stage) => <option key={sequenceTaskId(item.id, stage)} value={sequenceTaskId(item.id, stage)} disabled={!sequenceStageReady(item, stage) || item[stage].some((work) => !work.reviewed)}>{SEQUENCE_STAGE_LABELS[stage]}：{item.title}{stage === "retest" && !item.retestOpen ? "（尚未开放）" : ""}</option>))}
   </select></label>;
   useEffect(() => {
     mounted.current = true;
@@ -80,6 +82,23 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   }, []);
   useEffect(() => () => { if (recordingDraftUrl) URL.revokeObjectURL(recordingDraftUrl); }, [recordingDraftUrl]);
   useEffect(() => { if (recorder.current?.state === "recording") recorder.current.stop(); }, [nav]);
+  async function refreshRetestStatus() {
+    if (retestRefreshing) return;
+    setRetestRefreshing(true);
+    try { await refresh(); setFailedRetestRead(null); }
+    catch { setFailedRetestRead(receivedAt); }
+    finally { setRetestRefreshing(false); }
+  }
+  const refreshRetest = useEffectEvent(() => { void refreshRetestStatus(); });
+  useEffect(() => {
+    const next = (data.learningSequences ?? []).filter((item) => item.studentUserId === data.user.id && item.retestAvailableAt && !item.retestOpen)
+      .map((item) => Date.parse(item.retestAvailableAt!)).sort((a, b) => a - b)[0];
+    if (!next) return;
+    // 使用本次服务器响应的时间差，页面持续打开时也能在开放后刷新任务状态。
+    const delay = Math.max(1000, next - Date.parse(data.generatedAt) - (performance.now() - receivedAt));
+    const timer = window.setTimeout(() => refreshRetest(), Math.min(delay, 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [data.learningSequences, data.generatedAt, data.user.id, receivedAt]);
   const masteryAverage = data.mastery.length
     ? Math.round(data.mastery.reduce((sum, row) => sum + numberValue(row.mastery) * 100, 0) / data.mastery.length)
     : 0;
@@ -224,8 +243,11 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
     {recordingDraft && <div className="recording-preview"><p>提交到：{recordingDraft.title}{recordingDraft.familyPartner ? ` · 交流对象：${EXCHANGE_PARTNERS[recordingDraft.familyPartner].zh}` : ""}</p><audio controls src={recordingDraft.url} aria-label="录音试听"/>{recordingTaskChanged && <p role="alert">交流要求已更新，请核对后重新录音。</p>}<button className="primary-button" type="button" disabled={recordingBusy || recordingTaskChanged} onClick={uploadRecording}>{recordingBusy ? "正在提交…" : "提交录音给老师"}</button></div>}
   </div>;
 
+  const retestRefreshNotice = failedRetestRead === receivedAt && <article className="panel" role="alert"><p>复测开放状态刷新失败。当前输入和录音已保留，恢复网络后可在这里重试。</p><button className="soft-button" type="button" disabled={retestRefreshing} onClick={refreshRetestStatus}>{retestRefreshing ? "正在刷新…" : "重试刷新复测状态"}</button></article>;
+
   if (nav === "AI 课堂") return <section>
     <PageTitle eyebrow="来源透明 · 学生问答" title="AI 课堂" detail="回答只基于本租户已发布内容；找不到来源时会明确拒答。"/>
+    {retestRefreshNotice}
     <form className="panel query-panel" onSubmit={askTutor}>
       <label>想问什么？<textarea value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={4000} required/></label>
       <button className="primary-button" disabled={busy}>{busy ? "正在检索…" : "检索并生成回答"}</button>
@@ -241,6 +263,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   </section>;
 
   if (nav === "学习任务") return <section>
+    {retestRefreshNotice}
     <PageTitle eyebrow="诊断与真实作业提交" title="我的学习任务" detail={`${published.length} 项已发布任务；提交后进入教师审核。`}/>
     <StudentDiagnostic data={data} act={act} notify={notify} onStartAssignment={(id) => {
       if (recording || recordingBusy || busy) return notify("请先完成当前提交", "处理当前作品后再切换任务。", "error");
@@ -252,7 +275,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
       <p>{stringValue(item.activity_type)} · 截止 {stringValue(item.due_at)}</p>
     </article>)}</div>
     <section id="student-submission">
-    {sequence && <article className="panel form-card"><h3>{sequence.title} · {SEQUENCE_STAGE_LABELS[sequenceStage]}</h3><p>学习目标：{sequence.objectiveTitle}</p><p className="generated-copy">{sequenceStage === "practice" ? sequence.practicePrompt : sequence.transferPrompt}</p><p>迁移情境变化：{sequence.transferContext}</p><small>本组量规：{sequence.rubric.map((item) => `${item.name} ${item.weight}%`).join("、")}。教师分别评价各阶段，并记录实际帮助。</small>{!sequenceReady && <p role="status">先完成练习及教师评价；已有待评作品时不能重复提交。</p>}</article>}
+    {sequence && <article className="panel form-card"><h3>{sequence.title} · {SEQUENCE_STAGE_LABELS[sequenceStage]}</h3><p>学习目标：{sequence.objectiveTitle}</p><p className="generated-copy">{sequencePrompt(sequence, sequenceStage)}</p><p>情境变化：{sequenceStage === "retest" ? sequence.retestContext : sequence.transferContext}</p>{sequenceStage === "retest" && sequence.retestAvailableAt && <p>开放时间：{sequenceTime(sequence.retestAvailableAt)}</p>}<small>本组量规：{sequence.rubric.map((item) => `${item.name} ${item.weight}%`).join("、")}。教师分别评价各阶段，并记录实际帮助。</small>{!sequenceReady && <p role="status">{sequenceStage === "retest" && !sequence.retestOpen ? "复测尚未开放，请在开放时间后提交。" : "先完成练习及教师评价；已有待评作品时不能重复提交。"}</p>}</article>}
     {familyTask && <article className="panel form-card"><FamilyTaskGuide plan={familyPlan} title={`家庭交流：${stringValue(familyTask.title)}`} detail={stringValue(familyTask.detail, "")} objectiveTitle={stringValue(familyTask.objectiveTitle, "")} expanded/>
       <label>本次实际交流对象 / Actual partner<select value={familyPartner} disabled={recording || recordingBusy || busy} onChange={(event) => {
         const partner = event.target.value as ExchangePartner;
@@ -276,6 +299,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
 
   if (nav === "成长档案") return <section>
     <PageTitle eyebrow="来自掌握度快照与作业记录" title="成长档案" detail="每一项都能追溯到真实学习证据。"/>
+    {retestRefreshNotice}
     <AbilityEvidenceProfile studentId={data.user.id} revision={data.generatedAt}/>
     <SequenceReports sequences={sequences} onStartTask={(id) => { if (recording || recordingBusy || busy) return; setSelectedAssignment(id); navigate("学习任务"); }}/>
     <StudentReviewCenter data={data} act={act} notify={notify}/>
@@ -299,6 +323,7 @@ export function StudentView({ nav, data, act, refresh, notify, navigate }: Props
   const current = assignment;
   return <>
     <PageTitle eyebrow="学习总览 · 数据实时读取" title={`早上好，${data.user.displayName}！`} detail="今天也一起发现中文里的小惊喜。"/>
+    {retestRefreshNotice}
     <StudentTodayPlan data={data} act={act} notify={notify} navigate={navigate} onStartTask={(id) => { setSelectedAssignment(id); navigate("学习任务"); }}/>
     <section className="hero-learning">
       <div className="hero-copy">

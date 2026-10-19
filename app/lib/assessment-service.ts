@@ -112,7 +112,7 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
   const dimensionScores = scoredItems(input.dimensionScores, "name", rubric.map((item) => item.name)) as DimensionReviewScore[];
   if ((sequence && input.helpLevel === undefined) || (input.helpLevel !== undefined && (typeof input.helpLevel !== "string" || !Object.hasOwn(HELP_LEVEL_LABELS, input.helpLevel)))) throw new Error("invalid_review_help_level");
   if (input.contextConfirmed !== undefined && typeof input.contextConfirmed !== "boolean") throw new Error("invalid_review_context");
-  const reviewEvidence: ReviewEvidence = { version: 1, rubric, objectives, helpLevel: input.helpLevel as HelpLevel ?? "unknown", contextConfirmed: sequence?.stage === "transfer" && input.contextConfirmed === true };
+  const reviewEvidence: ReviewEvidence = { version: 1, rubric, objectives, helpLevel: input.helpLevel as HelpLevel ?? "unknown", contextConfirmed: (sequence?.stage === "transfer" || sequence?.stage === "retest") && input.contextConfirmed === true };
   try {
     await db.batch([
       db.prepare(`INSERT INTO submission_review_confirmations

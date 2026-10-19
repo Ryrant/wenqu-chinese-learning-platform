@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminView, GuardianView, TeacherView } from "./staff-views";
 import { StudentView } from "./student-view";
 import type { Notify, Role, WorkspaceData } from "./lib/platform-types";
@@ -29,6 +29,7 @@ async function readJson<T extends Record<string, unknown>>(response: Response): 
 
 export function Dashboard() {
   const [data, setData] = useState<WorkspaceData | null>(null);
+  const [workspaceReceivedAt, setWorkspaceReceivedAt] = useState(0);
   const [role, setRole] = useState<Role>("student");
   const [activeNav, setActiveNav] = useState(navigation.student[0]);
   const [toast, setToast] = useState<Toast>(null);
@@ -62,7 +63,7 @@ export function Dashboard() {
     return { mode: payload.authMode ?? null, setupRequired: payload.setupRequired === true };
   }
 
-  async function refresh(studentId?: string) {
+  const refresh = useCallback(async (studentId?: string) => {
     setError("");
     const selectedStudentId = studentId ?? data?.selectedStudent?.id;
     const workspaceUrl = selectedStudentId ? `/api/v1/workspace?studentId=${encodeURIComponent(selectedStudentId)}` : "/api/v1/workspace";
@@ -70,12 +71,13 @@ export function Dashboard() {
     const payload = await readJson<WorkspaceData | { error?: string }>(response);
     if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
     const next = payload as WorkspaceData;
+    setWorkspaceReceivedAt(performance.now());
     setData(next);
     if (!next.user.roles.includes(role)) {
       const first = next.user.roles[0] ?? "student";
       setRole(first); setActiveNav(navigation[first][0]);
     }
-  }
+  }, [data, role]);
 
   useEffect(() => {
     let active = true;
@@ -87,6 +89,7 @@ export function Dashboard() {
       })
       .then((next) => {
         if (active) {
+          setWorkspaceReceivedAt(performance.now());
           setData(next);
           void loadAuthMode().catch(() => null);
         }
@@ -225,7 +228,7 @@ export function Dashboard() {
         {noticesOpen && <div className="notice-drawer"><div className="panel-heading"><h3>通知</h3><button onClick={() => setNoticesOpen(false)}>关闭</button></div>{data.notifications.length ? data.notifications.map((item) => <button key={String(item.id)} className={item.read_at ? "read" : ""} onClick={async () => { await act("mark_notification", { id: item.id }); }}><strong>{String(item.title)}</strong><small>{String(item.detail)}</small></button>) : <p className="empty-state">暂无通知</p>}</div>}
       </header>
       <div className="content"><div className="truth-banner"><strong>✓ 已连接 D1 + R2</strong><span>所有数字来自当前租户数据；未配置的模型能力会明确标注，不展示伪造分数。</span></div>
-        {role === "student" && <StudentView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify} navigate={setActiveNav}/>}
+        {role === "student" && <StudentView nav={activeNav} data={data} receivedAt={workspaceReceivedAt} act={act} refresh={refresh} notify={notify} navigate={setActiveNav}/>}
         {role === "teacher" && <TeacherView nav={activeNav} data={data} act={act} notify={notify}/>}
         {role === "guardian" && <GuardianView nav={activeNav} data={data} act={act} notify={notify} selectStudent={async (studentId) => refresh(studentId)}/>}
         {role === "admin" && <AdminView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify}/>}

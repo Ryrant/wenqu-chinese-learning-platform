@@ -17,6 +17,7 @@ type WorkRow = {
 type SequenceRow = {
   id: string; student_user_id: string; studentName: string; assignment_id: string; objective_id: string; objective_title: string;
   title: string; practice_prompt: string; transfer_prompt: string; transfer_context: string; rubric_json: string; medium: "text" | "audio"; baseline_snapshot_json: string;
+  retest_prompt: string; retest_context: string; retest_available_at: string | null; retest_reference_id: string | null;
 };
 
 async function workRows(db: PlatformDatabase, context: PlatformContext, filter: string, args: unknown[] = []) {
@@ -110,30 +111,71 @@ export async function createLearningSequence(db: PlatformDatabase, context: Plat
   return { id };
 }
 
+export async function scheduleDelayedRetest(db: PlatformDatabase, context: PlatformContext, input: {
+  sequenceId: string; referenceSubmissionId: string; prompt: string; context: string; availableAt: string;
+}) {
+  if (!context.roles.some((role) => role === "teacher" || role === "admin")) throw new Error("forbidden");
+  const row = await db.prepare("SELECT * FROM learning_sequences WHERE id=? AND tenant_id=?").bind(input.sequenceId, context.tenantId).first<SequenceRow & { baseline_submission_id: string }>();
+  if (!row) throw new Error("sequence_not_found");
+  await assertSubmissionReviewAccess(db, context, row.baseline_submission_id);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(input.availableAt) || !Number.isFinite(Date.parse(input.availableAt))) throw new Error("invalid_retest_available_at");
+  const availableAt = new Date(input.availableAt).toISOString();
+  function savedResult(saved: SequenceRow) {
+    if (!saved.retest_available_at) return null;
+    if (saved.retest_reference_id !== input.referenceSubmissionId || saved.retest_prompt !== input.prompt || saved.retest_context !== input.context || saved.retest_available_at !== availableAt) throw new Error("sequence_retest_already_scheduled");
+    return { id: row!.id, availableAt };
+  }
+  const existing = savedResult(row);
+  if (existing) return existing;
+  if (Date.parse(availableAt) <= Date.now()) throw new Error("invalid_retest_available_at");
+  const reference = (await workRows(db, context, "s.id=? AND s.sequence_id=? AND s.student_user_id=? AND s.sequence_stage='transfer' AND s.review_status='reviewed' AND a.status='published'", [input.referenceSubmissionId, row.id, row.student_user_id]))[0];
+  if (!reference) throw new Error("sequence_transfer_not_found");
+  const enrolled = await db.prepare("SELECT id FROM enrollments WHERE tenant_id=? AND student_user_id=? AND status='active' AND class_id=(SELECT class_id FROM assignments WHERE id=? AND tenant_id=?)")
+    .bind(context.tenantId, row.student_user_id, row.assignment_id, context.tenantId).first();
+  if (!enrolled) throw new Error("invalid_sequence_student");
+  if (input.prompt.trim() === evidence(reference).prompt.trim()) throw new Error("invalid_sequence_context");
+  // 时间和参照作品一次保存并固定；条件更新让并发发布也只产生一份安排及审计记录。
+  await db.batch([
+    db.prepare("UPDATE learning_sequences SET retest_prompt=?,retest_context=?,retest_available_at=?,retest_reference_id=? WHERE id=? AND tenant_id=? AND retest_available_at IS NULL")
+      .bind(input.prompt, input.context, availableAt, reference.id, row.id, context.tenantId),
+    db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) SELECT ?,?,?,'learning_sequence.retest_scheduled','learning_sequence',?,? WHERE changes()>0")
+      .bind(crypto.randomUUID(), context.tenantId, context.userId, row.id, JSON.stringify({ referenceSubmissionId: reference.id, availableAt })),
+  ]);
+  const saved = await db.prepare("SELECT * FROM learning_sequences WHERE id=? AND tenant_id=?").bind(row.id, context.tenantId).first<SequenceRow>();
+  if (!saved || !savedResult(saved)) throw new Error("sequence_not_found");
+  return { id: row.id, availableAt };
+}
+
 export async function assertSequenceTarget(db: PlatformDatabase, context: PlatformContext, input: { assignmentId: string; sequenceId?: string | null; sequenceStage?: string; familyTaskId?: string | null }): Promise<SequenceWorkSnapshot | null> {
   if (!input.sequenceId && input.sequenceStage === undefined) return null;
-  if (typeof input.sequenceId !== "string" || !input.sequenceId || (input.sequenceStage !== "practice" && input.sequenceStage !== "transfer") || input.familyTaskId) throw new Error("invalid_sequence_target");
+  if (typeof input.sequenceId !== "string" || !input.sequenceId || (input.sequenceStage !== "practice" && input.sequenceStage !== "transfer" && input.sequenceStage !== "retest") || input.familyTaskId) throw new Error("invalid_sequence_target");
   const row = await db.prepare("SELECT * FROM learning_sequences WHERE id=? AND tenant_id=? AND student_user_id=? AND assignment_id=?")
     .bind(input.sequenceId, context.tenantId, context.userId, input.assignmentId).first<SequenceRow>();
   if (!row) throw new Error("sequence_not_found");
+  if (input.sequenceStage === "retest") {
+    if (!row.retest_available_at || !row.retest_reference_id) throw new Error("sequence_retest_required");
+    if (Date.parse(row.retest_available_at) > Date.now()) throw new Error("sequence_retest_not_open");
+  }
   if (input.sequenceStage === "transfer") {
     const practice = await db.prepare("SELECT id FROM submissions WHERE tenant_id=? AND sequence_id=? AND student_user_id=? AND sequence_stage='practice' AND review_status='reviewed' LIMIT 1")
       .bind(context.tenantId, row.id, context.userId).first();
     if (!practice) throw new Error("sequence_practice_required");
   }
   return { version: 1, sequenceId: row.id, stage: input.sequenceStage, title: `${row.title} · ${SEQUENCE_STAGE_LABELS[input.sequenceStage]}`,
-    prompt: input.sequenceStage === "practice" ? row.practice_prompt : row.transfer_prompt, context: row.transfer_context,
+    prompt: input.sequenceStage === "practice" ? row.practice_prompt : input.sequenceStage === "transfer" ? row.transfer_prompt : row.retest_prompt,
+    context: input.sequenceStage === "retest" ? row.retest_context : row.transfer_context,
+    ...(input.sequenceStage === "retest" ? { availableAt: row.retest_available_at!, referenceSubmissionId: row.retest_reference_id! } : {}),
     objectiveId: row.objective_id, objectiveTitle: row.objective_title, rubric: JSON.parse(row.rubric_json), medium: row.medium };
 }
 
 export async function readSequenceWorkspace(db: PlatformDatabase, context: PlatformContext, focusedStudentId: string | null) {
   const access = submissionAccessClause(context);
   const filter = focusedStudentId ? " AND ls.student_user_id=?" : "";
-  const rows = (await db.prepare(`SELECT ls.*,u.display_name AS studentName FROM learning_sequences ls
+  const rows = (await db.prepare(`SELECT ls.*,u.display_name AS studentName,c.teacher_user_id AS teacherUserId FROM learning_sequences ls
     JOIN submissions s ON s.id=ls.baseline_submission_id AND s.tenant_id=ls.tenant_id
     JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
     JOIN users u ON u.id=ls.student_user_id WHERE ls.tenant_id=? AND ${access.sql}${filter} ORDER BY ls.created_at DESC,ls.rowid DESC`)
-    .bind(context.tenantId, ...access.args, ...(focusedStudentId ? [focusedStudentId] : [])).all<SequenceRow>()).results;
+    .bind(context.tenantId, ...access.args, ...(focusedStudentId ? [focusedStudentId] : [])).all<SequenceRow & { teacherUserId: string }>()).results;
   const ids = rows.map((item) => item.id);
   const works = ids.length ? await workRows(db, context, `s.sequence_id IN (${ids.map(() => "?").join(",")})`, ids) : [];
   const learningSequences: LearningSequence[] = rows.map((row) => ({
@@ -141,8 +183,12 @@ export async function readSequenceWorkspace(db: PlatformDatabase, context: Platf
     objectiveId: row.objective_id, objectiveTitle: row.objective_title, title: row.title, practicePrompt: row.practice_prompt,
     transferPrompt: row.transfer_prompt, transferContext: row.transfer_context, rubric: JSON.parse(row.rubric_json), medium: row.medium,
     baseline: JSON.parse(row.baseline_snapshot_json),
+    retestPrompt: row.retest_prompt, retestContext: row.retest_context, retestAvailableAt: row.retest_available_at, retestReferenceId: row.retest_reference_id,
+    retestOpen: !!row.retest_available_at && Date.parse(row.retest_available_at) <= Date.now(),
+    canScheduleRetest: context.roles.includes("admin") || (context.roles.includes("teacher") && row.teacherUserId === context.userId),
     practice: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "practice").map(evidence),
     transfer: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "transfer").map(evidence),
+    retest: works.filter((work) => work.sequence_id === row.id && work.sequence_stage === "retest").map(evidence),
   }));
   const sequenceSources = context.roles.some((role) => role === "admin" || role === "teacher")
     ? (await workRows(db, context, "s.review_status='reviewed' AND a.status='published' AND (?=1 OR c.teacher_user_id=?)", [context.roles.includes("admin") ? 1 : 0, context.userId])).map(source).filter((item) => item.work.objectives.length)

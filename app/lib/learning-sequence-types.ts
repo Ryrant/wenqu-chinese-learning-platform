@@ -1,11 +1,11 @@
 import type { RubricDimension } from "./learning-loop";
 
-export const SEQUENCE_STAGE_LABELS = { practice: "针对性练习", transfer: "迁移任务" } as const;
+export const SEQUENCE_STAGE_LABELS = { practice: "针对性练习", transfer: "迁移任务", retest: "延后复测" } as const;
 export type SequenceStage = keyof typeof SEQUENCE_STAGE_LABELS;
 export type HelpLevel = "unknown" | "independent" | "prompted" | "assisted";
 export const HELP_LEVEL_LABELS: Record<HelpLevel, string> = { unknown: "未记录", independent: "独立完成", prompted: "提供了提示", assisted: "共同完成或较多帮助" };
 export type ReviewEvidence = { version: 1; rubric: RubricDimension[]; objectives: Array<{ id: string; title: string }>; helpLevel: HelpLevel; contextConfirmed: boolean };
-export type SequenceWorkSnapshot = { version: 1; sequenceId: string; stage: SequenceStage; title: string; prompt: string; context: string; objectiveId: string; objectiveTitle: string; rubric: RubricDimension[]; medium: "text" | "audio" };
+export type SequenceWorkSnapshot = { version: 1; sequenceId: string; stage: SequenceStage; title: string; prompt: string; context: string; objectiveId: string; objectiveTitle: string; rubric: RubricDimension[]; medium: "text" | "audio"; availableAt?: string; referenceSubmissionId?: string };
 export type SequenceEvidence = {
   id: string; title: string; prompt: string; mediaId: string | null; textAnswer: string | null; hasAudio: boolean;
   submittedAt: string; reviewedAt: string | null; reviewed: boolean; score: number | null; feedback: string;
@@ -17,6 +17,7 @@ export type LearningSequence = {
   id: string; studentUserId: string; studentName: string; assignmentId: string; objectiveId: string; objectiveTitle: string;
   title: string; practicePrompt: string; transferPrompt: string; transferContext: string; rubric: RubricDimension[]; medium: "text" | "audio";
   baseline: SequenceEvidence; practice: SequenceEvidence[]; transfer: SequenceEvidence[];
+  retestPrompt: string; retestContext: string; retestAvailableAt: string | null; retestReferenceId: string | null; retestOpen: boolean; retest: SequenceEvidence[]; canScheduleRetest: boolean;
 };
 export function jsonValue<T>(value: unknown, fallback: T): T {
   if (typeof value !== "string") return fallback;
@@ -39,3 +40,13 @@ export function sameRubric(left: RubricDimension[] | null, right: RubricDimensio
     && left.every((item) => right.some((other) => item.name === other.name && item.weight === other.weight));
 }
 export function sequenceTaskId(id: string, stage: SequenceStage) { return `sequence:${id}:${stage}`; }
+export function sequenceStages(sequence: LearningSequence): SequenceStage[] { return sequence.retestAvailableAt ? ["practice", "transfer", "retest"] : ["practice", "transfer"]; }
+export function sequenceStageReady(sequence: LearningSequence, stage: SequenceStage) {
+  return stage === "practice" || (stage === "retest" ? sequence.retestOpen : sequence.practice.some((work) => work.reviewed));
+}
+export function sequencePrompt(sequence: LearningSequence, stage: SequenceStage) { return stage === "practice" ? sequence.practicePrompt : stage === "transfer" ? sequence.transferPrompt : sequence.retestPrompt; }
+export function sequenceTime(value: string) {
+  // SQLite CURRENT_TIMESTAMP 是 UTC；与复测的带时区时间统一显示，避免看起来在开放前提交。
+  const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? value.replace(" ", "T") + "Z" : value;
+  return new Date(iso).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }) + "（北京时间）";
+}
