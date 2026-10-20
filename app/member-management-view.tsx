@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo, useRef, useState } from "react";
 import type { Act, MemberRow, Notify, WorkspaceData } from "./lib/platform-types";
 import { stringValue } from "./lib/platform-types";

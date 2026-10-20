@@ -1,5 +1,3 @@
-"use client";
-
 import { Card } from "@/components/ui/card";
 import { SectionHeading } from "./components/workspace-ui";
 import { Button } from "@/components/ui/button";

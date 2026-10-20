@@ -228,17 +228,13 @@ test("legacy cleanup rolls back grants, audit and marker together on failure, th
   const account = await legacyAccount(db, "retry");
   await db.prepare("DELETE FROM app_settings WHERE key='role_isolation_v1'").run();
   const before = await authorizationState(db);
-  const failingDb = {
-    prepare(query) {
-      const statement = db.prepare(query);
-      if (query.startsWith("INSERT OR IGNORE INTO app_settings")) statement.run = async () => { throw new Error("injected_migration_marker_failure"); };
-      return statement;
-    },
-    batch: db.batch.bind(db),
-  };
-  await assert.rejects(api.cleanupLegacyDemoRoles(failingDb), /injected_migration_marker_failure/);
+  await db.prepare(`CREATE TRIGGER fail_role_isolation_marker BEFORE INSERT ON app_settings
+    WHEN NEW.key='role_isolation_v1'
+    BEGIN SELECT RAISE(ABORT, 'injected_migration_marker_failure'); END`).run();
+  await assert.rejects(api.cleanupLegacyDemoRoles(db), /injected_migration_marker_failure/);
   assert.deepEqual(await authorizationState(db), before);
   assert.equal(await db.prepare("SELECT key FROM app_settings WHERE key='role_isolation_v1'").first(), null);
+  await db.prepare("DROP TRIGGER fail_role_isolation_marker").run();
   await api.cleanupLegacyDemoRoles(db);
   assert.deepEqual((await db.prepare("SELECT role FROM role_memberships WHERE user_id=?").bind(account.userId).all()).results, [{ role: "admin" }]);
   assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE actor_user_id=? AND action='auth.legacy_demo_role_removed'").bind(account.userId).first()).count, 3);

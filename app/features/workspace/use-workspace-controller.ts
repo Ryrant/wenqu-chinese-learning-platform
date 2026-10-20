@@ -4,6 +4,7 @@ import type { Role, WorkspaceSection } from "../../lib/platform-types";
 import { ApiError, postJson, requestJson } from "./api";
 import { sectionsChangedByAction } from "./invalidation";
 import { defaultWorkspaceRole, matchWorkspaceRoute, pageSections, workspacePath, type WorkspaceRoute } from "./navigation";
+import { observePageResume } from "./observe-page-resume";
 import { useWorkspace } from "./use-workspace";
 
 type Session = {
@@ -13,6 +14,7 @@ type Session = {
 
 export function errorMessage(reason: unknown) {
   if (reason instanceof ApiError) {
+    if (reason.code === "session_changed") return "登录账号或所属机构已改变，请重新登录后进入工作区。";
     if (reason.status === 401) return "请先登录";
     if (reason.code === "forbidden") return "当前账号未获授权，请联系管理员分配角色。";
     if (reason.code === "password_change_required") return "请先修改临时密码";
@@ -98,17 +100,41 @@ export function useWorkspaceController() {
       try {
         // 写入可能使在途的读取失效；只在所有页面分组都已接收时切换可见导航。
         for (let attempt = 0; attempt < 3; attempt++) {
-          await store.load(sections, { studentId });
+          await store.load(sections, { studentId, revalidate: attempt === 0 });
           if (!active || ticket !== epoch.current) return;
-          if (store.ready(sections)) { setCommittedRoute(desiredRoute); return; }
+          if (store.ready(sections)) { setCommittedRoute(desiredRoute); setRefreshError(""); return; }
         }
         throw new Error("数据正在更新，请重新读取页面。");
       } catch (reason) {
-        if (active && ticket === epoch.current) { handleAccessError(reason); setPageError(errorMessage(reason)); }
+        if (ticket !== epoch.current) return;
+        // store 清空身份时会先卸载旧页面，失效通知仍须完成退出和可见提示。
+        if (reason instanceof ApiError && reason.code === "session_changed") { handleAccessError(reason); return; }
+        if (active) { handleAccessError(reason); setPageError(errorMessage(reason)); }
       } finally { if (active && ticket === epoch.current) setPageLoading(false); }
     })();
     return () => { active = false; };
   }, [initializing, userId, rolesKey, studentsKey, session?.authenticated, session?.user?.mustChangePassword, desiredRoute, location.pathname, location.search, navigate, store, handleAccessError, retry]);
+
+  useEffect(() => {
+    if (!session?.authenticated || session.user?.mustChangePassword || !committedRoute || !rolesKey.split(",").includes(committedRoute.role) ||
+      desiredRoute?.role !== committedRoute.role || desiredRoute.page !== committedRoute.page) return;
+    let active = true;
+    const stop = observePageResume(() => {
+      const ticket = epoch.current;
+      // 会话失效后清空快照；迟到的窗口事件不得重新启动已退出的读取。
+      if (!store.getSnapshot().data) return;
+      void store.load([...pageSections(committedRoute), "notifications"], { revalidate: true }).then(() => {
+        if (active && ticket === epoch.current) setRefreshError("");
+      }).catch((reason) => {
+        if (ticket !== epoch.current) return;
+        if (reason instanceof ApiError && reason.code === "session_changed") { handleAccessError(reason); return; }
+        if (!active) return;
+        handleAccessError(reason);
+        setRefreshError(`读取最新数据失败：${errorMessage(reason)}。已保留上次读取的内容。`);
+      });
+    });
+    return () => { active = false; stop(); };
+  }, [session?.authenticated, session?.user?.mustChangePassword, rolesKey, committedRoute, desiredRoute, store, handleAccessError]);
 
   const refresh = useCallback(async (studentId?: string) => {
     const route = committed.current;
