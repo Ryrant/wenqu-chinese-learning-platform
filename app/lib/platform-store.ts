@@ -1,5 +1,9 @@
 import { sessionCookieName, verifySessionToken } from "./auth-token";
 import { ensurePlatformRuntime, type PlatformDatabase } from "./platform-runtime";
+import { createInitialAdminAccount } from "./standard-login";
+import { cleanupLegacyDemoRoles } from "./legacy-demo-roles";
+
+export { cleanupLegacyDemoRoles } from "./legacy-demo-roles";
 
 export type PlatformRole = "student" | "teacher" | "guardian" | "admin";
 export type AuthMode = "standard" | "local";
@@ -9,12 +13,6 @@ const schemaReady = new WeakMap<PlatformDatabase, Promise<void>>();
 
 export function getAuthMode(): AuthMode {
   return process.env.NODE_ENV === "development" ? "local" : "standard";
-}
-
-function idPart(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) { hash ^= value.charCodeAt(index); hash = Math.imul(hash, 16777619); }
-  return (hash >>> 0).toString(36);
 }
 
 function localIdentity(request: Request) {
@@ -126,7 +124,7 @@ export async function ensurePlatformSchema(db: PlatformDatabase) {
     await cached;
     return;
   }
-  const pending = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); })().catch((error) => {
+  const pending = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); await cleanupLegacyDemoRoles(db); })().catch((error) => {
     schemaReady.delete(db);
     throw error;
   });
@@ -240,92 +238,30 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
   ]);
 }
 
-async function seedWorkspace(context: Omit<PlatformContext, "roles">) {
-  const { db, tenantId, userId, userEmail, displayName } = context;
-  const classId = `${tenantId}-class-a2`;
-  const objectives = [
-    [`${tenantId}-obj-speak`, "A2-S1", "完整描述家庭活动", "口语表达", 0.72],
-    [`${tenantId}-obj-listen`, "A2-L1", "理解节日对话", "听力理解", 0.78],
-    [`${tenantId}-obj-write`, "A2-W1", "书写家庭主题词语", "汉字书写", 0.63],
-    [`${tenantId}-obj-culture`, "A2-C1", "理解团圆文化", "文化理解", 0.88],
-  ] as const;
-  const diagnosticItems = [
-    [`${tenantId}-diag-listen`, `${tenantId}-obj-listen`, "中秋节时，小华说“我们一家人一起吃月饼”。他在和谁一起？", ["同学", "家人", "老师", "邻居"], 1, "“一家人”说明他和家人在一起。"],
-    [`${tenantId}-diag-speak`, `${tenantId}-obj-speak`, "哪一句能完整描述家庭活动？", ["吃月饼", "一家人", "我们一家人一起吃月饼。", "中秋节"], 2, "完整句需要包含人物和活动。"],
-    [`${tenantId}-diag-write`, `${tenantId}-obj-write`, "“团圆”的“团”应选择哪一项？", ["困", "团", "园", "圆"], 1, "“团圆”表示亲人相聚。"],
-    [`${tenantId}-diag-culture`, `${tenantId}-obj-culture`, "中秋节的圆月和月饼通常象征什么？", ["远行", "团圆", "比赛", "上学"], 1, "圆月和月饼常用来象征家人团圆。"],
-  ] as const;
-  const due = new Date(Date.now() + 7 * 86400000).toISOString();
-  const defaultRubricJson = JSON.stringify([
-    { name: "内容准确性", weight: 40 },
-    { name: "语言表达", weight: 35 },
-    { name: "文化理解", weight: 25 },
-  ]);
-  const festivalDoc = `${tenantId}-doc-festival`, textbookDoc = `${tenantId}-doc-textbook`;
-  await db.batch([
-    db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,?,?)").bind(tenantId, "华文知行示范学校", "sg", "active"),
-    db.prepare("INSERT OR IGNORE INTO users (id,email,display_name,locale) VALUES (?,?,?,?)").bind(userId, userEmail, displayName, "zh-CN"),
-    ...(["student", "teacher", "guardian", "admin"] as PlatformRole[]).map((role) => db.prepare("INSERT OR IGNORE INTO role_memberships (tenant_id,user_id,role) VALUES (?,?,?)").bind(tenantId, userId, role)),
-    db.prepare("INSERT OR IGNORE INTO classes (id,tenant_id,name,level,teacher_user_id,academic_year) VALUES (?,?,?,?,?,?)").bind(classId, tenantId, "四年级乙班", "A2", userId, "2026"),
-    db.prepare("INSERT OR IGNORE INTO enrollments (tenant_id,class_id,student_user_id,status) VALUES (?,?,?,?)").bind(tenantId, classId, userId, "active"),
-    db.prepare("INSERT OR IGNORE INTO guardian_student_links (tenant_id,guardian_user_id,student_user_id,verified_at) VALUES (?,?,?,CURRENT_TIMESTAMP)").bind(tenantId, userId, userId),
-    ...objectives.map(([id, code, title, skill]) => db.prepare("INSERT OR IGNORE INTO learning_objectives (id,tenant_id,code,title,skill,level) VALUES (?,?,?,?,?,?)").bind(id, tenantId, code, title, skill, "A2")),
-    ...diagnosticItems.map(([id, objectiveId, prompt, options, correctOption, explanation], index) => db.prepare("INSERT OR IGNORE INTO diagnostic_items (id,tenant_id,objective_id,level,prompt,options_json,correct_option,explanation,sort_order,status,created_by) VALUES (?,?,?,'A2',?,?,?,?,?,'active',?)").bind(id, tenantId, objectiveId, prompt, JSON.stringify(options), correctOption, explanation, index, userId)),
-    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,rubric_json,created_by,published_at) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(`${tenantId}-asg-moon`, tenantId, classId, "月饼里的团圆", "故事闯关 · 口语", "published", due, defaultRubricJson, userId),
-    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,rubric_json,created_by,published_at) VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").bind(`${tenantId}-asg-food`, tenantId, classId, "我的家乡味道", "看图说话 · 写作", "published", due, defaultRubricJson, userId),
-    db.prepare("INSERT OR IGNORE INTO assignments (id,tenant_id,class_id,title,activity_type,status,rubric_json,created_by) VALUES (?,?,?,?,?,?,?,?)").bind(`${tenantId}-asg-school`, tenantId, classId, "校园里的一天", "情境对话 · 听力", "review", defaultRubricJson, userId),
-    db.prepare("UPDATE assignments SET rubric_json=? WHERE tenant_id=? AND id IN (?,?,?) AND rubric_json='[]'").bind(defaultRubricJson, tenantId, `${tenantId}-asg-moon`, `${tenantId}-asg-food`, `${tenantId}-asg-school`),
-    db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-moon`, `${tenantId}-obj-speak`),
-    db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-food`, `${tenantId}-obj-write`),
-    db.prepare("INSERT OR IGNORE INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,1)").bind(tenantId, `${tenantId}-asg-school`, `${tenantId}-obj-listen`),
-    db.prepare("INSERT OR IGNORE INTO source_documents (id,tenant_id,title,media_type,rights_status,processing_status,version,created_by) VALUES (?,?,?,?,?,?,?,?)").bind(festivalDoc, tenantId, "中华节日文化故事集", "text/plain", "owned", "published", 1, userId),
-    db.prepare("INSERT OR IGNORE INTO source_documents (id,tenant_id,title,media_type,rights_status,processing_status,version,created_by) VALUES (?,?,?,?,?,?,?,?)").bind(textbookDoc, tenantId, "四年级华文教材摘录", "text/plain", "licensed", "published", 1, userId),
-    db.prepare("INSERT OR IGNORE INTO knowledge_chunks (id,tenant_id,source_document_id,content,metadata_json,published) VALUES (?,?,?,?,?,1)").bind(`${tenantId}-chunk-festival`, tenantId, festivalDoc, "中秋节常以圆月和月饼象征家人团聚，团圆是节日的重要文化主题。", JSON.stringify({ level: "A2", topic: "中秋节" })),
-    db.prepare("INSERT OR IGNORE INTO knowledge_chunks (id,tenant_id,source_document_id,content,metadata_json,published) VALUES (?,?,?,?,?,1)").bind(`${tenantId}-chunk-sentence`, tenantId, textbookDoc, "句型：我们一家人一起……。学习者可以用它描述共同参与的家庭活动。", JSON.stringify({ level: "A2", skill: "口语表达" })),
-    db.prepare("INSERT OR IGNORE INTO knowledge_chunks (id,tenant_id,source_document_id,content,metadata_json,published) VALUES (?,?,?,?,?,1)").bind(`${tenantId}-chunk-method`, tenantId, textbookDoc, "看图说话时，可以从人物、食物和动作三个线索组织完整句子。", JSON.stringify({ level: "A2", skill: "看图说话" })),
-    db.prepare("INSERT OR IGNORE INTO consent_records (id,tenant_id,student_user_id,guardian_user_id,scope,status) VALUES (?,?,?,?,?,?)").bind(`${tenantId}-consent-learning`, tenantId, userId, userId, "learning_analytics", "granted"),
-    db.prepare("INSERT OR IGNORE INTO notifications (id,tenant_id,user_id,title,detail,kind) VALUES (?,?,?,?,?,?)").bind(`${tenantId}-notice-welcome`, tenantId, userId, "试用工作区已就绪", "这里的课程、作业、审核与上传操作都会真实保存。", "success"),
-  ]);
-
-  const mastery = await db.prepare("SELECT COUNT(*) AS count FROM mastery_snapshots WHERE tenant_id=? AND student_user_id=?").bind(tenantId, userId).first<{ count: number }>();
-  if (!mastery?.count) await db.batch(objectives.map(([id,,, , score], index) => db.prepare("INSERT INTO mastery_snapshots (tenant_id,student_user_id,objective_id,mastery,evidence_count) VALUES (?,?,?,?,?)").bind(tenantId, userId, id, score, index + 3)));
-}
-
-export async function seedInitialWorkspace(context: Omit<PlatformContext, "roles">) {
-  await seedWorkspace(context);
-}
-
 export async function platformContext(request: Request, requiredRole?: PlatformRole): Promise<PlatformContext> {
   const db = (await ensurePlatformRuntime()).database;
   if (!db) throw new Error("database_unavailable");
   await ensurePlatformSchema(db);
   const { email, displayName } = await identity(request, db);
-  const userId = `usr_${idPart(email)}`;
-  const memberships = await db.prepare(`SELECT rm.tenant_id AS tenantId, rm.role AS role
-FROM role_memberships rm
-JOIN users u ON u.id=rm.user_id
-WHERE lower(u.email)=? AND u.status='active' AND rm.status='active'
-ORDER BY rm.created_at ASC`).bind(email).all<{ tenantId: string; role: string }>();
-  let tenantId = memberships.results[0]?.tenantId ?? `tenant_${idPart(email)}`;
-  if (!memberships.results.length) {
-    const invitation = await db.prepare("SELECT id,tenant_id AS tenantId,role FROM invitations WHERE lower(email)=? AND status='pending' AND expires_at>CURRENT_TIMESTAMP ORDER BY created_at DESC LIMIT 1").bind(email).first<{ id: string; tenantId: string; role: PlatformRole }>();
-    if (invitation) {
-      tenantId = invitation.tenantId;
-      await db.batch([
-        db.prepare("INSERT OR IGNORE INTO users (id,email,display_name,locale) VALUES (?,?,?,'zh-CN')").bind(userId, email, displayName),
-        db.prepare("INSERT OR IGNORE INTO role_memberships (tenant_id,user_id,role) VALUES (?,?,?)").bind(tenantId, userId, invitation.role),
-        db.prepare("UPDATE invitations SET status='accepted' WHERE id=? AND tenant_id=?").bind(invitation.id, tenantId),
-        db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), tenantId, userId, "invitation.accepted", "invitation", invitation.id, JSON.stringify({ email, role: invitation.role })),
-      ]);
-    } else {
-      await seedWorkspace({ db, tenantId, userId, userEmail: email, displayName });
-    }
+  // 仅空库的默认本地测试身份可初始化管理员，其他请求不能自动创建账号或授权。
+  if (getAuthMode() === "local" && email === "dev@huawen-zhixing.local" && await isInitialSetupRequired(db)) {
+    await createInitialAdminAccount({ db, email, displayName, password: randomSecret() });
   }
-  const rows = await db.prepare("SELECT role FROM role_memberships WHERE tenant_id=? AND user_id=? AND status='active'").bind(tenantId, userId).all<{ role: string }>();
-  const roles = rows.results.map((item) => item.role).filter((role): role is PlatformRole => ROLE_SET.has(role as PlatformRole));
-  if (requiredRole && !roles.includes(requiredRole) && !roles.includes("admin")) throw new Error("forbidden");
-  const account = await db.prepare("SELECT must_change_password AS mustChangePassword FROM users WHERE id=? AND status='active'").bind(userId).first<{ mustChangePassword: number }>();
-  return { db, tenantId, userId, userEmail: email, displayName, roles, mustChangePassword: account?.mustChangePassword === 1 };
+  const account = await db.prepare(`SELECT id,email,display_name AS displayName,
+    must_change_password AS mustChangePassword,status FROM users WHERE lower(email)=? LIMIT 1`)
+    .bind(email).first<{ id: string; email: string; displayName: string; mustChangePassword: number; status: string }>();
+  if (!account || account.status !== "active") throw new Error("forbidden");
+  const memberships = await db.prepare(`SELECT rm.tenant_id AS tenantId,rm.role
+    FROM role_memberships rm JOIN tenants t ON t.id=rm.tenant_id AND t.status='active'
+    WHERE rm.user_id=? AND rm.status='active' AND rm.role IN ('student','teacher','guardian','admin')
+    ORDER BY rm.created_at ASC,rm.id ASC`).bind(account.id).all<{ tenantId: string; role: PlatformRole }>();
+  const tenantId = memberships.results[0]?.tenantId;
+  if (!tenantId) throw new Error("forbidden");
+  const roles = memberships.results.filter((item) => item.tenantId === tenantId)
+    .map((item) => item.role).filter((role) => ROLE_SET.has(role));
+  if (!roles.length || (requiredRole && !roles.includes(requiredRole) && !roles.includes("admin"))) throw new Error("forbidden");
+  return { db, tenantId, userId: account.id, userEmail: account.email, displayName: account.displayName,
+    roles, mustChangePassword: account.mustChangePassword === 1 };
 }
 
 export function platformApiError(error: unknown) {

@@ -17,6 +17,12 @@ const navigation: Record<Role, string[]> = {
 
 type Toast = { title: string; detail: string; tone: "success" | "error" } | null;
 
+function authorizedRole(authorized: Role[], current?: Role): Role {
+  const next = current && authorized.includes(current) ? current : authorized.includes("admin") ? "admin" : authorized[0];
+  if (!next) throw new Error("当前账号未获授权，请联系管理员为账号分配角色。");
+  return next;
+}
+
 async function readJson<T extends Record<string, unknown>>(response: Response): Promise<T | { error: string }> {
   const text = await response.text();
   if (!text.trim()) return {} as T;
@@ -38,6 +44,7 @@ export function Dashboard() {
   const [refreshError, setRefreshError] = useState("");
   const [retryRefreshing, setRetryRefreshing] = useState(false);
   const [authMode, setAuthMode] = useState<"standard" | "local" | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -60,14 +67,21 @@ export function Dashboard() {
   async function loadAuthMode() {
     const response = await fetch("/api/v1/auth/session", { cache: "no-store" });
     const payload = await readJson<{ authMode?: "standard" | "local"; setupRequired?: boolean; user?: { mustChangePassword?: boolean }; error?: string }>(response);
-    if (!response.ok || "error" in payload) throw new Error(payload.error ?? "会话状态加载失败");
-    setAuthMode(payload.authMode ?? null);
-    setSetupRequired(payload.setupRequired === true);
-    setMustChangePassword(payload.user?.mustChangePassword === true);
-    return { mode: payload.authMode ?? null, setupRequired: payload.setupRequired === true };
+    const mode = "authMode" in payload ? payload.authMode ?? null : null;
+    const needsSetup = "setupRequired" in payload && payload.setupRequired === true;
+    setAuthMode(mode);
+    setSetupRequired(needsSetup);
+    setMustChangePassword("user" in payload && payload.user?.mustChangePassword === true);
+    if (response.status === 403) {
+      setAccessDenied(true);
+      setData(null);
+      throw new Error("当前账号未获授权，请联系管理员为账号分配角色。");
+    }
+    if (!response.ok || ("error" in payload && payload.error !== "authentication_required")) throw new Error(payload.error ?? "会话状态加载失败");
+    return { mode, setupRequired: needsSetup };
   }
 
-  const refresh = useCallback(async (studentId?: string) => {
+  const refresh = useCallback(async (studentId?: string, initialRole = false) => {
     const requestId = ++workspaceRequest.current;
     setError("");
     // 写入完成后的刷新也使用最新选择，不能从旧表单闭包带回先前的孩子。
@@ -78,16 +92,20 @@ export function Dashboard() {
       const response = await fetch(workspaceUrl, { cache: "no-store" });
       const payload = await readJson<WorkspaceData | { error?: string }>(response);
       if (requestId !== workspaceRequest.current) return;
-      if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
+      if (!response.ok) {
+        const responseError = "error" in payload ? payload.error : undefined;
+        if (response.status === 403 && responseError === "forbidden") { setAccessDenied(true); setData(null); }
+        if (response.status === 403 && responseError === "password_change_required") setMustChangePassword(true);
+        throw new Error(response.status === 401 ? "请先登录" : responseError === "forbidden" ? "当前账号未获授权，请联系管理员为账号分配角色。" : responseError === "password_change_required" ? "请先修改临时密码" : `工作区数据加载失败：${responseError ?? response.status}`);
+      }
       const next = payload as WorkspaceData;
+      const nextRole = authorizedRole(next.user.roles, initialRole ? undefined : role);
       workspaceSelection.current = { requested: next.selectedStudent?.id, committed: next.selectedStudent?.id };
       setWorkspaceReceivedAt(performance.now());
+      setAccessDenied(false);
+      if (nextRole !== role) { setRole(nextRole); setActiveNav(navigation[nextRole][0]); }
       setData(next);
       setRefreshError("");
-      if (!next.user.roles.includes(role)) {
-        const first = next.user.roles[0] ?? "student";
-        setRole(first); setActiveNav(navigation[first][0]);
-      }
     } catch (reason) {
       if (requestId !== workspaceRequest.current) return;
       workspaceSelection.current.requested = workspaceSelection.current.committed;
@@ -100,13 +118,22 @@ export function Dashboard() {
     fetch("/api/v1/workspace", { cache: "no-store" })
       .then(async (response) => {
         const payload = await readJson<WorkspaceData | { error?: string }>(response);
-        if (!response.ok) throw new Error(response.status === 401 ? "请先登录" : `工作区数据加载失败：${"error" in payload ? payload.error ?? response.status : response.status}`);
+        if (!response.ok) {
+          const responseError = "error" in payload ? payload.error : undefined;
+          if (active && response.status === 403 && responseError === "forbidden") { setAccessDenied(true); setData(null); }
+          if (active && response.status === 403 && responseError === "password_change_required") setMustChangePassword(true);
+          throw new Error(response.status === 401 ? "请先登录" : responseError === "forbidden" ? "当前账号未获授权，请联系管理员为账号分配角色。" : responseError === "password_change_required" ? "请先修改临时密码" : `工作区数据加载失败：${responseError ?? response.status}`);
+        }
         return payload as WorkspaceData;
       })
       .then((next) => {
         if (active) {
+          const nextRole = authorizedRole(next.user.roles);
           workspaceSelection.current = { requested: next.selectedStudent?.id, committed: next.selectedStudent?.id };
           setWorkspaceReceivedAt(performance.now());
+          setRole(nextRole);
+          setActiveNav(navigation[nextRole][0]);
+          setAccessDenied(false);
           setData(next);
           void loadAuthMode().catch(() => null);
         }
@@ -114,7 +141,7 @@ export function Dashboard() {
       .catch(async (reason: Error) => {
         if (!active) return;
         const session = await loadAuthMode().catch(() => null);
-        setError(session?.mode === "standard" ? (session.setupRequired ? "" : "请使用管理员账号登录") : reason.message);
+        if (active) setError(session?.setupRequired ? "" : reason.message);
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -145,7 +172,7 @@ export function Dashboard() {
       setPassword("");
       setLoading(true);
       await loadAuthMode();
-      await refresh();
+      await refresh(undefined, true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "登录失败");
     } finally {
@@ -170,7 +197,7 @@ export function Dashboard() {
       setSetupRequired(false);
       setLoading(true);
       await loadAuthMode();
-      await refresh();
+      await refresh(undefined, true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "初始化失败");
     } finally {
@@ -186,10 +213,12 @@ export function Dashboard() {
       workspaceRequest.current++;
       workspaceSelection.current = {};
       setData(null);
+      setAccessDenied(false);
       setMustChangePassword(false);
       setAuthMode("standard");
       setError("已退出登录");
     } catch (reason) {
+      if (accessDenied) setError(reason instanceof Error ? reason.message : "退出登录失败");
       notify("退出失败", reason instanceof Error ? reason.message : "退出登录失败", "error");
     }
   }
@@ -220,12 +249,14 @@ export function Dashboard() {
   const visibleRoles = roles.filter((item) => data?.user.roles.includes(item.id));
 
   if (loading) return <main className="center-state"><div className="loader"/><h1>正在连接真实工作区…</h1><p>加载班级、任务、内容与审计记录</p></main>;
+  if (accessDenied || (data && !data.user.roles.includes(role))) return <main className="center-state"><div className="login-card"><span className="eyebrow">账号权限</span><h1>当前账号无权访问</h1><p>{error || "请联系管理员为账号分配角色后重新登录。"}</p>{authMode === "standard" && <button type="button" className="primary-button" onClick={logout}>退出并切换账号</button>}</div></main>;
   if (authMode === "standard" && setupRequired) return <main className="center-state"><form className="login-card" onSubmit={setup}><span className="eyebrow">首次部署初始化</span><h1>初始化华文知行工作区</h1><p>当前数据库还没有管理员。请在网页内创建首个管理员账号，D1/R2 和登录密钥会自动完成初始化。</p><label>管理员邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" required /></label><label>显示名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} type="text" autoComplete="name" placeholder="华文知行管理员" /></label><label>管理员密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" minLength={8} required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "初始化中…" : "创建管理员并进入工作区"}</button></form></main>;
   if (authMode === "standard" && (mustChangePassword || data?.user.mustChangePassword)) return <main className="center-state"><form className="login-card password-change-card" onSubmit={changePassword}><span className="eyebrow">首次登录安全设置</span><h1>请修改临时密码</h1><p>修改完成后才能进入工作区。</p><label>当前密码<input value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" autoComplete="current-password" required /></label><label>新密码<input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "修改中…" : "修改密码并进入工作区"}</button></form></main>;
   if ((error || !data) && authMode === "standard") return <main className="center-state"><form className="login-card" onSubmit={login}><span className="eyebrow">标准 Cloudflare 登录</span><h1>进入华文知行工作区</h1><p>使用初始化时创建的管理员账号，或成员管理中创建的账号登录。</p><label>邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" required /></label><label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "登录中…" : "登录"}</button></form></main>;
   if (error || !data) return <main className="center-state"><h1>暂时无法进入工作区</h1><p>{error || "未知错误"}</p><button className="primary-button" onClick={() => { setLoading(true); refresh().catch((reason: Error) => setError(reason.message)).finally(() => setLoading(false)); }}>重新加载</button></main>;
 
   async function switchRole(next: Role) {
+    if (!data!.user.roles.includes(next)) return;
     if (next === "student" && role !== "student") {
       // 家长所选孩子与登录学生本人是两个范围，先读回本人数据再显示学生操作。
       setLoading(true);

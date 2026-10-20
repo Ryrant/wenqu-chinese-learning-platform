@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unexpected_error";
-    const status = message === "authentication_required" ? 200 : 500;
+    const status = message === "authentication_required" ? 200 : message === "forbidden" ? 403 : 500;
     return Response.json({ authenticated: false, authMode, error: message }, { status, headers: { "cache-control": "no-store" } });
   }
 }

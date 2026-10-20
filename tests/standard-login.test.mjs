@@ -37,7 +37,7 @@ async function loadAuthModules() {
 }
 
 function fakeDb(account) {
-  const state = { account, batchCalls: 0 };
+  const state = { account, batchCalls: 0, createdRoles: [] };
   return {
     state,
     prepare(query) {
@@ -60,6 +60,7 @@ function fakeDb(account) {
     },
     async batch(statements) {
       state.batchCalls += 1;
+      state.createdRoles = statements.filter((statement) => /INSERT OR IGNORE INTO role_memberships/.test(statement.query)).map((statement) => statement.values[2]);
       const user = statements[1];
       state.account = { id: user.values[0], email: user.values[1], displayName: user.values[2], passwordHash: user.values[3], mustChangePassword: 0, status: "active" };
     },
@@ -84,6 +85,7 @@ test("initial admin setup creates the first account without deploy-time secrets"
     assert.equal(account?.status, "active");
     assert.equal(account?.displayName, "管理员");
     assert.equal(db.state.batchCalls, 1);
+    assert.deepEqual(db.state.createdRoles, ["admin"]);
   } finally { await cleanup(); }
 });
 

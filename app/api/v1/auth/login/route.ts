@@ -74,6 +74,11 @@ export async function POST(request: Request) {
     recordFailedLogin(key, nowMilliseconds);
     return json("invalid_credentials", 401);
   }
+  const membership = await db.prepare(`SELECT rm.id FROM role_memberships rm
+    JOIN tenants t ON t.id=rm.tenant_id AND t.status='active'
+    WHERE rm.user_id=? AND rm.status='active' AND rm.role IN ('student','teacher','guardian','admin') LIMIT 1`)
+    .bind(account.id).first();
+  if (!membership) return json("forbidden", 403);
   loginAttempts.delete(key);
   await db.prepare("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?").bind(account.id).run();
   const now = Math.floor(Date.now() / 1000);
