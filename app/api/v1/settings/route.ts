@@ -1,5 +1,5 @@
-import { loadPlatformSettings, publicPlatformSettings, savePlatformSettings } from "../../../lib/platform-settings";
-import { platformApiError, platformContext } from "../../../lib/platform-store";
+import { loadPlatformSettings, publicPlatformSettings, savePlatformSettings } from "../../../../lib/platform-settings";
+import { platformApiError, platformContext } from "../../../../lib/platform-store";
 
 
 export async function GET(request: Request) {

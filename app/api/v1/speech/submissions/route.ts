@@ -1,6 +1,6 @@
-import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
-import { platformApiError, platformContext } from "../../../../lib/platform-store";
-import { assertSubmissionTarget, createStudentSubmission } from "../../../../lib/submission-service";
+import { ensurePlatformRuntime } from "../../../../../lib/platform-runtime";
+import { platformApiError, platformContext } from "../../../../../lib/platform-store";
+import { assertSubmissionTarget, createStudentSubmission } from "../../../../../lib/submission-service";
 
 export async function POST(request: Request) {
   try {

@@ -9,7 +9,7 @@ const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
 const registryBundle = await build({
-  stdin: { contents: `export { workspaceActionRoles } from './app/lib/workspace-actions'; export { resolveWorkspaceAction } from './app/lib/commands';`, resolveDir: fileURLToPath(root) },
+  stdin: { contents: `export { workspaceActionRoles } from './lib/workspace-actions'; export { resolveWorkspaceAction } from './lib/commands';`, resolveDir: fileURLToPath(root) },
   bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const registry = await import(`data:text/javascript;base64,${Buffer.from(registryBundle.outputFiles[0].text).toString("base64")}`);
@@ -38,7 +38,7 @@ test("workspace command registry resolves supported operations with explicit rol
 });
 
 test("learning-loop service scopes guardian teacher and student operations", async () => {
-  const service = await read("app/lib/learning-loop-service.ts");
+  const service = await read("lib/learning-loop-service.ts");
   assert.match(service, /assertGuardianStudentAccess/);
   assert.match(service, /guardian_student_links/);
   assert.match(service, /guardian_user_id=\?/);
@@ -54,7 +54,7 @@ test("learning-loop service scopes guardian teacher and student operations", asy
 });
 
 test("teacher-confirmed review reuses cumulative mastery update service", async () => {
-  const assessment = await read("app/lib/assessment-service.ts");
+  const assessment = await read("lib/assessment-service.ts");
   assert.match(assessment, /prepareMasteryEvidenceInsert/);
   assert.match(assessment, /review_status!='reviewed'/);
   assert.match(assessment, /submission_already_reviewed/);

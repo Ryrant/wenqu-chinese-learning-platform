@@ -4,12 +4,12 @@ import test from "node:test";
 import { build } from "esbuild";
 
 const bundled = await build({
-  entryPoints: [fileURLToPath(new URL("../app/features/workspace/workspace-store.ts", import.meta.url))],
+  entryPoints: [fileURLToPath(new URL("../lib/workspace/workspace-store.ts", import.meta.url))],
   bundle: true, format: "esm", platform: "node", target: "node22", write: false,
 });
 const { createWorkspaceStore } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString("base64")}`);
 const resumeBundled = await build({
-  entryPoints: [fileURLToPath(new URL("../app/features/workspace/observe-page-resume.ts", import.meta.url))],
+  entryPoints: [fileURLToPath(new URL("../lib/workspace/observe-page-resume.ts", import.meta.url))],
   bundle: true, format: "esm", platform: "node", target: "node22", write: false,
 });
 const { observePageResume } = await import(`data:text/javascript;base64,${Buffer.from(resumeBundled.outputFiles[0].text).toString("base64")}`);

@@ -10,10 +10,10 @@ import { build } from "esbuild";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const bundle = await build({
   stdin: { contents: `
-    export { NodeSqliteDatabase, LocalFileStorage } from './app/lib/platform-runtime-node';
-    export { setPlatformRuntime } from './app/lib/platform-runtime';
-    export { ensurePlatformSchema, ensureSiteJwtSecret } from './app/lib/platform-store';
-    export { createSessionToken } from './app/lib/auth-token';
+    export { NodeSqliteDatabase, LocalFileStorage } from './lib/platform-runtime-node';
+    export { setPlatformRuntime } from './lib/platform-runtime';
+    export { ensurePlatformSchema, ensureSiteJwtSecret } from './lib/platform-store';
+    export { createSessionToken } from './lib/auth-token';
     export { POST as setup } from './app/api/v1/auth/setup/route';
     export { POST as actions } from './app/api/v1/workspace/actions/route';
     export { GET as workspace } from './app/api/v1/workspace/route';
@@ -24,7 +24,7 @@ const bundle = await build({
     export { GET as profile } from './app/api/v1/ability-profile/route';
     export { POST as uploadMedia } from './app/api/v1/diagnostic-media/route';
     export { GET as media } from './app/api/v1/diagnostic-media/[id]/route';
-    export { trialSummary } from './app/lib/trial-types';
+    export { trialSummary } from './lib/trial-types';
     export { GET as unitReport } from './app/api/v1/learning-sequences/[id]/report/route';
     export { GET as internalReport } from './app/api/v1/trial-records/report/route';
     export { GET as portfolio } from './app/api/v1/family-portfolio/route';
@@ -33,10 +33,10 @@ const bundle = await build({
     export { GET as batchCatalog, POST as batchAction } from './app/api/v1/trial-batches/route';
     export { GET as batchDetail } from './app/api/v1/trial-batches/[id]/route';
     export { GET as batchReport } from './app/api/v1/trial-batches/[id]/report/route';
-    export { batchSummary } from './app/lib/trial-batch-types';
-    export { feedbackCaseState } from './app/lib/family-feedback-types';
+    export { batchSummary } from './lib/trial-batch-types';
+    export { feedbackCaseState } from './lib/family-feedback-types';
     export { GET as studentCase } from './app/api/v1/student-cases/route';
-    export { caseTimestamp } from './app/lib/student-case-types';
+    export { caseTimestamp } from './lib/student-case-types';
   `, resolveDir: root }, bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);

@@ -6,7 +6,7 @@ const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
 test("content processing module supports txt docx and pdf without OCR", async () => {
-  const moduleText = await read("app/lib/content-processing.ts");
+  const moduleText = await read("lib/content-processing.ts");
   assert.match(moduleText, /extractTxtText/);
   assert.match(moduleText, /extractDocxText/);
   assert.match(moduleText, /extractPdfText/);

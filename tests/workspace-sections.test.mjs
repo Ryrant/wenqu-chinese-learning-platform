@@ -7,15 +7,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 const bundle = await build({
   stdin: { contents: `
-    export { NodeSqliteDatabase } from './app/lib/platform-runtime-node';
-    export { setPlatformRuntime } from './app/lib/platform-runtime';
-    export { ensurePlatformSchema, ensureSiteJwtSecret } from './app/lib/platform-store';
-    export { createSessionToken } from './app/lib/auth-token';
-    export { parseWorkspaceSections, readWorkspace, workspaceServices } from './app/lib/workspace-service';
+    export { NodeSqliteDatabase } from './lib/platform-runtime-node';
+    export { setPlatformRuntime } from './lib/platform-runtime';
+    export { ensurePlatformSchema, ensureSiteJwtSecret } from './lib/platform-store';
+    export { createSessionToken } from './lib/auth-token';
+    export { parseWorkspaceSections, readWorkspace, workspaceServices } from './lib/workspace-service';
     export { GET as workspace } from './app/api/v1/workspace/route';
-    export { createWorkspaceStore } from './app/features/workspace/workspace-store';
-    export { matchWorkspaceRoute, pageSections } from './app/features/workspace/navigation';
-    export { TeacherMasteryHeatmap } from './app/features/teacher/mastery-heatmap';
+    export { createWorkspaceStore } from './lib/workspace/workspace-store';
+    export { matchWorkspaceRoute, pageSections } from './lib/workspace/navigation';
+    export { TeacherMasteryHeatmap } from './components/teacher/mastery-heatmap';
   `, resolveDir: fileURLToPath(new URL("../", import.meta.url)) },
   bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });

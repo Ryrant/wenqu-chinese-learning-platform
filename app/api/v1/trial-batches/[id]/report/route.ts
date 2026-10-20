@@ -1,7 +1,7 @@
-import { platformContext } from "../../../../../lib/platform-store";
-import { printReport, reportError, reportPasswordChangeGate } from "../../../../../lib/print-report";
-import { readTrialBatch } from "../../../../../lib/trial-batch-service";
-import { trialBatchReport } from "../../../../../lib/trial-batch-report";
+import { platformContext } from "../../../../../../lib/platform-store";
+import { printReport, reportError, reportPasswordChangeGate } from "../../../../../../lib/print-report";
+import { readTrialBatch } from "../../../../../../lib/trial-batch-service";
+import { trialBatchReport } from "../../../../../../lib/trial-batch-report";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

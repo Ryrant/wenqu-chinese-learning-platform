@@ -1,7 +1,7 @@
-import { classAccessClause, studentAccessClause, submissionAccessClause } from "../../../../lib/access-control";
-import { diagnosticMediaKey } from "../../../../lib/diagnostic-media";
-import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
-import { platformApiError, platformContext } from "../../../../lib/platform-store";
+import { classAccessClause, studentAccessClause, submissionAccessClause } from "../../../../../lib/access-control";
+import { diagnosticMediaKey } from "../../../../../lib/diagnostic-media";
+import { ensurePlatformRuntime } from "../../../../../lib/platform-runtime";
+import { platformApiError, platformContext } from "../../../../../lib/platform-store";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

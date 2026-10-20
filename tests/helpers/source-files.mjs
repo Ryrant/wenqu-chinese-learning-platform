@@ -13,7 +13,7 @@ export async function readSourceDirectory(path) {
   }))).join("\n");
 }
 
-export const readWorkspaceSources = () => readSources(["app/api/v1/workspace/route.ts", "app/lib/workspace-service.ts"]);
-export const readCommandSources = async () => [await readSource("app/api/v1/workspace/actions/route.ts"), await readSource("app/lib/workspace-actions.ts"), await readSourceDirectory("app/lib/commands")].join("\n");
-export const readRoleSources = (...roles) => Promise.all(roles.map((role) => readSourceDirectory(`app/features/${role}`))).then((parts) => parts.join("\n"));
-export const readWorkspaceClientSources = async () => [await readSource("app/dashboard.tsx"), await readSourceDirectory("app/features/workspace")].join("\n");
+export const readWorkspaceSources = () => readSources(["app/api/v1/workspace/route.ts", "lib/workspace-service.ts"]);
+export const readCommandSources = async () => [await readSource("app/api/v1/workspace/actions/route.ts"), await readSource("lib/workspace-actions.ts"), await readSourceDirectory("lib/commands")].join("\n");
+export const readRoleSources = (...roles) => Promise.all(roles.map((role) => readSourceDirectory(`components/${role}`))).then((parts) => parts.join("\n"));
+export const readWorkspaceClientSources = async () => [await readSource("components/workspace/dashboard.tsx"), await readSourceDirectory("hooks"), await readSourceDirectory("lib/workspace")].join("\n");

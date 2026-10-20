@@ -1,6 +1,6 @@
-import { ensurePlatformSchema, getAuthMode, isInitialSetupRequired, platformContext } from "../../../../lib/platform-store";
-import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
-import { sessionPasswordChangeState } from "../../../../lib/password-change-state";
+import { ensurePlatformSchema, getAuthMode, isInitialSetupRequired, platformContext } from "../../../../../lib/platform-store";
+import { ensurePlatformRuntime } from "../../../../../lib/platform-runtime";
+import { sessionPasswordChangeState } from "../../../../../lib/password-change-state";
 
 export async function GET(request: Request) {
   const authMode = getAuthMode();

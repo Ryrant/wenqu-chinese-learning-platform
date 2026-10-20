@@ -1,6 +1,6 @@
-import { chunkText, extractText } from "../../../../lib/content-processing";
-import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
-import { platformApiError, platformContext } from "../../../../lib/platform-store";
+import { chunkText, extractText } from "../../../../../lib/content-processing";
+import { ensurePlatformRuntime } from "../../../../../lib/platform-runtime";
+import { platformApiError, platformContext } from "../../../../../lib/platform-store";
 
 const processingErrors = new Set(["empty_text", "unsupported_scanned_pdf", "docx_document_missing", "unsupported_file_type"]);
 

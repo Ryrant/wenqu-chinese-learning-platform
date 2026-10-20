@@ -1,8 +1,8 @@
-import { createSessionToken, sessionCookieName } from "../../../../lib/auth-token";
-import { loadPlatformSettings } from "../../../../lib/platform-settings";
-import { ensurePlatformSchema, ensureSiteJwtSecret, getAuthMode, isInitialSetupRequired, platformApiError } from "../../../../lib/platform-store";
-import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
-import { createInitialAdminAccount } from "../../../../lib/standard-login";
+import { createSessionToken, sessionCookieName } from "../../../../../lib/auth-token";
+import { loadPlatformSettings } from "../../../../../lib/platform-settings";
+import { ensurePlatformSchema, ensureSiteJwtSecret, getAuthMode, isInitialSetupRequired, platformApiError } from "../../../../../lib/platform-store";
+import { ensurePlatformRuntime } from "../../../../../lib/platform-runtime";
+import { createInitialAdminAccount } from "../../../../../lib/standard-login";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

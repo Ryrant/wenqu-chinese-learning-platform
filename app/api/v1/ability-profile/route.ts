@@ -1,5 +1,5 @@
-import { readAbilityProfile } from "../../../lib/ability-profile-service";
-import { platformApiError, platformContext } from "../../../lib/platform-store";
+import { readAbilityProfile } from "../../../../lib/ability-profile-service";
+import { platformApiError, platformContext } from "../../../../lib/platform-store";
 
 export async function GET(request: Request) {
   try {

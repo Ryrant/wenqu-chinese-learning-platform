@@ -73,7 +73,7 @@ test("Node extracts complete multi-page English and Chinese PDF text and retains
   const directory = await temporaryDirectory(t);
   const output = path.join(directory, "node.mjs");
   await build({
-    stdin: { contents: "export { extractPdfText } from './app/lib/content-processing';", resolveDir: root },
+    stdin: { contents: "export { extractPdfText } from './lib/content-processing';", resolveDir: root },
     outfile: output, bundle: true, platform: "node", format: "esm", target: "node22", packages: "external",
   });
   const { extractPdfText } = await import(pathToFileURL(output).href);
@@ -91,7 +91,7 @@ test("Workerd extracts PDF text without browser graphics or a separate worker fi
   const output = path.join(directory, "worker.mjs");
   await build({
     stdin: { contents: `
-      import { extractPdfText } from './app/lib/content-processing';
+      import { extractPdfText } from './lib/content-processing';
       const nativeDOMMatrix = typeof globalThis.DOMMatrix !== 'undefined';
       export default { async fetch(request) {
         try {

@@ -7,7 +7,7 @@ const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
 test("local template answers from reviewed excerpts without repeating the question", async () => {
-  const { buildTemplateAnswer } = await import("../app/lib/ai/template-answer.mjs");
+  const { buildTemplateAnswer } = await import("../lib/ai/template-answer.mjs");
   const prompt = "中秋节为什么代表团圆？";
   const answer = buildTemplateAnswer(prompt, [
     "中秋节常以圆月和月饼象征家人团聚，圆形代表圆满与相聚。",
@@ -23,7 +23,7 @@ test("ui workflow migration is additive and runtime initialization stays idempot
   const [migration, schema, store, baseline] = await Promise.all([
     read("drizzle/0005_ui_workflow.sql"),
     read("db/schema.ts"),
-    read("app/lib/platform-store.ts"),
+    read("lib/platform-store.ts"),
     read("scripts/baseline-d1-migrations.sql"),
   ]);
   for (const table of ["lesson_plans", "learning_recommendations", "source_documents"]) {
@@ -46,7 +46,7 @@ test("ui workflow migration is additive and runtime initialization stays idempot
 test("workspace actions expose tenant-scoped editable and archival workflows", async () => {
   const [actions, service, workspace] = await Promise.all([
     readCommandSources(),
-    read("app/lib/learning-loop-service.ts"),
+    read("lib/learning-loop-service.ts"),
     readWorkspaceSources(),
   ]);
   for (const action of ["update_lesson_plan", "archive_lesson_plan", "update_family_task", "archive_family_task", "reprocess_content", "archive_content"]) {
@@ -72,7 +72,7 @@ test("admin audit API supports tenant-scoped filters and pagination", async () =
 
 test("workspace returns structured quality metrics with real denominators and details", async () => {
   const [types, workspace] = await Promise.all([
-    read("app/lib/platform-types.ts"),
+    read("lib/platform-types.ts"),
     readWorkspaceSources(),
   ]);
   assert.match(types, /export type QualityMetric/);
@@ -85,8 +85,8 @@ test("workspace returns structured quality metrics with real denominators and de
 test("four-end UI preserves teaching and account management actions", async () => {
   const [staff, loop, members] = await Promise.all([
     readRoleSources("teacher", "guardian", "admin"),
-    readSourceDirectory("app/features"),
-    read("app/member-management-view.tsx"),
+    readSourceDirectory("components"),
+    read("components/admin/member-management-view.tsx"),
   ]);
   for (const action of ["update_lesson_plan", "archive_lesson_plan"]) assert.match(staff, new RegExp(action));
   for (const action of ["update_family_task", "archive_family_task"]) assert.match(loop, new RegExp(action));

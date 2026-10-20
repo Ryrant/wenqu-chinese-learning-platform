@@ -1,6 +1,6 @@
-import { createTrialBatch, linkTrialBatch, readBatchCatalog, voidTrialBatch } from "../../../lib/trial-batch-service";
-import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
-import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
+import { createTrialBatch, linkTrialBatch, readBatchCatalog, voidTrialBatch } from "../../../../lib/trial-batch-service";
+import { workspacePasswordChangeGate } from "../../../../lib/password-change-state";
+import { getAuthMode, platformApiError, platformContext } from "../../../../lib/platform-store";
 
 const headers = { "Cache-Control": "private, no-store" };
 export async function GET(request: Request) {

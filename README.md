@@ -307,11 +307,13 @@ AI 未配置、返回内容无法解析或评分不合法时，建议分数为�
 
 ### 🧭 页面与 API
 
-前端使用 React Router 管理角色页面，按路由加载角色模块及较重的业务组件。`app/features/` 承载各角色页面，`components/ui/` 保存 shadcn/ui 基础组件；页面通过同域 `/api/v1` HTTP API 读取和提交数据。
+前端使用 React Router 管理角色页面，按路由加载角色模块及较重的业务组件。`components/ui/` 保存 shadcn/ui 基础组件，`components/student/`、`components/teacher/`、`components/guardian/` 和 `components/admin/` 承载各角色页面，跨角色的业务组件按工作区、家庭、学习和试用领域组织；页面通过同域 `/api/v1` HTTP API 读取和提交数据。
+
+组件、工具和 Hook 路径与 `components.json` 的别名保持一致：基础组件从 `@/components/ui/...` 导入，业务组件放在 `components/`，共享工具与业务逻辑放在 `lib/`，自定义 Hook 放在 `hooks/`。组件专用的 CSS Modules 与组件同目录维护；`app/` 保留客户端入口、全局样式和 API 处理器。
 
 工作区支持 `include` 参数按页面读取教学、课程、学习进度、教案、内容、成员等数据分组。写入后仅刷新受影响的分组；未请求的分组不会覆盖已读取数据。未传 `include` 的 `/api/v1/workspace` 仍返回完整工作区，保持原 API 兼容。认证和业务写入继续在服务端校验，页面导航不代替权限检查。
 
-后端由 `server/` 的 Hono 入口挂载标准 `Request` / `Response` 处理器，工作区命令按领域拆分到 `app/lib/commands/`，业务服务复用现有数据库与文件存储接口。Worker 使用 D1/R2，Node.js 使用 SQLite 与本地文件。
+后端由 `server/` 的 Hono 入口挂载标准 `Request` / `Response` 处理器，工作区命令按领域拆分到 `lib/commands/`，业务服务复用现有数据库与文件存储接口。Worker 使用 D1/R2，Node.js 使用 SQLite 与本地文件。
 
 ### 数据与绑定
 
@@ -355,11 +357,24 @@ Docker 自部署不需要 Cloudflare 绑定，默认使用 `DATABASE_URL=file:/d
 huawen-zhixing-platform/
 ├── index.html                 # Vite 单页应用入口
 ├── app/main.tsx               # React 客户端入口
-├── app/features/              # 按角色组织的页面与业务模块
+├── app/globals.css            # 全局样式与主题变量
 ├── app/api/v1/                # 标准 HTTP API 处理器
-├── app/lib/                   # 身份、租户、业务服务与共享类型
-├── app/lib/commands/          # 按领域拆分的工作区写命令
-├── components/ui/             # 可维护的 shadcn/ui 基础组件
+├── components/                # 业务组件与同目录 CSS Modules
+│   ├── ui/                    # 可维护的 shadcn/ui 基础组件
+│   ├── workspace/             # 应用壳、导航容器与共享工作区组件
+│   ├── student/               # 学生端页面与组件
+│   ├── teacher/               # 教师端页面与组件
+│   ├── guardian/              # 家长端页面与组件
+│   ├── admin/                 # 机构端页面与组件
+│   ├── family/                # 跨角色家庭任务、反馈与作品集组件
+│   ├── learning/              # 学习序列、证据时间线与单元报告组件
+│   └── trial/                 # 试用批次与记录组件
+├── hooks/                     # 工作区数据与会话控制 Hook
+├── lib/                       # 共享工具、类型及身份、租户与业务服务
+│   ├── utils.ts               # shadcn/ui 使用的 cn 工具
+│   ├── workspace/             # 工作区 API、路由、缓存与刷新逻辑
+│   └── commands/              # 按领域拆分的工作区写命令
+├── components.json            # shadcn/ui 配置与组件、工具、Hook 别名
 ├── server/                    # Hono API 注册与 Node.js 服务入口
 ├── db/                        # Drizzle 数据模型
 ├── drizzle/                   # 数据库迁移

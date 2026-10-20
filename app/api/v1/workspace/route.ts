@@ -1,6 +1,6 @@
-import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
-import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
-import { parseWorkspaceSections, readWorkspace } from "../../../lib/workspace-service";
+import { getAuthMode, platformApiError, platformContext } from "../../../../lib/platform-store";
+import { workspacePasswordChangeGate } from "../../../../lib/password-change-state";
+import { parseWorkspaceSections, readWorkspace } from "../../../../lib/workspace-service";
 
 export async function GET(request: Request) {
   try {

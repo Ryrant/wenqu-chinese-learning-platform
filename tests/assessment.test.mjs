@@ -8,10 +8,10 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 
 test("assessment service separates ai suggestion from final teacher confirmation", async () => {
   const [service, actions, staff, review, student] = await Promise.all([
-    read("app/lib/assessment-service.ts"),
+    read("lib/assessment-service.ts"),
     readCommandSources(),
     readRoleSources("teacher", "guardian", "admin"),
-    read("app/submission-review.tsx"),
+    read("components/teacher/submission-review.tsx"),
     readRoleSources("student"),
   ]);
   assert.match(service, /export async function suggestTextReview/);

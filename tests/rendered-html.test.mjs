@@ -25,7 +25,7 @@ test("pilot readiness schema includes account content and assessment state", asy
   const [schema, migration, store] = await Promise.all([
     read("db/schema.ts"),
     read("drizzle/0002_pilot_school_readiness.sql"),
-    read("app/lib/platform-store.ts"),
+    read("lib/platform-store.ts"),
   ]);
   assert.match(schema, /passwordHash: text\("password_hash"\)/);
   assert.match(schema, /mustChangePassword: integer\("must_change_password"/);
@@ -55,7 +55,7 @@ test("all four role workspaces expose real operations instead of timer shells", 
 
 test("defines tenant-scoped durable data, migrations and production bindings", async () => {
   const [schema, firstMigration, secondMigration, wrangler, store] = await Promise.all([
-    read("db/schema.ts"), read("drizzle/0000_dusty_mesmero.sql"), read("drizzle/0001_condemned_lester.sql"), read("wrangler.toml"), read("app/lib/platform-store.ts"),
+    read("db/schema.ts"), read("drizzle/0000_dusty_mesmero.sql"), read("drizzle/0001_condemned_lester.sql"), read("wrangler.toml"), read("lib/platform-store.ts"),
   ]);
   assert.match(schema, /tenantId: text\("tenant_id"\)/);
   assert.match(schema, /lessonPlans/);
@@ -70,7 +70,7 @@ test("defines tenant-scoped durable data, migrations and production bindings", a
 
 test("versioned APIs enforce tenant scope, honest provider state and review fallbacks", async () => {
   const [generate, search, upload, speech, actions, health, contentProcessing] = await Promise.all([
-    read("app/api/v1/ai/generate/route.ts"), read("app/api/v1/knowledge/search/route.ts"), read("app/api/v1/content/upload/route.ts"), read("app/api/v1/speech/submissions/route.ts"), readCommandSources(), read("app/api/v1/health/route.ts"), read("app/lib/content-processing.ts"),
+    read("app/api/v1/ai/generate/route.ts"), read("app/api/v1/knowledge/search/route.ts"), read("app/api/v1/content/upload/route.ts"), read("app/api/v1/speech/submissions/route.ts"), readCommandSources(), read("app/api/v1/health/route.ts"), read("lib/content-processing.ts"),
   ]);
   assert.match(generate, /text\/event-stream/); assert.match(generate, /generateGroundedText/); assert.match(generate, /citations/);
   assert.match(search, /tenant_id=\?/); assert.match(search, /processing_status='published'/);
@@ -87,7 +87,7 @@ test("versioned APIs enforce tenant scope, honest provider state and review fall
 });
 
 test("standard auth token helpers use Web Crypto without new dependencies", async () => {
-  const token = await read("app/lib/auth-token.ts");
+  const token = await read("lib/auth-token.ts");
   const pkg = JSON.parse(await read("package.json"));
   assert.match(token, /export type StandardSession/);
   assert.match(token, /export const sessionCookieName = "huawen_zhixing_session"/);
@@ -100,7 +100,7 @@ test("standard auth token helpers use Web Crypto without new dependencies", asyn
 });
 
 test("platform identity supports standard and local auth modes only", async () => {
-  const store = await read("app/lib/platform-store.ts");
+  const store = await read("lib/platform-store.ts");
   const envTypes = await read("cloudflare-env.d.ts");
   assert.match(store, /export type AuthMode = "standard" \| "local"/);
   assert.match(store, /export function getAuthMode\(\): AuthMode/);
@@ -116,10 +116,10 @@ test("platform identity supports standard and local auth modes only", async () =
 
 test("platform runtime boundary isolates Cloudflare bindings from business modules", async () => {
   const [runtime, cloudflare, worker, store, session, login, setup, health, contentUpload, speechUpload, actions] = await Promise.all([
-    read("app/lib/platform-runtime.ts"),
-    read("app/lib/platform-runtime-cloudflare.ts"),
+    read("lib/platform-runtime.ts"),
+    read("lib/platform-runtime-cloudflare.ts"),
     read("worker/index.ts"),
-    read("app/lib/platform-store.ts"),
+    read("lib/platform-store.ts"),
     read("app/api/v1/auth/session/route.ts"),
     read("app/api/v1/auth/login/route.ts"),
     read("app/api/v1/auth/setup/route.ts"),
@@ -343,7 +343,7 @@ test("standard cloudflare deployment configuration has no variable prerequisites
 test("login has best-effort throttling and malformed cookies fail closed", async () => {
   const [login, store] = await Promise.all([
     read("app/api/v1/auth/login/route.ts"),
-    read("app/lib/platform-store.ts"),
+    read("lib/platform-store.ts"),
   ]);
   assert.match(login, /429/);
   assert.match(login, /Retry-After/i);
@@ -357,11 +357,11 @@ test("standard login uses account password hashes and change-password gate", asy
     read("app/api/v1/auth/login/route.ts"),
     read("app/api/v1/auth/session/route.ts"),
     read("app/api/v1/auth/change-password/route.ts"),
-    read("app/lib/password-change.ts"),
-    read("app/lib/password-change-state.ts"),
+    read("lib/password-change.ts"),
+    read("lib/password-change-state.ts"),
     readWorkspaceSources(),
-    read("app/lib/platform-store.ts"),
-    read("app/lib/standard-login.ts"),
+    read("lib/platform-store.ts"),
+    read("lib/standard-login.ts"),
     read("cloudflare-env.d.ts"),
   ]);
   assert.match(login, /authenticateStandardAccount/);
@@ -409,9 +409,9 @@ test("pilot workspace UI exposes member content ai review and password change fl
   const [dashboard, staff, memberManagement, student, types, workspaceRoute] = await Promise.all([
     readWorkspaceClientSources(),
     readRoleSources("teacher", "guardian", "admin"),
-    read("app/member-management-view.tsx"),
+    read("components/admin/member-management-view.tsx"),
     readRoleSources("student"),
-    read("app/lib/platform-types.ts"),
+    read("lib/platform-types.ts"),
     readWorkspaceSources(),
   ]);
   assert.match(dashboard, /change-password/);
@@ -429,7 +429,7 @@ test("pilot workspace UI exposes member content ai review and password change fl
 
 test("member management preserves password reset and current-account guard", async () => {
   const [memberManagement, staff] = await Promise.all([
-    read("app/member-management-view.tsx").catch(() => ""),
+    read("components/admin/member-management-view.tsx").catch(() => ""),
     readRoleSources("teacher", "guardian", "admin"),
   ]);
 
@@ -449,7 +449,7 @@ test("admin UI exposes post-deploy platform settings stored in D1", async () => 
   const [dashboard, staff, types, readme] = await Promise.all([
     readWorkspaceClientSources(),
     readRoleSources("teacher", "guardian", "admin"),
-    read("app/lib/platform-types.ts"),
+    read("lib/platform-types.ts"),
     read("README.md"),
   ]);
   assert.match(dashboard, /平台设置/);
@@ -467,7 +467,7 @@ test("README documents pilot workflow without exposing secrets", async () => {
   const [readme, envExample, openaiProvider] = await Promise.all([
     read("README.md"),
     read(".env.example"),
-    read("app/lib/ai/openai-provider.ts"),
+    read("lib/ai/openai-provider.ts"),
   ]);
   assert.match(readme, /成员账号/);
   assert.match(readme, /首次登录修改临时密码/);

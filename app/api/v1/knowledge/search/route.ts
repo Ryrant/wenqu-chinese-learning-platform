@@ -1,5 +1,5 @@
-import { platformApiError, platformContext } from "../../../../lib/platform-store";
-import { searchPublishedKnowledge } from "../../../../lib/retrieval";
+import { platformApiError, platformContext } from "../../../../../lib/platform-store";
+import { searchPublishedKnowledge } from "../../../../../lib/retrieval";
 
 export async function POST(request: Request) {
   try {

@@ -1,4 +1,4 @@
-﻿import { platformApiError, platformContext } from "../../../lib/platform-store";
+﻿import { platformApiError, platformContext } from "../../../../lib/platform-store";
 
 export async function POST(request: Request) {
   try {

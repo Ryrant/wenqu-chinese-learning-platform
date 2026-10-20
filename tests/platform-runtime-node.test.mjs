@@ -9,8 +9,8 @@ const root = new URL("../", import.meta.url);
 
 async function importRuntimeNode() {
   const [runtimeSource, nodeSource] = await Promise.all([
-    readFile(new URL("app/lib/platform-runtime.ts", root), "utf8"),
-    readFile(new URL("app/lib/platform-runtime-node.ts", root), "utf8"),
+    readFile(new URL("lib/platform-runtime.ts", root), "utf8"),
+    readFile(new URL("lib/platform-runtime-node.ts", root), "utf8"),
   ]);
   const runtimeJs = ts.transpileModule(runtimeSource, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },

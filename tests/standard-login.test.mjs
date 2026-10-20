@@ -21,10 +21,10 @@ async function loadAuthModules() {
     assert.deepEqual(errors, []);
     await writeFile(join(directory, output), transpiled.outputText, "utf8");
   };
-  await compile("app/lib/auth-password.ts", "auth-password.js");
-  await compile("app/lib/standard-login.ts", "standard-login.js");
-  await compile("app/lib/password-change.ts", "password-change.js");
-  await compile("app/lib/password-change-state.ts", "password-change-state.js");
+  await compile("lib/auth-password.ts", "auth-password.js");
+  await compile("lib/standard-login.ts", "standard-login.js");
+  await compile("lib/password-change.ts", "password-change.js");
+  await compile("lib/password-change-state.ts", "password-change-state.js");
   return {
     modules: {
       ...await import(`${pathToFileURL(join(directory, "standard-login.js")).href}?${Date.now()}`),

@@ -1,5 +1,5 @@
-import { platformApiError, platformContext } from "../../../../lib/platform-store";
-import { changeAccountPassword } from "../../../../lib/password-change";
+import { platformApiError, platformContext } from "../../../../../lib/platform-store";
+import { changeAccountPassword } from "../../../../../lib/password-change";
 
 export async function POST(request: Request) {
   try {

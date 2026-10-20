@@ -1,6 +1,6 @@
-import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
-import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
-import { readStudentCase } from "../../../lib/student-case-service";
+import { workspacePasswordChangeGate } from "../../../../lib/password-change-state";
+import { getAuthMode, platformApiError, platformContext } from "../../../../lib/platform-store";
+import { readStudentCase } from "../../../../lib/student-case-service";
 
 export async function GET(request: Request) {
   try {

@@ -1,5 +1,5 @@
-import { platformApiError, platformContext } from "../../../lib/platform-store";
-import { createStudentSubmission, type SubmissionTargetInput } from "../../../lib/submission-service";
+import { platformApiError, platformContext } from "../../../../lib/platform-store";
+import { createStudentSubmission, type SubmissionTargetInput } from "../../../../lib/submission-service";
 
 export async function POST(request: Request) {
   try {

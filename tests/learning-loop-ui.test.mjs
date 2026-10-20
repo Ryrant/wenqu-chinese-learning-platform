@@ -9,7 +9,7 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 test("student workspace exposes diagnostic plan and review actions", async () => {
   const [student, views] = await Promise.all([
     readRoleSources("student"),
-    readSourceDirectory("app/features"),
+    readSourceDirectory("components"),
   ]);
   const source = `${student}\n${views}`;
   assert.match(source, /submit_diagnostic/);
@@ -22,7 +22,7 @@ test("student workspace exposes diagnostic plan and review actions", async () =>
 test("teacher workspace exposes rubric heatmap and intervention actions", async () => {
   const [staff, views] = await Promise.all([
     readRoleSources("teacher", "guardian", "admin"),
-    readSourceDirectory("app/features"),
+    readSourceDirectory("components"),
   ]);
   const source = `${staff}\n${views}`;
   assert.match(source, /objectiveIds/);
@@ -35,7 +35,7 @@ test("guardian workspace exposes child switching weekly report and family tasks"
   const [dashboard, staff, views] = await Promise.all([
     readWorkspaceClientSources(),
     readRoleSources("teacher", "guardian", "admin"),
-    readSourceDirectory("app/features"),
+    readSourceDirectory("components"),
   ]);
   const source = `${dashboard}\n${staff}\n${views}`;
   assert.match(source, /studentId/);
@@ -46,7 +46,7 @@ test("guardian workspace exposes child switching weekly report and family tasks"
 test("admin workspace exposes objectives enrollment and real quality metrics", async () => {
   const [staff, views] = await Promise.all([
     readRoleSources("teacher", "guardian", "admin"),
-    readSourceDirectory("app/features"),
+    readSourceDirectory("components"),
   ]);
   const source = `${staff}\n${views}`;
   assert.match(source, /upsert_learning_objective/);

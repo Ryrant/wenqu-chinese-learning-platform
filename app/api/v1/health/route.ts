@@ -1,6 +1,6 @@
-import { ensurePlatformRuntime } from "../../../lib/platform-runtime";
-import { loadPlatformSettings } from "../../../lib/platform-settings";
-import { ensurePlatformSchema } from "../../../lib/platform-store";
+import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
+import { loadPlatformSettings } from "../../../../lib/platform-settings";
+import { ensurePlatformSchema } from "../../../../lib/platform-store";
 
 export async function GET() {
   let database = null;

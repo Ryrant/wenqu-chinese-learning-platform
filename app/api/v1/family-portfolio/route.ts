@@ -1,6 +1,6 @@
-import { readFamilyPortfolio } from "../../../lib/family-portfolio-service";
-import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
-import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
+import { readFamilyPortfolio } from "../../../../lib/family-portfolio-service";
+import { workspacePasswordChangeGate } from "../../../../lib/password-change-state";
+import { getAuthMode, platformApiError, platformContext } from "../../../../lib/platform-store";
 
 export async function GET(request: Request) {
   try {

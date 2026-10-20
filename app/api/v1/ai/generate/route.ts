@@ -1,8 +1,8 @@
-import { generateGroundedText } from "../../../../lib/ai/grounding";
-import type { AiPurpose } from "../../../../lib/ai/provider";
-import { aiProviderSettings, loadPlatformSettings } from "../../../../lib/platform-settings";
-import { platformApiError, platformContext } from "../../../../lib/platform-store";
-import { searchPublishedKnowledge } from "../../../../lib/retrieval";
+import { generateGroundedText } from "../../../../../lib/ai/grounding";
+import type { AiPurpose } from "../../../../../lib/ai/provider";
+import { aiProviderSettings, loadPlatformSettings } from "../../../../../lib/platform-settings";
+import { platformApiError, platformContext } from "../../../../../lib/platform-store";
+import { searchPublishedKnowledge } from "../../../../../lib/retrieval";
 
 const purposes = new Set<AiPurpose>(["tutor", "lesson", "review"]);
 

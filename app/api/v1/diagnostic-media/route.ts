@@ -1,6 +1,6 @@
-import { diagnosticMediaKey } from "../../../lib/diagnostic-media";
-import { ensurePlatformRuntime } from "../../../lib/platform-runtime";
-import { platformApiError, platformContext } from "../../../lib/platform-store";
+import { diagnosticMediaKey } from "../../../../lib/diagnostic-media";
+import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
+import { platformApiError, platformContext } from "../../../../lib/platform-store";
 
 export async function POST(request: Request) {
   try {

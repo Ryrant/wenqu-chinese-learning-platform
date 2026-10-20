@@ -8,10 +8,10 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 
 test("ai provider modules use Responses API and keep template fallback", async () => {
   const [provider, openai, template, grounding, envExample] = await Promise.all([
-    read("app/lib/ai/provider.ts"),
-    read("app/lib/ai/openai-provider.ts"),
-    read("app/lib/ai/template-provider.ts"),
-    read("app/lib/ai/grounding.ts"),
+    read("lib/ai/provider.ts"),
+    read("lib/ai/openai-provider.ts"),
+    read("lib/ai/template-provider.ts"),
+    read("lib/ai/grounding.ts"),
     read(".env.example"),
   ]);
   assert.match(provider, /export type AiProvider/);
@@ -25,7 +25,7 @@ test("ai provider modules use Responses API and keep template fallback", async (
 
 test("knowledge search route delegates to retrieval service", async () => {
   const [retrieval, route] = await Promise.all([
-    read("app/lib/retrieval.ts"),
+    read("lib/retrieval.ts"),
     read("app/api/v1/knowledge/search/route.ts"),
   ]);
   assert.match(retrieval, /export async function searchPublishedKnowledge/);

@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/d1";
-import { getPlatformRuntime } from "../app/lib/platform-runtime";
+import { getPlatformRuntime } from "../lib/platform-runtime";
 import * as schema from "./schema";
 
 export function getDb() {

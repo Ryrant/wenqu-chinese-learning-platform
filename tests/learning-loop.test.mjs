@@ -34,7 +34,7 @@ async function importBundledTypeScript(path) {
 }
 
 test("diagnostic scores are grouped by learning objective", async () => {
-  const { calculateDiagnosticScores } = await importTypeScript("app/lib/learning-loop.ts");
+  const { calculateDiagnosticScores } = await importTypeScript("lib/learning-loop.ts");
   assert.deepEqual(calculateDiagnosticScores([
     { objectiveId: "listen", isCorrect: true },
     { objectiveId: "listen", isCorrect: false },
@@ -46,7 +46,7 @@ test("diagnostic scores are grouped by learning objective", async () => {
 });
 
 test("diagnostic submission must match the complete active item set", async () => {
-  const { matchesDiagnosticItemSet } = await importTypeScript("app/lib/learning-loop.ts");
+  const { matchesDiagnosticItemSet } = await importTypeScript("lib/learning-loop.ts");
   assert.equal(matchesDiagnosticItemSet(["a", "b"], ["b", "a"]), true);
   assert.equal(matchesDiagnosticItemSet(["a", "b"], ["a"]), false);
   assert.equal(matchesDiagnosticItemSet(["a", "b"], ["a", "b", "c"]), false);
@@ -54,7 +54,7 @@ test("diagnostic submission must match the complete active item set", async () =
 });
 
 test("diagnostic service rejects a partial level questionnaire before writing evidence", async () => {
-  const { submitDiagnostic } = await importBundledTypeScript("app/lib/learning-loop-service.ts");
+  const { submitDiagnostic } = await importBundledTypeScript("lib/learning-loop-service.ts");
   let writes = 0;
   const db = {
     prepare(sql) {
@@ -85,7 +85,7 @@ test("diagnostic service rejects a partial level questionnaire before writing ev
 });
 
 test("review service enforces next-day due time and blocks generic diagnostic completion", async () => {
-  const { answerReviewItem, updateRecommendationStatus } = await importBundledTypeScript("app/lib/learning-loop-service.ts");
+  const { answerReviewItem, updateRecommendationStatus } = await importBundledTypeScript("lib/learning-loop-service.ts");
   const context = { tenantId: "tenant", userId: "student", roles: ["student"] };
   const futureDb = {
     prepare() {
@@ -113,7 +113,7 @@ test("review service enforces next-day due time and blocks generic diagnostic co
 });
 
 test("teacher confirmation is one atomic batch guarded by a durable unique fact", async () => {
-  const { confirmSubmissionReview } = await importBundledTypeScript("app/lib/assessment-service.ts");
+  const { confirmSubmissionReview } = await importBundledTypeScript("lib/assessment-service.ts");
   const prepared = [];
   let firstCount = 0;
   let allCount = 0;
@@ -161,7 +161,7 @@ test("teacher confirmation is one atomic batch guarded by a durable unique fact"
 });
 
 test("AI review suggestion cannot reopen an already reviewed submission", async () => {
-  const { suggestTextReview } = await importBundledTypeScript("app/lib/assessment-service.ts");
+  const { suggestTextReview } = await importBundledTypeScript("lib/assessment-service.ts");
   const db = {
     prepare(sql) {
       return {
@@ -180,13 +180,13 @@ test("AI review suggestion cannot reopen an already reviewed submission", async 
 });
 
 test("mastery blends new evidence and preserves cumulative evidence count", async () => {
-  const { blendMastery } = await importTypeScript("app/lib/learning-loop.ts");
+  const { blendMastery } = await importTypeScript("lib/learning-loop.ts");
   assert.deepEqual(blendMastery(null, 0, 0.8, 2), { mastery: 0.8, evidenceCount: 2 });
   assert.deepEqual(blendMastery(0.5, 3, 1, 2), { mastery: 0.65, evidenceCount: 5 });
 });
 
 test("learning plan prioritizes teacher intervention review family and assignments", async () => {
-  const { rankLearningPlan } = await importTypeScript("app/lib/learning-loop.ts");
+  const { rankLearningPlan } = await importTypeScript("lib/learning-loop.ts");
   const ranked = rankLearningPlan([
     { id: "normal", kind: "assignment", dueAt: "2026-08-20T00:00:00.000Z" },
     { id: "family", kind: "family", dueAt: "2026-08-01T09:00:00.000Z" },
@@ -198,7 +198,7 @@ test("learning plan prioritizes teacher intervention review family and assignmen
 });
 
 test("daily plan gives actionable teacher and due review tasks priority before matching support, without waiting work blocking them", async () => {
-  const { rankLearningPlan } = await importTypeScript("app/lib/learning-loop.ts");
+  const { rankLearningPlan } = await importTypeScript("lib/learning-loop.ts");
   const ranked = rankLearningPlan([
     { id: "waiting-teacher", kind: "sequence", waitingReview: true },
     { id: "waiting-family", kind: "family", waitingReview: true },
@@ -211,7 +211,7 @@ test("daily plan gives actionable teacher and due review tasks priority before m
 });
 
 test("review items become answerable only when their due time arrives", async () => {
-  const { isRecommendationDue } = await importTypeScript("app/lib/learning-loop.ts");
+  const { isRecommendationDue } = await importTypeScript("lib/learning-loop.ts");
   const now = new Date("2026-08-01T00:00:00.000Z");
   assert.equal(isRecommendationDue(null, now), true);
   assert.equal(isRecommendationDue("2026-07-31T23:59:59.000Z", now), true);
@@ -220,7 +220,7 @@ test("review items become answerable only when their due time arrives", async ()
 });
 
 test("assignment rubric requires exactly three dimensions totaling 100", async () => {
-  const { validateRubric } = await importTypeScript("app/lib/learning-loop.ts");
+  const { validateRubric } = await importTypeScript("lib/learning-loop.ts");
   assert.deepEqual(validateRubric([
     { name: "内容准确", weight: 40 },
     { name: "表达完整", weight: 40 },
@@ -241,7 +241,7 @@ test("assignment rubric requires exactly three dimensions totaling 100", async (
 test("learning loop schema and additive migration include durable tenant-scoped state", async () => {
   const [schema, runtime, migration, wrangler, baseline] = await Promise.all([
     readFile(new URL("db/schema.ts", root), "utf8"),
-    readFile(new URL("app/lib/platform-store.ts", root), "utf8"),
+    readFile(new URL("lib/platform-store.ts", root), "utf8"),
     readFile(new URL("drizzle/0004_learning_loop.sql", root), "utf8"),
     readFile(new URL("wrangler.toml", root), "utf8"),
     readFile(new URL("scripts/baseline-d1-migrations.sql", root), "utf8"),

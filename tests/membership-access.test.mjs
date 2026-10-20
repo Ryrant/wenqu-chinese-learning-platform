@@ -5,7 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 
 const root = new URL("../", import.meta.url);
-const serviceSource = await readFile(new URL("app/lib/membership-service.ts", root), "utf8");
+const serviceSource = await readFile(new URL("lib/membership-service.ts", root), "utf8");
 const executableSource = serviceSource
   .replace('import { hashPassword } from "./auth-password";', 'async function hashPassword(password) { return `hash:${password}`; }')
   .replace('import type { PlatformRole } from "./platform-store";\n', "");
@@ -19,7 +19,7 @@ const membershipService = await import(`data:text/javascript;base64,${Buffer.fro
 const [actionsSource, workspaceSource, platformStoreSource] = await Promise.all([
   readCommandSources(),
   readWorkspaceSources(),
-  readFile(new URL("app/lib/platform-store.ts", root), "utf8"),
+  readFile(new URL("lib/platform-store.ts", root), "utf8"),
 ]);
 
 function createDb({ users = [], memberships = [], links = [] } = {}) {
@@ -184,7 +184,7 @@ test("workspace routes expose member and guardian management operations", () => 
 });
 
 test("access control helpers centralize teacher student and guardian filters", async () => {
-  const access = await readFile(new URL("app/lib/access-control.ts", root), "utf8");
+  const access = await readFile(new URL("lib/access-control.ts", root), "utf8");
   const workspace = await readWorkspaceSources();
   const actions = await readCommandSources();
   assert.match(access, /export type AccessClause/);

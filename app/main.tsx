@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
-import { Dashboard } from "./dashboard";
+import { Dashboard } from "../components/workspace/dashboard";
 import "./globals.css";
 
 const root = document.getElementById("root");

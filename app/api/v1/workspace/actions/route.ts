@@ -1,7 +1,7 @@
-import { resolveWorkspaceAction } from "../../../../lib/commands";
-import { requireText, type ActionBody } from "../../../../lib/commands/shared";
-import { workspaceActionRole, type WorkspaceActionName } from "../../../../lib/workspace-actions";
-import { platformApiError, platformContext } from "../../../../lib/platform-store";
+import { resolveWorkspaceAction } from "../../../../../lib/commands";
+import { requireText, type ActionBody } from "../../../../../lib/commands/shared";
+import { workspaceActionRole, type WorkspaceActionName } from "../../../../../lib/workspace-actions";
+import { platformApiError, platformContext } from "../../../../../lib/platform-store";
 
 export async function POST(request: Request) {
   try {

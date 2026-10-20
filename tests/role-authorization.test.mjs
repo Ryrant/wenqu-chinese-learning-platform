@@ -6,11 +6,11 @@ import { build } from "esbuild";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const bundle = await build({
   stdin: { contents: `
-    export { NodeSqliteDatabase } from './app/lib/platform-runtime-node';
-    export { setPlatformRuntime } from './app/lib/platform-runtime';
-    export { ensurePlatformSchema, ensureSiteJwtSecret, platformContext, cleanupLegacyDemoRoles } from './app/lib/platform-store';
-    export { createSessionToken } from './app/lib/auth-token';
-    export { hashPassword } from './app/lib/auth-password';
+    export { NodeSqliteDatabase } from './lib/platform-runtime-node';
+    export { setPlatformRuntime } from './lib/platform-runtime';
+    export { ensurePlatformSchema, ensureSiteJwtSecret, platformContext, cleanupLegacyDemoRoles } from './lib/platform-store';
+    export { createSessionToken } from './lib/auth-token';
+    export { hashPassword } from './lib/auth-password';
     export { POST as setup } from './app/api/v1/auth/setup/route';
     export { POST as login } from './app/api/v1/auth/login/route';
     export { GET as session } from './app/api/v1/auth/session/route';

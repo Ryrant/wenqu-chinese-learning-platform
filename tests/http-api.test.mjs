@@ -9,10 +9,10 @@ import { build } from "esbuild";
 const bundle = await build({
   stdin: { contents: `
     export { createApiApp } from './server/app';
-    export { NodeSqliteDatabase, LocalFileStorage } from './app/lib/platform-runtime-node';
-    export { setPlatformRuntime } from './app/lib/platform-runtime';
-    export { ensurePlatformSchema } from './app/lib/platform-store';
-    export { cleanupLegacyWorkspaceMetadata } from './app/lib/legacy-workspace-metadata';
+    export { NodeSqliteDatabase, LocalFileStorage } from './lib/platform-runtime-node';
+    export { setPlatformRuntime } from './lib/platform-runtime';
+    export { ensurePlatformSchema } from './lib/platform-store';
+    export { cleanupLegacyWorkspaceMetadata } from './lib/legacy-workspace-metadata';
   `, resolveDir: fileURLToPath(new URL("../", import.meta.url)) },
   bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });

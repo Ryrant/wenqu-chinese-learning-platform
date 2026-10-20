@@ -1,4 +1,4 @@
-import { sessionCookieName } from "../../../../lib/auth-token";
+import { sessionCookieName } from "../../../../../lib/auth-token";
 
 export async function POST() {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";

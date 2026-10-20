@@ -1,6 +1,6 @@
-import { workspacePasswordChangeGate } from "../../../lib/password-change-state";
-import { getAuthMode, platformApiError, platformContext } from "../../../lib/platform-store";
-import { readTeachingFollowups } from "../../../lib/teaching-followup-service";
+import { workspacePasswordChangeGate } from "../../../../lib/password-change-state";
+import { getAuthMode, platformApiError, platformContext } from "../../../../lib/platform-store";
+import { readTeachingFollowups } from "../../../../lib/teaching-followup-service";
 
 export async function GET(request: Request) {
   try {

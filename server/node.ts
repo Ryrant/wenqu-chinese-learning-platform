@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { fileURLToPath } from "node:url";
 import { createApiApp } from "./app";
-import { installNodeRuntime } from "../app/lib/platform-runtime-node";
+import { installNodeRuntime } from "../lib/platform-runtime-node";
 
 process.env.NODE_ENV ??= "production";
 await installNodeRuntime();

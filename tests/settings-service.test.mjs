@@ -10,10 +10,10 @@ const root = new URL("../", import.meta.url);
 
 async function loadSettingsModule() {
   const directory = await mkdtemp(join(tmpdir(), "huawen-zhixing-settings-"));
-  const source = await readFile(new URL("app/lib/platform-settings.ts", root), "utf8");
+  const source = await readFile(new URL("lib/platform-settings.ts", root), "utf8");
   const transpiled = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-    fileName: "app/lib/platform-settings.ts",
+    fileName: "lib/platform-settings.ts",
     reportDiagnostics: true,
   });
   const errors = (transpiled.diagnostics ?? []).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);

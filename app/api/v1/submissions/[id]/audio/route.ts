@@ -1,6 +1,6 @@
-import { submissionAccessClause } from "../../../../../lib/access-control";
-import { ensurePlatformRuntime } from "../../../../../lib/platform-runtime";
-import { platformApiError, platformContext } from "../../../../../lib/platform-store";
+import { submissionAccessClause } from "../../../../../../lib/access-control";
+import { ensurePlatformRuntime } from "../../../../../../lib/platform-runtime";
+import { platformApiError, platformContext } from "../../../../../../lib/platform-store";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
