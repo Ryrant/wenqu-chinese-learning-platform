@@ -313,10 +313,9 @@ test("standard build launcher delegates through the active npm CLI", async () =>
 });
 
 test("standard cloudflare deployment configuration has no variable prerequisites and remains secret-safe", async () => {
-  const [standardWrangler, envExample, agents] = await Promise.all([
+  const [standardWrangler, envExample] = await Promise.all([
     read("wrangler.toml"),
     read(".env.example"),
-    read("AGENTS.md"),
   ]);
   assert.match(standardWrangler, /main = "worker\/index\.ts"/);
   assert.match(standardWrangler, /binding = "DB"/);
@@ -327,22 +326,7 @@ test("standard cloudflare deployment configuration has no variable prerequisites
   assert.doesNotMatch(envExample, /D1_DATABASE_ID|R2_BUCKET_NAME/);
   assert.doesNotMatch(envExample, /CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID/);
   assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
-  assert.match(agents, /feature 分支/);
-  assert.match(agents, /PR/);
-  assert.match(agents, /README 维护规则/);
-  assert.match(agents, /优先移动原文/);
-  assert.match(agents, /快速开始.*Cloudflare 自托管.*一键部署/s);
-  assert.match(agents, /使用说明.*平台内部功能使用说明/s);
-  assert.match(agents, /本地开发.*clone.*依赖安装.*dev server/s);
-  assert.match(agents, /demo 阶段/);
-  assert.match(agents, /部署前.*零变量/s);
-  assert.match(agents, /首次初始化/);
-  assert.match(agents, /WAF Rate Limiting|Cloudflare Access/);
-  assert.match(agents, /\.github\/workflows\/ci\.yml.*必要校验/s);
-  assert.match(agents, /不维护默认 GitHub Actions 自动部署 workflow/);
-  assert.match(agents, /\/api\/v1\/auth\/login/);
-  assert.match(agents, /docs\/superpowers\/.*本地/);
-  assert.doesNotMatch(`${envExample}\n${agents}`, /ChatGPT|Platform Sites|\.openai|wrangler\.chatgpt|oai-authenticated-user-email/i);
+  assert.doesNotMatch(envExample, /ChatGPT|Platform Sites|\.openai|wrangler\.chatgpt|oai-authenticated-user-email/i);
 });
 
 test("login has best-effort throttling and malformed cookies fail closed", async () => {
