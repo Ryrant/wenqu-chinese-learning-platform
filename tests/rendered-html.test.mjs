@@ -7,10 +7,19 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
+import { ESLint } from "eslint";
 
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const execFileAsync = promisify(execFile);
+
+test("lint ignores generated artifacts left by an in-place framework upgrade while checking current source", async () => {
+  const eslint = new ESLint({ cwd: fileURLToPath(root) });
+  for (const artifact of [".next/server/entry.js", ".vinext/server/index.js", "dist/node/index.mjs"]) {
+    assert.equal(await eslint.isPathIgnored(artifact), true, `${artifact} 是构建产物，不应作为源码检查`);
+  }
+  assert.equal(await eslint.isPathIgnored("app/main.tsx"), false);
+});
 
 test("pilot readiness schema includes account content and assessment state", async () => {
   const [schema, migration, store] = await Promise.all([

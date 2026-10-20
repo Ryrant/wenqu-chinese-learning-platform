@@ -37,7 +37,12 @@ export function defaultWorkspaceRole(roles: readonly Role[]): Role {
 export function pageSections(route: WorkspaceRoute): WorkspaceSection[] {
   const { role, page } = route;
   if (role === "student") return ["teaching", "progress", ...(page === "tasks" ? ["curriculum" as const] : [])];
-  if (role === "teacher") return ["teaching", "progress", ...(page === "lessons" ? ["lessons" as const, "content" as const] : page === "classes" || page === "reviews" ? ["curriculum" as const, "trials" as const] : [])];
+  if (role === "teacher") {
+    const sections: WorkspaceSection[] = ["teaching", "progress"];
+    if (page === "lessons") return [...sections, "lessons", "content"];
+    if (page === "overview") return [...sections, "curriculum"];
+    return [...sections, "curriculum", "trials"];
+  }
   if (role === "guardian") return ["progress", ...(page === "tasks" ? ["teaching" as const, "curriculum" as const] : page === "consents" ? ["consents" as const] : [])];
   const sections: Record<string, WorkspaceSection[]> = {
     overview: ["teaching", "members", "content", "quality", "trials", "progress"],

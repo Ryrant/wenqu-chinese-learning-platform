@@ -49,6 +49,80 @@ test("NodeSqliteDatabase implements D1-like prepare bind first all run and batch
   }
 });
 
+test("concurrent Node SQLite batches commit independently without nesting transactions", async (t) => {
+  const { NodeSqliteDatabase } = await importRuntimeNode();
+  const db = new NodeSqliteDatabase("file::memory:");
+  t.after(() => db.close());
+  await db.prepare("CREATE TABLE writes (id TEXT PRIMARY KEY)").run();
+
+  const outcomes = await Promise.allSettled([
+    db.batch([db.prepare("INSERT INTO writes VALUES ('first-1')"), db.prepare("INSERT INTO writes VALUES ('first-2')")]),
+    db.batch([db.prepare("INSERT INTO writes VALUES ('second-1')"), db.prepare("INSERT INTO writes VALUES ('second-2')")]),
+  ]);
+
+  assert.deepEqual(outcomes.map((outcome) => outcome.status), ["fulfilled", "fulfilled"]);
+  assert.deepEqual((await db.prepare("SELECT id FROM writes ORDER BY id").all()).results.map((row) => row.id), ["first-1", "first-2", "second-1", "second-2"]);
+});
+
+test("a failed batch cannot roll back an independently successful run", async (t) => {
+  const { NodeSqliteDatabase } = await importRuntimeNode();
+  const db = new NodeSqliteDatabase("file::memory:");
+  t.after(() => db.close());
+  await db.prepare("CREATE TABLE writes (id TEXT PRIMARY KEY)").run();
+
+  const outcomes = await Promise.allSettled([
+    db.batch([db.prepare("INSERT INTO writes VALUES ('rolled-back')"), db.prepare("INSERT INTO writes VALUES ('rolled-back')")]),
+    db.prepare("INSERT INTO writes VALUES ('independent')").run(),
+  ]);
+
+  assert.equal(outcomes[0].status, "rejected");
+  assert.match(outcomes[0].reason.message, /UNIQUE constraint failed/);
+  assert.equal(outcomes[1].status, "fulfilled");
+  assert.equal(outcomes[1].value.success, true);
+  assert.deepEqual((await db.prepare("SELECT id FROM writes ORDER BY id").all()).results, [{ id: "independent" }]);
+  await db.batch([db.prepare("INSERT INTO writes VALUES ('retry')")]);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM writes").first()).count, 2);
+});
+
+test("Node SQLite batches reject foreign and asynchronous statements before executing any writes", async (t) => {
+  const { NodeSqliteDatabase } = await importRuntimeNode();
+  const db = new NodeSqliteDatabase("file::memory:");
+  const otherDb = new NodeSqliteDatabase("file::memory:");
+  t.after(() => { db.close(); otherDb.close(); });
+  await db.prepare("CREATE TABLE writes (id TEXT PRIMARY KEY)").run();
+  await otherDb.prepare("CREATE TABLE writes (id TEXT PRIMARY KEY)").run();
+  let called = false;
+  const overridden = db.prepare("INSERT INTO writes VALUES ('overridden')");
+  overridden.run = async () => { called = true; throw new Error("asynchronous_failure"); };
+  const custom = { run: async () => { called = true; return { success: true, meta: {} }; } };
+
+  for (const invalid of [otherDb.prepare("INSERT INTO writes VALUES ('foreign')"), overridden, custom]) {
+    await assert.rejects(db.batch([db.prepare("INSERT INTO writes VALUES ('must-not-run')"), invalid]), /invalid_batch_statement/);
+    assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM writes").first()).count, 0);
+    assert.equal((await otherDb.prepare("SELECT COUNT(*) AS count FROM writes").first()).count, 0);
+  }
+  assert.equal(called, false);
+  assert.deepEqual(await db.batch([]), []);
+  await db.batch([db.prepare("INSERT INTO writes VALUES ('valid')")]);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM writes").first()).count, 1);
+});
+
+test("SQLite automatic rollback preserves the original failure and permits a later batch", async (t) => {
+  const { NodeSqliteDatabase } = await importRuntimeNode();
+  const db = new NodeSqliteDatabase("file::memory:");
+  t.after(() => db.close());
+  await db.prepare("CREATE TABLE writes (id TEXT PRIMARY KEY)").run();
+  await db.prepare("INSERT INTO writes VALUES ('existing')").run();
+
+  await assert.rejects(db.batch([
+    db.prepare("INSERT INTO writes VALUES ('rolled-back')"),
+    db.prepare("INSERT OR ROLLBACK INTO writes VALUES ('existing')"),
+  ]), /UNIQUE constraint failed/);
+  assert.deepEqual((await db.prepare("SELECT id FROM writes").all()).results, [{ id: "existing" }]);
+  await db.batch([db.prepare("INSERT INTO writes VALUES ('retry')")]);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM writes").first()).count, 2);
+});
+
 test("LocalFileStorage writes reads and rejects traversal keys", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "huawen-zhixing-storage-"));
   try {

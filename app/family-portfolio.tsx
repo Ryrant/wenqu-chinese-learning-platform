@@ -1,12 +1,10 @@
-"use client";
-
 import { NativeSelect } from "@/components/ui/native-select";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { SectionHeading, EmptyState } from "./components/workspace-ui";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FamilyWorkEvidence } from "./family-task-guide";
 import { WorkEvidence } from "./learning-sequences";
 import { UnitReportLink } from "./unit-report-links";
@@ -48,40 +46,47 @@ const portfolioKey = (studentId: string, revision: string, retry: number) => JSO
 
 export function FamilyPortfolio({ studentId, revision }: { studentId?: string; revision: string }) {
   const [selectedId, setSelectedId] = useState("");
+  const automaticStudent = useRef("");
   const [retry, setRetry] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<{ key: string; data: FamilyPortfolioData | null; error: string }>({ key: "", data: null, error: "" });
   const requestedId = studentId ?? selectedId;
   const requestKey = portfolioKey(requestedId, revision, retry);
   useEffect(() => {
-    if (studentId === "" || result.key === requestKey) return;
+    if (studentId === "") return;
+    // Activity 隐藏时清理 Effect，恢复后重新读取，但保留筛选及已展开作品。
+    // 首次由服务端选择的学生保留为读取目标，避免自动选择引发第二次请求。
+    const targetId = requestedId || automaticStudent.current;
     const controller = new AbortController();
     let active = true;
-    fetch(`/api/v1/family-portfolio${requestedId ? `?studentId=${encodeURIComponent(requestedId)}` : ""}`, { cache: "no-store", signal: controller.signal })
+    setLoading(true);
+    fetch(`/api/v1/family-portfolio${targetId ? `?studentId=${encodeURIComponent(targetId)}` : ""}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json() as FamilyPortfolioData & { error?: string };
         if (!response.ok) throw new Error(payload.error === "password_change_required" ? "请返回工作区完成初始密码修改后再读取作品集。" : [401, 403, 404].includes(response.status) ? "当前无法读取所选学生的作品集，请核对账号及授权范围。" : "作品集暂时无法读取，请重试。", { cause: response.status });
-        if (requestedId && payload.student?.id !== requestedId) throw new Error("返回的作品与当前选择不一致，请重试。", { cause: 404 });
+        if (targetId && payload.student?.id !== targetId) throw new Error("返回的作品与当前选择不一致，请重试。", { cause: 404 });
         return payload;
       }).then((data) => {
         if (!active) return;
-        const committedId = requestedId || data.student?.id || "";
-        if (studentId === undefined && !requestedId && committedId) setSelectedId(committedId);
-        setResult({ key: portfolioKey(committedId, revision, retry), data, error: "" });
+        if (studentId === undefined && !requestedId) automaticStudent.current = data.student?.id || "";
+        setResult({ key: requestKey, data, error: "" });
+        setLoading(false);
       }).catch((reason) => {
         if (!active) return;
         const denied = reason instanceof Error && [401, 403, 404].includes(Number(reason.cause));
         setResult((previous) => ({ key: requestKey, data: denied ? null : previous.data, error: reason instanceof Error && typeof reason.cause === "number" ? reason.message : "作品集暂时无法读取，请重试。" }));
+        setLoading(false);
       });
     return () => { active = false; controller.abort(); };
-  }, [requestedId, revision, retry, studentId, requestKey, result.key]);
-  const current = result.key === requestKey;
+  }, [requestedId, studentId, requestKey]);
+  const current = result.key === requestKey && !loading;
   const shownData = result.data && (!requestedId || result.data.student?.id === requestedId) ? result.data : null;
   return <Card className={`gap-0 p-6 ${styles.section}`} aria-label="家庭交流作品集" aria-busy={!current && studentId !== ""}>
     <SectionHeading title={`家庭交流作品集${shownData?.student ? ` · ${shownData.student.displayName}` : ""}`} description="回看交流作品、帮助记录与教师反馈。"/>
     {studentId === "" ? <p className="empty-state">请先选择孩子，再查看作品集。</p> : <>
-      {studentId === undefined && <label className={styles.selector}>作品集学生<NativeSelect className="w-full" value={requestedId} onChange={(event) => setSelectedId(event.target.value)}><option value="" disabled>请选择学生</option>{requestedId && !result.data?.students.some((item) => item.id === requestedId) && <option value={requestedId}>当前选择暂不可读取</option>}{result.data?.students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.id.slice(0, 8)}</option>)}</NativeSelect></label>}
+      {studentId === undefined && <label className={styles.selector}>作品集学生<NativeSelect className="w-full" value={requestedId || shownData?.student?.id || ""} onChange={(event) => setSelectedId(event.target.value)}><option value="" disabled>请选择学生</option>{requestedId && !result.data?.students.some((item) => item.id === requestedId) && <option value={requestedId}>当前选择暂不可读取</option>}{result.data?.students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.id.slice(0, 8)}</option>)}</NativeSelect></label>}
       {!current && <p role="status">{shownData ? "正在刷新，以下保留上次读取的作品。" : "正在读取所选学生的作品…"}</p>}
-      {current && result.error && <div role="alert"><p>{result.error}{shownData ? " 已保留上次读取的作品及筛选。" : ""}</p><div className={styles.actions}><Button type="button" variant="outline" onClick={() => setRetry(retry + 1)}>重试读取作品集</Button>{studentId === undefined && requestedId && <Button type="button" variant="outline" onClick={() => { setSelectedId(""); setRetry(retry + 1); }}>重新读取学生列表</Button>}</div></div>}
+      {current && result.error && <div role="alert"><p>{result.error}{shownData ? " 已保留上次读取的作品及筛选。" : ""}</p><div className={styles.actions}><Button type="button" variant="outline" onClick={() => setRetry(retry + 1)}>重试读取作品集</Button>{studentId === undefined && (requestedId || automaticStudent.current) && <Button type="button" variant="outline" onClick={() => { automaticStudent.current = ""; setSelectedId(""); setRetry(retry + 1); }}>重新读取学生列表</Button>}</div></div>}
       {shownData && <><p className={styles.timestamp}>读取于 {sequenceTime(shownData.generatedAt)}</p>{shownData.student ? <PortfolioEntries key={shownData.student.id} data={shownData}/> : <p className="empty-state">当前没有可读学生，请先完成学生入班或家庭绑定。</p>}</>}
     </>}
   </Card>;

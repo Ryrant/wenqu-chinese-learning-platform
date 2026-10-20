@@ -8,6 +8,11 @@ const bundled = await build({
   bundle: true, format: "esm", platform: "node", target: "node22", write: false,
 });
 const { createWorkspaceStore } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString("base64")}`);
+const resumeBundled = await build({
+  entryPoints: [fileURLToPath(new URL("../app/features/workspace/observe-page-resume.ts", import.meta.url))],
+  bundle: true, format: "esm", platform: "node", target: "node22", write: false,
+});
+const { observePageResume } = await import(`data:text/javascript;base64,${Buffer.from(resumeBundled.outputFiles[0].text).toString("base64")}`);
 
 function patch(studentId = "child-a", fields = {}) {
   return {
@@ -129,6 +134,60 @@ test("equivalent pending reads deduplicate and loaded sections stay cached", { t
   assert.deepEqual(store.getSnapshot().data.documents, [{ id: "updated" }]);
 });
 
+test("revisiting a page revalidates its cached groups without rereading unrelated data", { timeout: 5000 }, async () => {
+  const { store, requests } = controlledStore();
+  await seed(store, requests, ["progress", "content"], { submissions: [{ id: "previous-work" }], documents: [{ id: "source" }] });
+  const returning = store.load(["progress"], { revalidate: true });
+  assert.equal(requests.length, 2, "returning to a page must read other sessions' changes");
+  assert.deepEqual(requests.at(-1).sections, ["progress"]);
+  requests.at(-1).resolve(patch("child-a", { submissions: [{ id: "new-work" }] }));
+  await returning;
+  assert.deepEqual(store.getSnapshot().data.submissions, [{ id: "new-work" }]);
+  assert.deepEqual(store.getSnapshot().data.documents, [{ id: "source" }]);
+});
+
+test("simultaneous revalidation requests share one read and failed reads preserve a retryable snapshot", { timeout: 5000 }, async () => {
+  const { store, requests } = controlledStore();
+  await seed(store, requests, ["progress"], { submissions: [{ id: "saved-work" }] });
+  const previous = store.getSnapshot();
+  const first = store.load(["progress"], { revalidate: true });
+  const second = store.load(["progress"], { revalidate: true });
+  assert.equal(requests.length, 2, "focus and visibility recovery must share an in-flight read");
+  const failures = Promise.all([assert.rejects(first, /unavailable/), assert.rejects(second, /unavailable/)]);
+  requests.at(-1).reject(new Error("read unavailable"));
+  await failures;
+  assert.equal(store.getSnapshot(), previous);
+  const retry = store.load(["progress"], { revalidate: true });
+  assert.equal(requests.length, 3);
+  requests.at(-1).resolve(patch("child-a", { submissions: [{ id: "latest-work" }] }));
+  await retry;
+  assert.deepEqual(store.getSnapshot().data.submissions, [{ id: "latest-work" }]);
+});
+
+test("window recovery reads only when visible, coalesces paired events and removes listeners", () => {
+  const windowTarget = new EventTarget();
+  const documentTarget = new EventTarget();
+  documentTarget.visibilityState = "hidden";
+  let clock = 0;
+  let resumes = 0;
+  const stop = observePageResume(() => { resumes++; }, windowTarget, documentTarget, () => clock);
+  windowTarget.dispatchEvent(new Event("focus"));
+  documentTarget.dispatchEvent(new Event("visibilitychange"));
+  assert.equal(resumes, 0, "a background tab must not read hidden pages");
+  documentTarget.visibilityState = "visible";
+  documentTarget.dispatchEvent(new Event("visibilitychange"));
+  windowTarget.dispatchEvent(new Event("focus"));
+  assert.equal(resumes, 1, "one foreground transition must not issue two reads");
+  clock = 1500;
+  windowTarget.dispatchEvent(new Event("focus"));
+  assert.equal(resumes, 2, "a later return must revalidate again");
+  stop();
+  clock = 3000;
+  windowTarget.dispatchEvent(new Event("focus"));
+  documentTarget.dispatchEvent(new Event("visibilitychange"));
+  assert.equal(resumes, 2, "unmounted or logged-out pages must not retain recovery listeners");
+});
+
 test("rapid child switches publish only the latest complete child snapshot", { timeout: 5000 }, async () => {
   const { store, requests } = controlledStore();
   await seed(store, requests, ["progress", "teaching"], { submissions: [{ id: "a-work" }], classes: [{ id: "a-class" }] });
@@ -169,7 +228,7 @@ test("failed child selection keeps the committed child and rolls future reads ba
 test("reset aborts invalidated reads and prevents their late responses from restoring the session", { timeout: 5000 }, async () => {
   const { store, requests } = controlledStore();
   await seed(store, requests, ["progress"], { submissions: [{ id: "a-work" }] });
-  const stale = store.load(["progress"], { force: true });
+  const stale = store.load(["progress"], { revalidate: true });
   const oldRequest = requests.at(-1);
   store.invalidate(["progress"]);
   store.reset();
@@ -184,6 +243,30 @@ test("reset aborts invalidated reads and prevents their late responses from rest
   assert.equal(store.getSnapshot().data.user.id, "admin");
   assert.deepEqual(store.getSnapshot().data.classes, [{ id: "new-session" }]);
   assert.deepEqual(store.getSnapshot().data.submissions, []);
+});
+
+test("account or tenant changes clear the previous identity's cache and reject late reads", { timeout: 5000 }, async () => {
+  for (const changed of ["account", "tenant"]) {
+    const { store, requests } = controlledStore();
+    const previousUser = { id: "teacher-a", email: "a@example.test", displayName: "A", roles: ["teacher"] };
+    await seed(store, requests, ["lessons", "progress"], { selectedStudent: null, user: previousUser, lessonPlans: [{ id: "a-private-lesson" }] });
+    const oldRead = store.load(["lessons"], { revalidate: true });
+    const oldRequest = requests.at(-1);
+    const foregroundRead = store.load(["progress"], { revalidate: true });
+    const rejected = assert.rejects(foregroundRead, { status: 401, code: "session_changed" });
+    requests.at(-1).resolve(patch(null, {
+      user: changed === "account" ? { ...previousUser, id: "teacher-b", displayName: "B" } : previousUser,
+      workspace: { tenantId: changed === "tenant" ? "school-b" : "school-a", name: "测试学校", region: "CN" },
+      submissions: [{ id: "new-identity-work" }],
+    }));
+    await rejected;
+    assert.equal(store.getSnapshot().data, null, "an identity switch must unmount old-role editors rather than merge identities");
+    assert.deepEqual(store.loaded(), []);
+    assert.equal(oldRequest.signal.aborted, true);
+    oldRequest.resolve(patch(null, { user: previousUser, lessonPlans: [{ id: "late-a-lesson" }] }));
+    await oldRead;
+    assert.equal(store.getSnapshot().data, null, "a late response must not restore the previous identity");
+  }
 });
 
 test("reset also cancels callers waiting behind a previous child switch", { timeout: 5000 }, async () => {

@@ -63,6 +63,19 @@ export class NodeSqlitePreparedStatement implements PlatformPreparedStatement {
   }
 
   async run<T = unknown>() {
+    return this.runSynchronously<T>();
+  }
+
+  static batchRunner<T>(statement: PlatformPreparedStatement, database: DatabaseSync) {
+    if (!(statement instanceof NodeSqlitePreparedStatement)
+      || statement.database !== database
+      || statement.run !== NodeSqlitePreparedStatement.prototype.run) {
+      throw new Error("invalid_batch_statement");
+    }
+    return () => statement.runSynchronously<T>();
+  }
+
+  private runSynchronously<T>() {
     const result = (this.database.prepare(this.query) as unknown as SqliteStatement).run(...this.values);
     return {
       results: [] as T[],
@@ -87,14 +100,22 @@ export class NodeSqliteDatabase implements PlatformDatabase {
   }
 
   async batch<T = unknown>(statements: PlatformPreparedStatement[]) {
+    // 先校验来源；事务内只执行同步 SQLite 调用，避免让并发请求进入同一连接。
+    const runners = statements.map((statement) => NodeSqlitePreparedStatement.batchRunner<T>(statement, this.database));
     this.database.exec("BEGIN");
     try {
-      const results = [];
-      for (const statement of statements) results.push(await statement.run<T>());
+      const results = runners.map((run) => run());
       this.database.exec("COMMIT");
       return results;
     } catch (error) {
-      this.database.exec("ROLLBACK");
+      try {
+        this.database.exec("ROLLBACK");
+      } catch (rollbackError) {
+        // OR ROLLBACK 等语句可能已结束事务，保留原始 SQL 错误供调用方处理。
+        if (!(rollbackError instanceof Error && rollbackError.message === "cannot rollback - no transaction is active")) {
+          throw new AggregateError([error, rollbackError], "sqlite_batch_rollback_failed", { cause: error });
+        }
+      }
       throw error;
     }
   }

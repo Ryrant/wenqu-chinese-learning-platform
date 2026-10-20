@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const bundle = await build({
   stdin: { contents: `
@@ -11,6 +13,9 @@ const bundle = await build({
     export { createSessionToken } from './app/lib/auth-token';
     export { parseWorkspaceSections, readWorkspace, workspaceServices } from './app/lib/workspace-service';
     export { GET as workspace } from './app/api/v1/workspace/route';
+    export { createWorkspaceStore } from './app/features/workspace/workspace-store';
+    export { matchWorkspaceRoute, pageSections } from './app/features/workspace/navigation';
+    export { TeacherMasteryHeatmap } from './app/features/teacher/mastery-heatmap';
   `, resolveDir: fileURLToPath(new URL("../", import.meta.url)) },
   bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
@@ -62,6 +67,19 @@ async function fixture(t) {
 }
 
 const metadataKeys = ["workspace", "user", "availableStudents", "selectedStudent", "generatedAt"];
+
+test("a fresh direct visit to teacher overview renders existing class mastery without visiting another page", async (t) => {
+  const f = await fixture(t);
+  const store = api.createWorkspaceStore((sections, studentId) => api.readWorkspace(f.context("teacher"), {
+    sections: new Set(sections), studentId,
+  }));
+  await store.load();
+  await store.load(api.pageSections(api.matchWorkspaceRoute("/teacher/overview")));
+  const html = renderToStaticMarkup(createElement(api.TeacherMasteryHeatmap, { data: store.getSnapshot().data }));
+  assert.match(html, /80%/, "已有目标和掌握度必须在首次直接访问时显示，不能依赖其他页面预热缓存");
+  assert.match(html, />student</);
+  assert.doesNotMatch(html, /other-student/);
+});
 
 test("workspace include parser accepts explicit groups and rejects unknown or empty values", () => {
   assert.equal(api.parseWorkspaceSections(null).size, 12);

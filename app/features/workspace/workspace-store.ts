@@ -1,8 +1,8 @@
 import type { WorkspaceData, WorkspacePatch, WorkspaceSection } from "../../lib/platform-types";
-import { readWorkspace } from "./api";
+import { ApiError, readWorkspace } from "./api";
 
 type Reader = typeof readWorkspace;
-type LoadOptions = { force?: boolean; studentId?: string };
+type LoadOptions = { force?: boolean; revalidate?: boolean; studentId?: string };
 export type WorkspaceSnapshot = { data: WorkspaceData | null; receivedAt: number };
 
 const sectionFields: Record<WorkspaceSection, readonly (keyof WorkspaceData)[]> = {
@@ -71,7 +71,8 @@ export function createWorkspaceStore(reader: Reader = readWorkspace) {
     }
     const token = generation;
     const needsNewContext = selected !== committedStudent && Boolean(snapshot.data);
-    const requested = [...new Set(sections)].filter((section) => options.force || needsNewContext || !loaded.has(section) || dirty.has(section));
+    // 页面重访和窗口恢复绕过已加载缓存，但仍与等价的在途读取合并。
+    const requested = [...new Set(sections)].filter((section) => options.force || options.revalidate || needsNewContext || !loaded.has(section) || dirty.has(section));
     if (snapshot.data && !requested.length && !changingStudent && !options.force) return;
     const key = `${token}:${selected ?? ""}:${options.force ? ++requestNumber : "cached"}:${requested.slice().sort().map((section) => `${section}.${versions.get(section) ?? 0}`).join(",")}`;
     if (pending.has(key)) return pending.get(key);
@@ -83,6 +84,11 @@ export function createWorkspaceStore(reader: Reader = readWorkspace) {
       try {
         const patch = await reader(requested, selected, controller.signal);
         if (token !== generation) return;
+        // 其他标签页可能切换了共享 Cookie；旧身份的缓存和草稿不能交给新账号或机构。
+        if (snapshot.data && (snapshot.data.user.id !== patch.user.id || snapshot.data.workspace.tenantId !== patch.workspace.tenantId)) {
+          reset();
+          throw new ApiError(401, "session_changed");
+        }
         // 每个分组独立判旧，较晚的通知请求不会吞掉并行的课程请求。
         const accepted = requested.filter((section) => (versions.get(section) ?? 0) === tickets.get(section) && latestRequests.get(section) === number);
         // 切换必须提交完整的新孩子快照；写入令在途数据失效时仍保留原孩子。
@@ -108,6 +114,8 @@ export function createWorkspaceStore(reader: Reader = readWorkspace) {
         requestedStudent = patch.selectedStudent?.id; committedStudent = requestedStudent;
         publish(current, updateClock);
       } catch (error) {
+        // reset 已推进 generation，这个主动失效错误仍需到达控制器以退出旧角色视图。
+        if (error instanceof ApiError && error.code === "session_changed") throw error;
         if (token !== generation) return;
         if (needsNewContext) { requestedStudent = committedStudent; generation++; }
         throw error;

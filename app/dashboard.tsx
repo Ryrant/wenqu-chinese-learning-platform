@@ -1,5 +1,3 @@
-"use client";
-
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Bell, BookOpen, CalendarCheck, ChartNoAxesCombined, Check, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, ClipboardList, FileText, FolderOpen, GraduationCap, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, Search, Settings, ShieldCheck, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
