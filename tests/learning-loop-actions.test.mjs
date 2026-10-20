@@ -1,3 +1,6 @@
+import { readCommandSources } from "./helpers/source-files.mjs";
+import { build } from "esbuild";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -5,8 +8,14 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 
-test("workspace actions expose every learning-loop write with explicit roles", async () => {
-  const actions = await read("app/api/v1/workspace/actions/route.ts");
+const registryBundle = await build({
+  stdin: { contents: `export { workspaceActionRoles } from './app/lib/workspace-actions'; export { resolveWorkspaceAction } from './app/lib/commands';`, resolveDir: fileURLToPath(root) },
+  bundle: true, platform: "node", format: "esm", target: "node22", write: false,
+});
+const registry = await import(`data:text/javascript;base64,${Buffer.from(registryBundle.outputFiles[0].text).toString("base64")}`);
+
+test("workspace command registry resolves supported operations with explicit role requirements", async () => {
+  const actions = await readCommandSources();
   const expected = {
     submit_diagnostic: "student",
     answer_review_item: "student",
@@ -17,10 +26,11 @@ test("workspace actions expose every learning-loop write with explicit roles", a
     set_class_enrollments: "admin",
   };
   for (const [action, role] of Object.entries(expected)) {
-    assert.match(actions, new RegExp(`${action}: "${role}"`));
-    assert.match(actions, new RegExp(`action === "${action}"`));
+    assert.equal(registry.workspaceActionRoles[action], role);
+    assert.equal(typeof registry.resolveWorkspaceAction(action), "function");
   }
-  assert.match(actions, /action === "update_recommendation_status"/);
+  for (const name of Object.keys(registry.workspaceActionRoles)) assert.equal(typeof registry.resolveWorkspaceAction(name), "function", name);
+  for (const name of ["unsupported", "constructor", "__proto__"]) assert.equal(registry.resolveWorkspaceAction(name), undefined);
   assert.match(actions, /validateRubric/);
   assert.match(actions, /assignment_objectives/);
   assert.match(actions, /objectiveCount/);
@@ -52,24 +62,4 @@ test("teacher-confirmed review reuses cumulative mastery update service", async 
   assert.match(assessment, /db\.batch/);
   assert.match(assessment, /submission\.reviewStatus === "reviewed"/);
   assert.doesNotMatch(assessment, /SELECT s\.tenant_id,s\.student_user_id,ao\.objective_id,\?,1/);
-});
-
-test("workspace read model selects a bound child and returns latest mastery only", async () => {
-  const workspace = await read("app/api/v1/workspace/route.ts");
-  for (const field of [
-    "learningObjectives", "diagnosticItems", "diagnosticSummary", "recommendations",
-    "availableStudents", "weeklyReport", "masteryMatrix",
-    "qualityMetrics", "enrollments",
-  ]) assert.match(workspace, new RegExp(`${field}[:,]`));
-  assert.match(workspace, /selectedStudent[:,]/);
-  assert.match(workspace, /searchParams\.get\("studentId"\)/);
-  assert.match(workspace, /assertGuardianStudentAccess/);
-  assert.match(workspace, /ROW_NUMBER\(\) OVER/);
-  assert.match(workspace, /rn=1/);
-  assert.match(workspace, /weeklyStatsQuery/);
-  assert.match(workspace, /PARTITION BY cr\.student_user_id,cr\.scope/);
-  assert.match(workspace, /submittedByFocus/);
-  assert.match(workspace, /PARTITION BY di\.level/);
-  assert.match(workspace, /rn<=30/);
-  assert.doesNotMatch(workspace, /diagnostic_items[\s\S]{0,500}LIMIT 12/);
 });

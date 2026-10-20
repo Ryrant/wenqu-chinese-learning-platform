@@ -2,6 +2,7 @@ import { sessionCookieName, verifySessionToken } from "./auth-token";
 import { ensurePlatformRuntime, type PlatformDatabase } from "./platform-runtime";
 import { createInitialAdminAccount } from "./standard-login";
 import { cleanupLegacyDemoRoles } from "./legacy-demo-roles";
+import { cleanupLegacyWorkspaceMetadata } from "./legacy-workspace-metadata";
 
 export { cleanupLegacyDemoRoles } from "./legacy-demo-roles";
 
@@ -60,7 +61,7 @@ async function trySchema(db: PlatformDatabase, sql: string) {
 
 async function ensureCoreSchema(db: PlatformDatabase) {
   await db.batch([
-    db.prepare(`CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, region TEXT NOT NULL DEFAULT 'sg', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, region TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL, locale TEXT NOT NULL DEFAULT 'zh-CN', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS role_memberships (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -124,7 +125,12 @@ export async function ensurePlatformSchema(db: PlatformDatabase) {
     await cached;
     return;
   }
-  const pending = (async () => { await ensureCoreSchema(db); await ensureExtendedSchema(db); await cleanupLegacyDemoRoles(db); })().catch((error) => {
+  const pending = (async () => {
+    await ensureCoreSchema(db);
+    await ensureExtendedSchema(db);
+    await cleanupLegacyDemoRoles(db);
+    await cleanupLegacyWorkspaceMetadata(db);
+  })().catch((error) => {
     schemaReady.delete(db);
     throw error;
   });

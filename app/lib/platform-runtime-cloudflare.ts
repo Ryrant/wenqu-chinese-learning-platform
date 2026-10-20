@@ -27,6 +27,7 @@ function createStorage(bucket: R2Bucket): PlatformStorage {
 
 export function createCloudflareRuntime(env: CloudflareRuntimeEnv): PlatformRuntime {
   return {
+    kind: "cloudflare",
     database: env.DB ?? null,
     storage: env.CONTENT ? createStorage(env.CONTENT) : null,
   };

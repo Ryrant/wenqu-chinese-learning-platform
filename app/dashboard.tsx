@@ -1,306 +1,146 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AdminView, GuardianView, TeacherView } from "./staff-views";
-import { StudentView } from "./student-view";
-import type { Notify, Role, WorkspaceData } from "./lib/platform-types";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { Bell, BookOpen, CalendarCheck, ChartNoAxesCombined, Check, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, ClipboardList, FileText, FolderOpen, GraduationCap, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, Search, Settings, ShieldCheck, Users, type LucideIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import type { Notify, Role } from "./lib/platform-types";
+import { postJson } from "./features/workspace/api";
+import { errorMessage, useWorkspaceController } from "./features/workspace/use-workspace-controller";
+import { workspacePages } from "./features/workspace/navigation";
+import { RetainedRole } from "./features/workspace/retained-role";
+
 
 const roles: Array<{ id: Role; label: string }> = [
   { id: "student", label: "学生" }, { id: "teacher", label: "教师" }, { id: "guardian", label: "家长" }, { id: "admin", label: "机构" },
 ];
-const navigation: Record<Role, string[]> = {
-  student: ["学习总览", "AI 课堂", "学习任务", "成长档案"],
-  teacher: ["教学总览", "来源化备课", "班级管理", "作业批阅"],
-  guardian: ["孩子概览", "成长报告", "家庭任务", "授权管理"],
-  admin: ["机构总览", "平台设置", "内容中心", "知识检索", "成员管理", "权限审计"],
-};
+const navigation = Object.fromEntries(Object.entries(workspacePages).map(([role, pages]) => [role, pages.map(([, label]) => label)])) as Record<Role, string[]>;
 
 type Toast = { title: string; detail: string; tone: "success" | "error" } | null;
 
-function authorizedRole(authorized: Role[], current?: Role): Role {
-  const next = current && authorized.includes(current) ? current : authorized.includes("admin") ? "admin" : authorized[0];
-  if (!next) throw new Error("当前账号未获授权，请联系管理员为账号分配角色。");
-  return next;
+const navigationIcons: Record<string, LucideIcon> = {
+  学习总览: LayoutDashboard, "AI 课堂": MessageCircle, 学习任务: ClipboardList, 成长档案: ChartNoAxesCombined,
+  教学总览: LayoutDashboard, 来源化备课: BookOpen, 班级管理: Users, 作业批阅: FileText,
+  孩子概览: LayoutDashboard, 成长报告: ChartNoAxesCombined, 家庭任务: CalendarCheck, 授权管理: ShieldCheck,
+  机构总览: LayoutDashboard, 平台设置: Settings, 内容中心: FolderOpen, 知识检索: Search, 成员管理: Users, 权限审计: ClipboardList,
+};
+
+function Brand() {
+  return <div className="app-brand"><span className="brand-symbol">华</span><div><strong>华文知行</strong><small>CHINESE LEARNING</small></div></div>;
 }
 
-async function readJson<T extends Record<string, unknown>>(response: Response): Promise<T | { error: string }> {
-  const text = await response.text();
-  if (!text.trim()) return {} as T;
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return { error: `接口返回的不是有效 JSON（HTTP ${response.status}）` };
-  }
+function AuthScreen({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return <main className="auth-page"><aside className="auth-intro"><Brand/><div className="auth-intro-copy"><h2>让学习发生，<br/>让成长可见。</h2><p>连接课堂与家庭，<br/>陪伴每一次表达与进步。</p></div><span className="auth-intro-footer">华文知行 · 协同教学平台</span></aside><section className="auth-form-area"><Card className="auth-card"><CardHeader><CardTitle><h1>{title}</h1></CardTitle>{description && <CardDescription>{description}</CardDescription>}</CardHeader><CardContent>{children}</CardContent></Card></section></main>;
 }
 
 export function Dashboard() {
-  const [data, setData] = useState<WorkspaceData | null>(null);
-  const [workspaceReceivedAt, setWorkspaceReceivedAt] = useState(0);
-  const [role, setRole] = useState<Role>("student");
-  const [activeNav, setActiveNav] = useState(navigation.student[0]);
+  const workspace = useWorkspaceController();
+  const { data, receivedAt: workspaceReceivedAt, session, initializing: loading, error, setError, accessDenied,
+    committedRoute, desiredRoute, pageLoading, pageError, refreshError, setRefreshError, refresh, act, selectStudent } = workspace;
+  const authMode = session?.authMode;
+  const setupRequired = session?.setupRequired;
+  const mustChangePassword = session?.user?.mustChangePassword;
+  const role = committedRoute?.role ?? desiredRoute?.role ?? "student";
+  const activeNav = committedRoute?.label ?? "";
   const [toast, setToast] = useState<Toast>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [refreshError, setRefreshError] = useState("");
   const [retryRefreshing, setRetryRefreshing] = useState(false);
-  const [authMode, setAuthMode] = useState<"standard" | "local" | null>(null);
-  const [accessDenied, setAccessDenied] = useState(false);
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [workspaceName, setWorkspaceName] = useState("");
   const [password, setPassword] = useState("");
-  const [setupRequired, setSetupRequired] = useState(false);
-  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [noticesOpen, setNoticesOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
-  const workspaceRequest = useRef(0);
-  const workspaceSelection = useRef<{ requested?: string; committed?: string }>({});
-
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavTrigger = useRef<HTMLButtonElement>(null);
+  const noticeTrigger = useRef<HTMLButtonElement>(null);
+  const feedbackReturnFocus = useRef<HTMLButtonElement | null>(null);
   const notify: Notify = (title, detail, tone = "success") => {
     setToast({ title, detail, tone });
     window.setTimeout(() => setToast(null), 3600);
   };
-
-  async function loadAuthMode() {
-    const response = await fetch("/api/v1/auth/session", { cache: "no-store" });
-    const payload = await readJson<{ authMode?: "standard" | "local"; setupRequired?: boolean; user?: { mustChangePassword?: boolean }; error?: string }>(response);
-    const mode = "authMode" in payload ? payload.authMode ?? null : null;
-    const needsSetup = "setupRequired" in payload && payload.setupRequired === true;
-    setAuthMode(mode);
-    setSetupRequired(needsSetup);
-    setMustChangePassword("user" in payload && payload.user?.mustChangePassword === true);
-    if (response.status === 403) {
-      setAccessDenied(true);
-      setData(null);
-      throw new Error("当前账号未获授权，请联系管理员为账号分配角色。");
-    }
-    if (!response.ok || ("error" in payload && payload.error !== "authentication_required")) throw new Error(payload.error ?? "会话状态加载失败");
-    return { mode, setupRequired: needsSetup };
-  }
-
-  const refresh = useCallback(async (studentId?: string, initialRole = false) => {
-    const requestId = ++workspaceRequest.current;
-    setError("");
-    // 写入完成后的刷新也使用最新选择，不能从旧表单闭包带回先前的孩子。
-    const selectedStudentId = studentId ?? workspaceSelection.current.requested;
-    workspaceSelection.current.requested = selectedStudentId;
-    const workspaceUrl = selectedStudentId ? `/api/v1/workspace?studentId=${encodeURIComponent(selectedStudentId)}` : "/api/v1/workspace";
+  async function authenticate(event: React.FormEvent, setup: boolean) {
+    event.preventDefault(); setLoginBusy(true); setError("");
     try {
-      const response = await fetch(workspaceUrl, { cache: "no-store" });
-      const payload = await readJson<WorkspaceData | { error?: string }>(response);
-      if (requestId !== workspaceRequest.current) return;
-      if (!response.ok) {
-        const responseError = "error" in payload ? payload.error : undefined;
-        if (response.status === 403 && responseError === "forbidden") { setAccessDenied(true); setData(null); }
-        if (response.status === 403 && responseError === "password_change_required") setMustChangePassword(true);
-        throw new Error(response.status === 401 ? "请先登录" : responseError === "forbidden" ? "当前账号未获授权，请联系管理员为账号分配角色。" : responseError === "password_change_required" ? "请先修改临时密码" : `工作区数据加载失败：${responseError ?? response.status}`);
-      }
-      const next = payload as WorkspaceData;
-      const nextRole = authorizedRole(next.user.roles, initialRole ? undefined : role);
-      workspaceSelection.current = { requested: next.selectedStudent?.id, committed: next.selectedStudent?.id };
-      setWorkspaceReceivedAt(performance.now());
-      setAccessDenied(false);
-      if (nextRole !== role) { setRole(nextRole); setActiveNav(navigation[nextRole][0]); }
-      setData(next);
-      setRefreshError("");
-    } catch (reason) {
-      if (requestId !== workspaceRequest.current) return;
-      workspaceSelection.current.requested = workspaceSelection.current.committed;
-      throw reason;
-    }
-  }, [role]);
-
-  useEffect(() => {
-    let active = true;
-    fetch("/api/v1/workspace", { cache: "no-store" })
-      .then(async (response) => {
-        const payload = await readJson<WorkspaceData | { error?: string }>(response);
-        if (!response.ok) {
-          const responseError = "error" in payload ? payload.error : undefined;
-          if (active && response.status === 403 && responseError === "forbidden") { setAccessDenied(true); setData(null); }
-          if (active && response.status === 403 && responseError === "password_change_required") setMustChangePassword(true);
-          throw new Error(response.status === 401 ? "请先登录" : responseError === "forbidden" ? "当前账号未获授权，请联系管理员为账号分配角色。" : responseError === "password_change_required" ? "请先修改临时密码" : `工作区数据加载失败：${responseError ?? response.status}`);
-        }
-        return payload as WorkspaceData;
-      })
-      .then((next) => {
-        if (active) {
-          const nextRole = authorizedRole(next.user.roles);
-          workspaceSelection.current = { requested: next.selectedStudent?.id, committed: next.selectedStudent?.id };
-          setWorkspaceReceivedAt(performance.now());
-          setRole(nextRole);
-          setActiveNav(navigation[nextRole][0]);
-          setAccessDenied(false);
-          setData(next);
-          void loadAuthMode().catch(() => null);
-        }
-      })
-      .catch(async (reason: Error) => {
-        if (!active) return;
-        const session = await loadAuthMode().catch(() => null);
-        if (active) setError(session?.setupRequired ? "" : reason.message);
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, []);
-
-  async function act(action: string, payload: Record<string, unknown> = {}) {
-    const response = await fetch("/api/v1/workspace/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, ...payload }) });
-    const result = await readJson<Record<string, unknown>>(response);
-    if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "操作失败");
-    // 写入已成功，后续读取失败不能要求用户重新提交同一操作。
-    try { await refresh(); }
-    catch (reason) { setRefreshError(`操作已保存，工作区刷新失败：${reason instanceof Error ? reason.message : "请重试刷新"}。无需重复提交。`); }
-    return result;
+      await postJson(setup ? "/api/v1/auth/setup" : "/api/v1/auth/login", setup ? { email, password, displayName, workspaceName } : { email, password });
+      setPassword(""); await workspace.openSession();
+    } catch (reason) { setError(errorMessage(reason)); }
+    finally { setLoginBusy(false); }
   }
-
-  async function login(event: React.FormEvent) {
-    event.preventDefault();
-    setLoginBusy(true);
-    setError("");
-    try {
-      const response = await fetch("/api/v1/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const result = await readJson<{ error?: string }>(response);
-      if (!response.ok) throw new Error(result.error ?? "登录失败");
-      setPassword("");
-      setLoading(true);
-      await loadAuthMode();
-      await refresh(undefined, true);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "登录失败");
-    } finally {
-      setLoading(false);
-      setLoginBusy(false);
-    }
-  }
-
-  async function setup(event: React.FormEvent) {
-    event.preventDefault();
-    setLoginBusy(true);
-    setError("");
-    try {
-      const response = await fetch("/api/v1/auth/setup", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password, displayName }),
-      });
-      const result = await readJson<{ error?: string }>(response);
-      if (!response.ok) throw new Error(result.error ?? "初始化失败");
-      setPassword("");
-      setSetupRequired(false);
-      setLoading(true);
-      await loadAuthMode();
-      await refresh(undefined, true);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "初始化失败");
-    } finally {
-      setLoading(false);
-      setLoginBusy(false);
-    }
-  }
-
+  const login = (event: React.FormEvent) => authenticate(event, false);
+  const setup = (event: React.FormEvent) => authenticate(event, true);
   async function logout() {
-    try {
-      const response = await fetch("/api/v1/auth/logout", { method: "POST" });
-      if (!response.ok) throw new Error("退出登录失败");
-      workspaceRequest.current++;
-      workspaceSelection.current = {};
-      setData(null);
-      setAccessDenied(false);
-      setMustChangePassword(false);
-      setAuthMode("standard");
-      setError("已退出登录");
-    } catch (reason) {
-      if (accessDenied) setError(reason instanceof Error ? reason.message : "退出登录失败");
-      notify("退出失败", reason instanceof Error ? reason.message : "退出登录失败", "error");
-    }
+    try { await workspace.logout(); }
+    catch (reason) { notify("退出失败", errorMessage(reason), "error"); }
   }
-
   async function changePassword(event: React.FormEvent) {
-    event.preventDefault();
-    setLoginBusy(true);
-    setError("");
+    event.preventDefault(); setLoginBusy(true); setError("");
     try {
-      const response = await fetch("/api/v1/auth/change-password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword, newPassword }) });
-      const result = await readJson<{ error?: string }>(response);
-      if (!response.ok) {
-        if (response.status < 500) { setCurrentPassword(""); setNewPassword(""); }
-        throw new Error(result.error ?? "修改密码失败");
-      }
-      setCurrentPassword("");
-      setNewPassword("");
-      await loadAuthMode();
-      await refresh();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "修改密码失败");
-    } finally {
-      setLoginBusy(false);
-    }
+      await postJson("/api/v1/auth/change-password", { currentPassword, newPassword });
+      setCurrentPassword(""); setNewPassword(""); await workspace.openSession();
+    } catch (reason) { setError(errorMessage(reason)); }
+    finally { setLoginBusy(false); }
   }
-
   const unread = useMemo(() => data?.notifications.filter((item) => !item.read_at).length ?? 0, [data]);
   const visibleRoles = roles.filter((item) => data?.user.roles.includes(item.id));
-
-  if (loading) return <main className="center-state"><div className="loader"/><h1>正在连接真实工作区…</h1><p>加载班级、任务、内容与审计记录</p></main>;
-  if (accessDenied || (data && !data.user.roles.includes(role))) return <main className="center-state"><div className="login-card"><span className="eyebrow">账号权限</span><h1>当前账号无权访问</h1><p>{error || "请联系管理员为账号分配角色后重新登录。"}</p>{authMode === "standard" && <button type="button" className="primary-button" onClick={logout}>退出并切换账号</button>}</div></main>;
-  if (authMode === "standard" && setupRequired) return <main className="center-state"><form className="login-card" onSubmit={setup}><span className="eyebrow">首次部署初始化</span><h1>初始化华文知行工作区</h1><p>当前数据库还没有管理员。请在网页内创建首个管理员账号，D1/R2 和登录密钥会自动完成初始化。</p><label>管理员邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" required /></label><label>显示名称<input value={displayName} onChange={(event) => setDisplayName(event.target.value)} type="text" autoComplete="name" placeholder="华文知行管理员" /></label><label>管理员密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" minLength={8} required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "初始化中…" : "创建管理员并进入工作区"}</button></form></main>;
-  if (authMode === "standard" && (mustChangePassword || data?.user.mustChangePassword)) return <main className="center-state"><form className="login-card password-change-card" onSubmit={changePassword}><span className="eyebrow">首次登录安全设置</span><h1>请修改临时密码</h1><p>修改完成后才能进入工作区。</p><label>当前密码<input value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" autoComplete="current-password" required /></label><label>新密码<input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "修改中…" : "修改密码并进入工作区"}</button></form></main>;
-  if ((error || !data) && authMode === "standard") return <main className="center-state"><form className="login-card" onSubmit={login}><span className="eyebrow">标准 Cloudflare 登录</span><h1>进入华文知行工作区</h1><p>使用初始化时创建的管理员账号，或成员管理中创建的账号登录。</p><label>邮箱<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" required /></label><label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loginBusy}>{loginBusy ? "登录中…" : "登录"}</button></form></main>;
-  if (error || !data) return <main className="center-state"><h1>暂时无法进入工作区</h1><p>{error || "未知错误"}</p><button className="primary-button" onClick={() => { setLoading(true); refresh().catch((reason: Error) => setError(reason.message)).finally(() => setLoading(false)); }}>重新加载</button></main>;
-
-  async function switchRole(next: Role) {
-    if (!data!.user.roles.includes(next)) return;
-    if (next === "student" && role !== "student") {
-      // 家长所选孩子与登录学生本人是两个范围，先读回本人数据再显示学生操作。
-      setLoading(true);
-      try { await refresh(data!.user.id); }
-      catch (reason) { notify("切换失败", reason instanceof Error ? reason.message : "请重试，当前工作区已保留。", "error"); return; }
-      finally { setLoading(false); }
-    }
-    setRole(next); setActiveNav(navigation[next][0]);
+  function switchRole(next: Role) {
+    if (!data?.user.roles.includes(next)) return;
+    workspace.switchRole(next); setMobileNavOpen(false);
   }
+  function navigatePage(label: string) { workspace.goTo(label); setMobileNavOpen(false); }
+
   async function sendFeedback(event: React.FormEvent) {
     event.preventDefault();
-    if (!feedback.trim()) return;
-    const response = await fetch("/api/v1/feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ targetType: "platform", targetId: data!.workspace.tenantId, rating: 1, correction: feedback }) });
-    if (!response.ok) return notify("反馈未提交", "请稍后重试。", "error");
-    setFeedback(""); setFeedbackOpen(false); notify("反馈已保存", "内容已写入租户反馈记录。谢谢你的建议！");
+    if (!feedback.trim() || !data || feedbackBusy) return;
+    setFeedbackBusy(true);
+    try {
+      const response = await fetch("/api/v1/feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ targetType: "platform", targetId: data.workspace.tenantId, rating: 1, correction: feedback }) });
+      if (!response.ok) throw new Error("暂时无法提交，请稍后重试。");
+      setFeedback(""); setFeedbackOpen(false); notify("反馈已提交", "感谢你的建议。");
+    } catch (reason) { notify("反馈未提交", reason instanceof Error ? reason.message : "请稍后重试。", "error"); }
+    finally { setFeedbackBusy(false); }
   }
 
+  if (loading) return <main className="center-state"><div className="loading-mark"><LoaderCircle size={24}/></div><h1>正在加载工作区</h1></main>;
+  if (accessDenied) return <AuthScreen title="当前账号无权访问" description={error || "请联系管理员为账号分配角色后重新登录。"}>{authMode === "standard" && <Button className="w-full" onClick={logout}>退出并切换账号</Button>}</AuthScreen>;
+  if (authMode === "standard" && setupRequired) return <AuthScreen title="创建你的工作区" description="设置首个管理员账号，开始使用华文知行。"><form className="auth-fields" onSubmit={setup}><div className="auth-field"><Label htmlFor="setup-workspace">工作区名称</Label><Input id="setup-workspace" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} maxLength={120} placeholder="学校或机构名称" required/></div><div className="auth-field"><Label htmlFor="setup-email">管理员邮箱</Label><Input id="setup-email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" placeholder="name@school.com" required/></div><div className="auth-field"><Label htmlFor="setup-name">姓名</Label><Input id="setup-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" placeholder="如何称呼你"/></div><div className="auth-field"><Label htmlFor="setup-password">密码</Label><Input id="setup-password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" minLength={8} placeholder="至少 8 个字符" required/></div>{error && <p className="form-error" role="alert">{error}</p>}<Button className="w-full" type="submit" disabled={loginBusy}>{loginBusy ? <><LoaderCircle className="animate-spin"/>正在创建</> : "创建管理员并进入工作区"}</Button></form></AuthScreen>;
+  if (authMode === "standard" && (mustChangePassword || data?.user.mustChangePassword)) return <AuthScreen title="设置新密码" description="请先修改临时密码，再进入工作区。"><form className="auth-fields password-change-card" onSubmit={changePassword}><div className="auth-field"><Label htmlFor="current-password">当前密码</Label><Input id="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} type="password" autoComplete="current-password" required/></div><div className="auth-field"><Label htmlFor="new-password">新密码</Label><Input id="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" minLength={10} required/></div>{error && error !== "请先修改临时密码" && <p className="form-error" role="alert">{error}</p>}<Button className="w-full" type="submit" disabled={loginBusy}>{loginBusy ? "正在保存…" : "修改密码并进入工作区"}</Button></form></AuthScreen>;
+  if (!session?.authenticated && authMode === "standard") return <AuthScreen title="欢迎回来" description="登录你的账号，继续今天的学习与教学。"><form className="auth-fields" onSubmit={login}><div className="auth-field"><Label htmlFor="login-email">邮箱</Label><Input id="login-email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" placeholder="name@school.com" required/></div><div className="auth-field"><Label htmlFor="login-password">密码</Label><Input id="login-password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" required/></div>{error && error !== "已退出登录" && error !== "请先登录" && <p className="form-error" role="alert">{error}</p>}<Button className="w-full" type="submit" disabled={loginBusy}>{loginBusy ? <><LoaderCircle className="animate-spin"/>正在登录</> : "登录"}</Button></form></AuthScreen>;
+  if (!data) return <main className="center-state"><CircleAlert className="text-muted-foreground" size={32}/><h1>暂时无法进入工作区</h1><p>{error || "请重新加载页面。"}</p><Button onClick={() => { void workspace.openSession().catch(() => { /* 错误已在会话控制器显示。 */ }); }}>重新加载</Button></main>;
+
+  if (!desiredRoute && window.location.pathname !== "/") return <AuthScreen title="页面不存在" description="请从工作台导航进入需要的页面。"><Button onClick={workspace.goHome}>返回工作台</Button></AuthScreen>;
+  if (desiredRoute && !data.user.roles.includes(desiredRoute.role)) return <AuthScreen title="当前账号无权访问此页面" description="这个工作台需要相应角色授权。"><Button onClick={workspace.goHome}>返回已授权工作台</Button></AuthScreen>;
+  if (!committedRoute) return <main className="center-state"><LoaderCircle className="animate-spin"/><h1>{pageError ? "页面读取失败" : "正在加载页面"}</h1>{pageError && <><p role="alert">{pageError}</p><Button onClick={workspace.retryPage}>重新读取页面</Button></>}</main>;
+
+  const roleLabel = roles.find((item) => item.id === role)?.label;
+  const workspaceNavigation = <nav className="workspace-nav" aria-label="主导航">{navigation[role].map((item) => {
+    const Icon = navigationIcons[item] ?? BookOpen;
+    return <Button type="button" variant="ghost" className="nav-button" aria-current={activeNav === item ? "page" : undefined} key={item} onClick={() => navigatePage(item)}><Icon/><span>{item}</span></Button>;
+  })}</nav>;
+
   return <main className="app-shell">
-    <aside className="sidebar">
-      <div className="brand"><span className="brand-mark">华</span><div><strong>华文知行</strong><small>协同教学平台</small></div></div>
-      <nav className="side-nav" aria-label="主导航">{navigation[role].map((item, index) => <button type="button" key={item} className={activeNav === item ? "active" : ""} onClick={() => setActiveNav(item)}><span className="nav-mark">{["◉", "✦", "册", "◎"][index]}</span><span>{item}</span></button>)}</nav>
-      <div className="culture-note"><span>春</span><div><strong>今日文化卡</strong><p>春风又绿江南岸</p><small>文化卡来源：自编审核内容</small></div></div>
-      <div className="sidebar-footer"><button type="button" onClick={() => setFeedbackOpen(true)}>？ 帮助与反馈</button><span>盾 未成年人保护已开启</span></div>
-    </aside>
-    <section className="workspace">
-      <header className="topbar">
-        <div className="mobile-brand"><span className="brand-mark">华</span><strong>华文知行</strong></div>
-        <div className="role-switcher" aria-label="已授权角色">{visibleRoles.map((item) => <button type="button" key={item.id} className={role === item.id ? "active" : ""} onClick={() => switchRole(item.id)}>{item.label}</button>)}</div>
-        <div className="top-actions"><span className="mode-chip">试用工作区 · 真实保存</span><button type="button" className="notification" aria-label={`通知 ${unread} 条未读`} onClick={() => setNoticesOpen(!noticesOpen)}>◌{unread > 0 && <i/>}</button><div className="profile"><span className={`avatar ${role}`}>{data.user.displayName[0]?.toUpperCase()}</span><div><strong>{data.user.displayName}</strong><small>{data.user.email}</small></div></div>{authMode === "standard" && <button type="button" className="logout-button" onClick={logout}>退出</button>}</div>
-        {noticesOpen && <div className="notice-drawer"><div className="panel-heading"><h3>通知</h3><button onClick={() => setNoticesOpen(false)}>关闭</button></div>{data.notifications.length ? data.notifications.map((item) => <button key={String(item.id)} className={item.read_at ? "read" : ""} onClick={async () => { await act("mark_notification", { id: item.id }); }}><strong>{String(item.title)}</strong><small>{String(item.detail)}</small></button>) : <p className="empty-state">暂无通知</p>}</div>}
-      </header>
-      <div className="content"><div className="truth-banner"><strong>✓ 已连接 D1 + R2</strong><span>所有数字来自当前租户数据；未配置的模型能力会明确标注，不展示伪造分数。</span></div>
-        {refreshError && <div className="panel" role="alert"><p>{refreshError}</p><button type="button" className="soft-button" disabled={retryRefreshing} onClick={async () => {
-          setRetryRefreshing(true);
-          try { await refresh(); } catch (reason) { setRefreshError(`工作区仍未刷新：${reason instanceof Error ? reason.message : "请稍后重试"}。之前成功保存的操作无需重复提交。`); }
-          finally { setRetryRefreshing(false); }
-        }}>{retryRefreshing ? "正在刷新…" : "重新读取工作区"}</button></div>}
-        {role === "student" && <StudentView nav={activeNav} data={data} receivedAt={workspaceReceivedAt} act={act} refresh={refresh} notify={notify} navigate={setActiveNav}/>}
-        {role === "teacher" && <TeacherView nav={activeNav} data={data} act={act} notify={notify} refresh={refresh} navigate={setActiveNav}/>}
-        {role === "guardian" && <GuardianView nav={activeNav} data={data} act={act} notify={notify} selectStudent={async (studentId) => refresh(studentId)}/>}
-        {role === "admin" && <AdminView nav={activeNav} data={data} act={act} refresh={refresh} notify={notify}/>}
+    <aside className="app-sidebar"><Brand/><p className="nav-caption">{roleLabel}工作台</p>{workspaceNavigation}<div className="sidebar-bottom"><Button variant="ghost" onClick={(event) => { feedbackReturnFocus.current = event.currentTarget; setFeedbackOpen(true); }}><MessageCircle/>意见反馈</Button><div className="sidebar-account"><GraduationCap size={22}/><div><strong>{data.workspace.name}</strong><small>{roleLabel}工作台</small></div></div></div></aside>
+    <section className="workspace-main">
+      <header className="workspace-topbar"><div className="workspace-location"><Button variant="ghost" size="icon" ref={mobileNavTrigger} className="mobile-menu-trigger" aria-label="打开导航" onClick={() => setMobileNavOpen(true)}><Menu/></Button><span className="breadcrumb-role">{roleLabel}工作台</span><ChevronRight/><strong>{activeNav}</strong></div><div className="workspace-tools"><Button variant="ghost" size="icon" ref={noticeTrigger} className="notice-trigger" aria-label={unread ? `通知，${unread} 条未读` : "通知"} onClick={() => setNoticesOpen(true)}><Bell/>{unread > 0 && <span className="notice-count">{unread > 99 ? "99+" : unread}</span>}</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="account-trigger" aria-label="账号菜单"><Avatar className="size-8"><AvatarFallback className="bg-secondary text-primary text-xs">{data.user.displayName[0]?.toUpperCase()}</AvatarFallback></Avatar><span className="account-trigger-name">{data.user.displayName}</span><ChevronDown/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-60"><DropdownMenuLabel><div className="font-medium">{data.user.displayName}</div><div className="mt-1 break-all text-xs font-normal text-muted-foreground">{data.user.email}</div></DropdownMenuLabel>{visibleRoles.length > 1 && <><DropdownMenuSeparator/><DropdownMenuLabel className="text-xs text-muted-foreground">切换角色</DropdownMenuLabel><div aria-label="已授权角色">{visibleRoles.map((item) => <DropdownMenuItem key={item.id} onSelect={() => { void switchRole(item.id); }}><span className="flex-1">{item.label}工作台</span>{role === item.id && <Check/>}</DropdownMenuItem>)}</div></>}{authMode === "standard" && <><DropdownMenuSeparator/><DropdownMenuItem onSelect={() => { void logout(); }}><LogOut/>退出登录</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div></header>
+      <div className="workspace-content" aria-busy={pageLoading}>{pageLoading && <p className="text-sm text-muted-foreground" role="status">正在读取页面…</p>}{pageError && <Alert variant="destructive"><CircleAlert/><AlertTitle>页面未切换</AlertTitle><AlertDescription>{pageError}<Button variant="outline" size="sm" onClick={workspace.retryPage}>重新读取页面</Button></AlertDescription></Alert>}{refreshError && <Alert className="refresh-warning"><CircleAlert/><AlertTitle>工作区未刷新</AlertTitle><AlertDescription><p>{refreshError}</p><Button variant="outline" size="sm" disabled={retryRefreshing} onClick={async () => { setRetryRefreshing(true); try { await refresh(); } catch (reason) { setRefreshError(`工作区仍未刷新：${reason instanceof Error ? reason.message : "请稍后重试"}。之前成功保存的操作无需重复提交。`); } finally { setRetryRefreshing(false); } }}>{retryRefreshing ? "正在刷新…" : "重新读取工作区"}</Button></AlertDescription></Alert>}
+        {visibleRoles.map((item) => <RetainedRole key={item.id} role={item.id} active={role === item.id} nav={activeNav} data={data} receivedAt={workspaceReceivedAt} act={act} refresh={refresh} notify={notify} navigate={navigatePage} selectStudent={async (studentId) => { try { await selectStudent(studentId); } catch (reason) { notify("切换失败", errorMessage(reason), "error"); } }}/>)}
       </div>
     </section>
-    {feedbackOpen && <div className="modal-backdrop"><form className="modal-card" onSubmit={sendFeedback}><span className="eyebrow">真实反馈记录</span><h2>告诉我们哪里需要改进</h2><textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="写下遇到的问题或建议" maxLength={2000} required/><div className="form-actions"><button type="button" className="soft-button" onClick={() => setFeedbackOpen(false)}>取消</button><button className="primary-button">提交反馈</button></div></form></div>}
-    {toast && <div className={`toast ${toast.tone}`} role="status"><span>{toast.tone === "success" ? "✓" : "!"}</span><div><strong>{toast.title}</strong><p>{toast.detail}</p></div></div>}
+    <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}><SheetContent side="left" className="mobile-navigation" onCloseAutoFocus={(event) => { event.preventDefault(); if (!feedbackOpen) mobileNavTrigger.current?.focus(); }}><SheetHeader className="px-3 pb-6"><SheetTitle>华文知行</SheetTitle><SheetDescription className="text-sidebar-foreground/60">{roleLabel}工作台</SheetDescription></SheetHeader>{workspaceNavigation}<div className="mt-auto grid gap-4 px-3"><Button variant="ghost" className="justify-start px-0 text-sidebar-foreground" onClick={() => { feedbackReturnFocus.current = mobileNavTrigger.current; setMobileNavOpen(false); setFeedbackOpen(true); }}><MessageCircle/>意见反馈</Button><p className="text-sm text-sidebar-foreground/60">{data.workspace.name}</p></div></SheetContent></Sheet>
+    <Sheet open={noticesOpen} onOpenChange={setNoticesOpen}><SheetContent onCloseAutoFocus={(event) => { event.preventDefault(); noticeTrigger.current?.focus(); }}><SheetHeader><SheetTitle>通知</SheetTitle><SheetDescription>{unread ? `${unread} 条未读通知` : "暂无未读通知"}</SheetDescription></SheetHeader><div className="notification-list">{data.notifications.length ? data.notifications.map((item) => <button type="button" className={`notification-item ${item.read_at ? "" : "unread"}`} key={String(item.id)} onClick={async () => { try { await act("mark_notification", { id: item.id }); } catch (reason) { notify("无法更新通知", reason instanceof Error ? reason.message : "请稍后重试", "error"); } }}><strong>{String(item.title)}</strong><small>{String(item.detail)}</small></button>) : <p className="empty-state">还没有通知</p>}</div></SheetContent></Sheet>
+    <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}><DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-lg" onCloseAutoFocus={(event) => { event.preventDefault(); feedbackReturnFocus.current?.focus(); }}><DialogHeader><DialogTitle>意见反馈</DialogTitle><DialogDescription>描述遇到的问题或你希望改进的地方。</DialogDescription></DialogHeader><form id="workspace-feedback" className="dialog-body" onSubmit={sendFeedback}><Label htmlFor="feedback-message" className="sr-only">反馈内容</Label><Textarea id="feedback-message" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="请填写反馈内容" maxLength={2000} rows={6} required/></form><DialogFooter><Button variant="outline" onClick={() => setFeedbackOpen(false)}>取消</Button><Button type="submit" form="workspace-feedback" disabled={feedbackBusy || !feedback.trim()}>{feedbackBusy ? "正在提交…" : "提交反馈"}</Button></DialogFooter></DialogContent></Dialog>
+    {toast && <div className="toast-region" role="status"><Alert variant={toast.tone === "error" ? "destructive" : "default"}>{toast.tone === "error" ? <CircleAlert/> : <CheckCircle2/>}<AlertTitle>{toast.title}</AlertTitle><AlertDescription>{toast.detail}</AlertDescription></Alert></div>}
   </main>;
 }

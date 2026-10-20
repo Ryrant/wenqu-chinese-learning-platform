@@ -1,5 +1,11 @@
 "use client";
 
+import { NativeSelect } from "@/components/ui/native-select";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { SectionHeading, EmptyState } from "./components/workspace-ui";
+
 import { useEffect, useState } from "react";
 import { FamilyWorkEvidence } from "./family-task-guide";
 import { WorkEvidence } from "./learning-sequences";
@@ -18,7 +24,7 @@ function PortfolioWork({ entry }: { entry: FamilyPortfolioEntry }) {
     <FamilyWorkEvidence value={entry.snapshot}/>
     <section><h4>交流确认记录</h4><p>{familyConfirmationLabel(entry)}{entry.confirmedAt ? ` · ${sequenceTime(entry.confirmedAt)}` : ""}{entry.confirmedByName ? ` · ${entry.confirmedByName}` : ""}</p>
       <p>已保存的交流帮助记录：{HELP_LEVEL_LABELS[entry.familyHelpLevel]}</p>
-      <p>交流确认与语言评价分开保留；确认交流不会生成成绩。</p></section>
+      </section>
     <section><h4>学生作品与教师评价</h4><WorkEvidence work={entry.work} objectiveId={entry.snapshot?.objectiveId}/></section>
     <section><h4>从本次作品继续的练习与迁移</h4>{entry.sequences.length ? <ul>{entry.sequences.map((sequence) => <li key={sequence.id}><span>{sequence.direct ? "关联初次作品" : "后续教学安排"} · {sequence.objectiveTitle}</span><UnitReportLink sequenceId={sequence.id}>{sequence.title} · 查看单元证据</UnitReportLink></li>)}</ul> : <p>尚未关联后续任务组，迁移表现仍待验证。</p>}</section>
   </div>}</details>;
@@ -31,10 +37,10 @@ function PortfolioEntries({ data }: { data: FamilyPortfolioData }) {
   const objectives = new Map(data.entries.map((entry) => [goalKey(entry), entry.snapshot ? `${entry.snapshot.objectiveTitle} · ${entry.snapshot.objectiveId.slice(0, 8)}` : "原交流目标未留存"]));
   const entries = data.entries.filter((entry) => !goal || goalKey(entry) === goal);
   return <>
-    <label className={styles.selector}>作品集学习目标<select value={goal} onChange={(event) => { setGoal(event.target.value); setVisibleCount(6); }}><option value="">全部目标</option>{goal && !objectives.has(goal) && <option value={goal}>先前选择的目标在当前范围无作品</option>}{[...objectives].map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
-    <p>{entries.length} 份作品 · {entries.filter((entry) => !!entry.confirmedAt).length} 份有交流确认 · {entries.filter((entry) => entry.work.reviewed).length} 份经教师评价。多次提交分别保留，作品数不等于实际交流次数。</p>
-    {!data.entries.length ? <p className="empty-state">该学生还没有家庭交流作品。提交文字或录音后会显示在这里。</p> : !entries.length ? <p className="empty-state">当前目标没有匹配的作品，可切换为全部目标。</p> : <div className={styles.list}>{entries.slice(0, visibleCount).map((entry) => <PortfolioWork key={entry.work.id} entry={entry}/>)}</div>}
-    {entries.length > visibleCount && <button type="button" className="soft-button" onClick={() => setVisibleCount(visibleCount + 6)}>查看更多作品（还有 {entries.length - visibleCount} 份）</button>}
+    <label className={styles.selector}>作品集学习目标<NativeSelect className="w-full" value={goal} onChange={(event) => { setGoal(event.target.value); setVisibleCount(6); }}><option value="">全部目标</option>{goal && !objectives.has(goal) && <option value={goal}>先前选择的目标在当前范围无作品</option>}{[...objectives].map(([id, title]) => <option key={id} value={id}>{title}</option>)}</NativeSelect></label>
+    <div className="flex flex-wrap gap-2"><Badge variant="secondary">{entries.length} 份作品</Badge><Badge variant="outline">{entries.filter((entry) => !!entry.confirmedAt).length} 份已确认交流</Badge><Badge variant="outline">{entries.filter((entry) => entry.work.reviewed).length} 份已评价</Badge></div>
+    {!data.entries.length ? <EmptyState title="还没有交流作品" description="提交文字或录音后，可在这里回看作品和教师反馈。"/> : !entries.length ? <EmptyState title="当前目标没有作品" action={<Button variant="outline" onClick={() => setGoal("")}>查看全部目标</Button>}/> : <div className={styles.list}>{entries.slice(0, visibleCount).map((entry) => <PortfolioWork key={entry.work.id} entry={entry}/>)}</div>}
+    {entries.length > visibleCount && <Button type="button" variant="outline" onClick={() => setVisibleCount(visibleCount + 6)}>查看更多作品（还有 {entries.length - visibleCount} 份）</Button>}
   </>;
 }
 
@@ -70,13 +76,13 @@ export function FamilyPortfolio({ studentId, revision }: { studentId?: string; r
   }, [requestedId, revision, retry, studentId, requestKey, result.key]);
   const current = result.key === requestKey;
   const shownData = result.data && (!requestedId || result.data.student?.id === requestedId) ? result.data : null;
-  return <section className={`panel ${styles.section}`} aria-label="家庭交流作品集" aria-busy={!current && studentId !== ""}>
-    <h3>家庭交流作品集{shownData?.student ? ` · ${shownData.student.displayName}` : ""}</h3><p>按学习目标回看完整交流作品，保留实际对象、帮助及原始要求，并追溯后续迁移证据。交流确认与语言评价分别记录，不用完成情况推断能力提升。</p>
+  return <Card className={`gap-0 p-6 ${styles.section}`} aria-label="家庭交流作品集" aria-busy={!current && studentId !== ""}>
+    <SectionHeading title={`家庭交流作品集${shownData?.student ? ` · ${shownData.student.displayName}` : ""}`} description="回看交流作品、帮助记录与教师反馈。"/>
     {studentId === "" ? <p className="empty-state">请先选择孩子，再查看作品集。</p> : <>
-      {studentId === undefined && <label className={styles.selector}>作品集学生<select value={requestedId} onChange={(event) => setSelectedId(event.target.value)}><option value="" disabled>请选择学生</option>{requestedId && !result.data?.students.some((item) => item.id === requestedId) && <option value={requestedId}>当前选择暂不可读取</option>}{result.data?.students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.id.slice(0, 8)}</option>)}</select></label>}
+      {studentId === undefined && <label className={styles.selector}>作品集学生<NativeSelect className="w-full" value={requestedId} onChange={(event) => setSelectedId(event.target.value)}><option value="" disabled>请选择学生</option>{requestedId && !result.data?.students.some((item) => item.id === requestedId) && <option value={requestedId}>当前选择暂不可读取</option>}{result.data?.students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.id.slice(0, 8)}</option>)}</NativeSelect></label>}
       {!current && <p role="status">{shownData ? "正在刷新，以下保留上次读取的作品。" : "正在读取所选学生的作品…"}</p>}
-      {current && result.error && <div role="alert"><p>{result.error}{shownData ? " 已保留上次读取的作品及筛选。" : ""}</p><div className={styles.actions}><button type="button" className="soft-button" onClick={() => setRetry(retry + 1)}>重试读取作品集</button>{studentId === undefined && requestedId && <button type="button" className="soft-button" onClick={() => { setSelectedId(""); setRetry(retry + 1); }}>重新读取学生列表</button>}</div></div>}
+      {current && result.error && <div role="alert"><p>{result.error}{shownData ? " 已保留上次读取的作品及筛选。" : ""}</p><div className={styles.actions}><Button type="button" variant="outline" onClick={() => setRetry(retry + 1)}>重试读取作品集</Button>{studentId === undefined && requestedId && <Button type="button" variant="outline" onClick={() => { setSelectedId(""); setRetry(retry + 1); }}>重新读取学生列表</Button>}</div></div>}
       {shownData && <><p className={styles.timestamp}>读取于 {sequenceTime(shownData.generatedAt)}</p>{shownData.student ? <PortfolioEntries key={shownData.student.id} data={shownData}/> : <p className="empty-state">当前没有可读学生，请先完成学生入班或家庭绑定。</p>}</>}
     </>}
-  </section>;
+  </Card>;
 }

@@ -1,6 +1,11 @@
 "use client";
 
-import Image from "next/image";
+import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import { SectionHeading } from "./components/workspace-ui";
+import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
+
 import { useEffect, useState } from "react";
 import { ABILITY_LABELS, diagnosticMediaUrl, type AbilityProfile } from "./lib/diagnostic-types";
 import { FAMILY_HELP_LABELS, type Notify, type WorkspaceData } from "./lib/platform-types";
@@ -8,7 +13,7 @@ import { FAMILY_HELP_LABELS, type Notify, type WorkspaceData } from "./lib/platf
 export function DiagnosticStimulus({ id, kind }: { id: string; kind: "audio" | "image" }) {
   return kind === "audio"
     ? <audio controls preload="metadata" src={diagnosticMediaUrl(id)} aria-label="听力材料"/>
-    : <Image className="diagnostic-image" src={diagnosticMediaUrl(id)} width={640} height={360} unoptimized alt="口述诊断图片"/>;
+    : <img className="diagnostic-image" src={diagnosticMediaUrl(id)} width={640} height={360} loading="lazy" decoding="async" alt="口述诊断图片"/>;
 }
 
 export function DiagnosticMediaInput({ kind, value, onChange, uploading, setUploading, notify, disabled = false }: {
@@ -30,7 +35,7 @@ export function DiagnosticMediaInput({ kind, value, onChange, uploading, setUplo
     finally { input.value = ""; setUploading(false); }
   }
   return <div className="diagnostic-media-input">
-    <label>{kind === "audio" ? "听力音频" : "题目图片"}<input type="file" accept={kind === "audio" ? "audio/mpeg,audio/wav,audio/x-wav,audio/webm,audio/ogg,audio/mp4" : "image/png,image/jpeg,image/webp"} disabled={disabled || uploading} onChange={upload}/></label>
+    <label>{kind === "audio" ? "听力音频" : "题目图片"}<Input type="file" accept={kind === "audio" ? "audio/mpeg,audio/wav,audio/x-wav,audio/webm,audio/ogg,audio/mp4" : "image/png,image/jpeg,image/webp"} disabled={disabled || uploading} onChange={upload}/></label>
     <small>{uploading ? "正在上传素材…" : kind === "image" ? "支持 PNG、JPEG、WebP，最大 12 MB。" : "支持 MP3、WAV、WebM、Ogg、MP4 音频，最大 12 MB。"}</small>
     {value && <DiagnosticStimulus id={value} kind={kind}/>}
   </div>;
@@ -60,18 +65,17 @@ export function AbilityEvidenceProfile({ studentId, revision }: { studentId: str
   }, [studentId, requestKey]);
   if (!studentId) return <p className="empty-state">选择学生后查看能力证据。</p>;
   const current = result.key === requestKey ? result : null;
-  return <section className="panel ability-profile" aria-label="能力差异与证据画像">
-    <div className="panel-heading"><div><span className="eyebrow">听 · 说 · 读 · 写</span><h3>能力差异与证据画像{current?.data ? ` · ${current.data.student.displayName}` : ""}</h3></div></div>
-    <p>按实际作答和教师目标评价查看差异。证据少不推断精确等级；待批阅作品不计入能力评价。</p>
+  return <Card className="gap-0 p-6 ability-profile" aria-label="能力差异与证据画像">
+    <SectionHeading title={`听说读写${current?.data ? ` · ${current.data.student.displayName}` : ""}`} description="查看各项能力的作品与教师评价。"/>
     {!current && <p role="status">正在读取证据…</p>}
-    {current?.error && <div role="alert"><p>{current.error}</p><button className="soft-button" type="button" onClick={() => setRetry(retry + 1)}>重试读取画像</button></div>}
+    {current?.error && <div role="alert"><p>{current.error}</p><Button variant="outline" type="button" onClick={() => setRetry(retry + 1)}>重试读取画像</Button></div>}
     {current?.data && <>
       {!!current.data.legacyAnswerCount && <p>另有 {current.data.legacyAnswerCount} 条历史答案未保存题面快照，未计入本画像；原诊断记录保持保留。</p>}
       <div className="ability-grid">{Object.entries(ABILITY_LABELS).map(([ability, label]) => {
         const records = current.data!.evidence.filter((item) => item.ability === ability);
         const assessed = records.filter((item) => item.status === "assessed");
         const pending = records.filter((item) => item.status === "pending").length;
-        return <article className="ability-card" key={ability}>
+        return <Card className="ability-card gap-0 p-5 shadow-none" key={ability}>
           <h4>{label}</h4><strong>{assessed.length ? `${assessed.reduce((sum, item) => sum + item.evidenceCount, 0)} 条证据 · ${assessed.length} 次记录` : "待评估"}</strong>
           {!!pending && <p>{pending} 份作品待教师评价</p>}
           {assessed.length === 1 && <p>目前仅有一次记录，仍需其他情境验证。</p>}
@@ -92,10 +96,10 @@ export function AbilityEvidenceProfile({ studentId, revision }: { studentId: str
             {item.feedback && <p>教师反馈：{item.feedback}</p>}
             {item.familyHelp && <p>家庭帮助情况：{FAMILY_HELP_LABELS[item.familyHelp] ?? item.familyHelp}</p>}
           </article>)}</details> : <p>尚无该能力的诊断作品。</p>}
-        </article>;
+        </Card>;
       })}</div>
     </>}
-  </section>;
+  </Card>;
 }
 
 export function TeacherAbilityProfiles({ data }: { data: WorkspaceData }) {
@@ -103,7 +107,7 @@ export function TeacherAbilityProfiles({ data }: { data: WorkspaceData }) {
   const [selected, setSelected] = useState(students[0]?.[0] ?? "");
   const studentId = students.some(([id]) => id === selected) ? selected : students[0]?.[0] ?? "";
   return <section className="loop-section">
-    <label>查看学生证据<select value={studentId} onChange={(event) => setSelected(event.target.value)}><option value="">请选择学生</option>{students.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+    <label>查看学生证据<NativeSelect className="w-full" value={studentId} onChange={(event) => setSelected(event.target.value)}><option value="">请选择学生</option>{students.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</NativeSelect></label>
     <AbilityEvidenceProfile key={studentId} studentId={studentId} revision={data.generatedAt}/>
   </section>;
 }

@@ -43,6 +43,7 @@ export interface PlatformStorage {
 }
 
 export type PlatformRuntime = {
+  kind?: "cloudflare" | "node";
   database: PlatformDatabase | null;
   storage: PlatformStorage | null;
 };

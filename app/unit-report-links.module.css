@@ -1,1 +1,6 @@
-.link{display:inline-flex;max-width:100%;margin:10px 0;text-decoration:none;overflow-wrap:anywhere;white-space:normal;text-align:left}.index{margin-top:24px;min-width:0}.index p{font-size:var(--font-caption);line-height:1.7}.index ul{padding-left:20px}.index li{min-width:0}.index summary{cursor:pointer}
+.link { display: inline-flex; max-width: 100%; margin: 8px 0; overflow-wrap: anywhere; white-space: normal; text-align: left; color: var(--primary); text-decoration: underline; text-underline-offset: 4px; line-height: 1.75; }
+.index { margin-top: 24px; min-width: 0; }
+.index p { font-size: var(--font-control); line-height: 1.75; color: var(--muted-foreground); }
+.index ul { padding-left: 20px; }
+.index li { min-width: 0; }
+.index summary { cursor: pointer; }

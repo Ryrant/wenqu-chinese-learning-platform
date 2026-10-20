@@ -1,5 +1,10 @@
 "use client";
 
+import { Card } from "@/components/ui/card";
+import { SectionHeading } from "./components/workspace-ui";
+import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DiagnosticStimulus } from "./diagnostic-evidence";
 import { FamilyTaskGuide, FamilyWorkEvidence } from "./family-task-guide";
@@ -73,27 +78,26 @@ export function StudentCaseTimeline({ view, studentId, revision }: { view: CaseV
   const works = scoped.filter((event) => event.kind === "work");
   const tasks = data?.tasks.filter((task) => inGoal(task.goal ? [task.goal] : [])) ?? [];
   const goal = data?.objectives.find((item) => item.id === goalId);
-  return <section className={`panel ${styles.section}`} aria-label="学生案例时间线" aria-busy={snapshot.loading}>
-    <div className={styles.heading}><h3>学生案例时间线 / Learner case timeline</h3><button type="button" className="soft-button" disabled={snapshot.loading} onClick={() => void load(request.current.committedId)}>刷新案例</button></div>
-    <p>按学生与目标串起诊断、支持、作品、教师判断及迁移复测。这里回看原记录，不自动判定能力提升。 / Trace the evidence for one learner and goal.</p>
+  return <Card className={`gap-0 p-6 ${styles.section}`} aria-label="学生案例时间线" aria-busy={snapshot.loading}>
+    <SectionHeading title="学习历程" description="按学习目标查看诊断、作品与后续教学安排。" action={<Button type="button" variant="outline" disabled={snapshot.loading} onClick={() => void load(request.current.committedId)}>刷新记录</Button>}/>
     {snapshot.loading && <p role="status">{data ? `正在读取${snapshot.pendingId && snapshot.pendingId !== data.student?.id ? "另一个学生；当前仍显示" : "最新记录；保留"} ${data.student?.displayName ?? "原"} 的上次案例与筛选。` : "正在读取授权学生与完整案例…"}</p>}
-    {snapshot.error && <div role="alert"><p>{snapshot.error}</p><button type="button" className="soft-button" onClick={() => void load(snapshot.pendingId)}>重试读取案例</button>{view === "teaching" && <button type="button" className="soft-button" onClick={() => void load()}>重新选择授权学生</button>}</div>}
+    {snapshot.error && <div role="alert"><p>{snapshot.error}</p><Button type="button" variant="outline" onClick={() => void load(snapshot.pendingId)}>重试读取案例</Button>{view === "teaching" && <Button type="button" variant="outline" onClick={() => void load()}>重新选择授权学生</Button>}</div>}
     {!data && !snapshot.loading && !snapshot.error && <p className="empty-state">请先选择孩子。 / Please select a learner.</p>}
     {data && <>
-      {view === "teaching" && <label className={styles.selector}>案例学生<select value={data.student?.id ?? ""} onChange={(event) => void load(event.target.value)}><option value="" disabled>请选择授权学生</option>{data.students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.id.slice(0, 8)}</option>)}</select></label>}
+      {view === "teaching" && <label className={styles.selector}>案例学生<NativeSelect className="w-full" value={data.student?.id ?? ""} onChange={(event) => void load(event.target.value)}><option value="" disabled>请选择授权学生</option>{data.students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.id.slice(0, 8)}</option>)}</NativeSelect></label>}
       {!data.student ? <p className="empty-state">当前授权范围没有学生案例。</p> : <>
         <h4>{data.student.displayName} · {goalId === unknownGoal ? "原目标未留存" : goal?.title ?? "先前目标当前无记录"}</h4>
-        <div className={styles.filters}><label>案例学习目标 / Learning goal<select value={goalId} onChange={(event) => setFilters({ ...filters, goalId: event.target.value, visible: 10 })}>{filters.goalId && filters.goalId !== unknownGoal && !goal && <option value={goalId}>先前目标当前无记录</option>}{data.objectives.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.id.slice(0, 8)}</option>)}<option value={unknownGoal}>原目标未留存 / Original goal unavailable</option></select></label>
-          <label>记录类型 / Record type<select value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.target.value, visible: 10 })}><option value="">全部记录 / All</option>{Object.entries(CASE_EVENT_LABELS).filter(([kind]) => view !== "student" || !["feedback", "support", "withdrawal"].includes(kind)).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select></label>
-          <label>时间顺序 / Order<select value={filters.newest ? "newest" : "oldest"} onChange={(event) => setFilters({ ...filters, newest: event.target.value === "newest", visible: 10 })}><option value="oldest">从早到晚 / Oldest first</option><option value="newest">从晚到早 / Newest first</option></select></label></div>
-        <p>本目标 {works.length} 份作品，其中 {works.filter((event) => event.kind === "work" && event.work.objectives.some((item) => item.id === goalId)).length} 份有目标评价；{scoped.length} 条事件，类型筛选显示 {entries.length} 条。作品与评价分别列出，事件数不等于作品数。</p>
-        <p className={styles.meta}>读取于 {sequenceTime(data.generatedAt)}。作品卡保留本次读取时的评价和确认状态；原目标或量规缺失时不补造。家庭反馈和处理仅在家长与教师授权范围展示。</p>
+        <div className={styles.filters}><label>案例学习目标 / Learning goal<NativeSelect className="w-full" value={goalId} onChange={(event) => setFilters({ ...filters, goalId: event.target.value, visible: 10 })}>{filters.goalId && filters.goalId !== unknownGoal && !goal && <option value={goalId}>先前目标当前无记录</option>}{data.objectives.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.id.slice(0, 8)}</option>)}<option value={unknownGoal}>原目标未留存 / Original goal unavailable</option></NativeSelect></label>
+          <label>记录类型 / Record type<NativeSelect className="w-full" value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.target.value, visible: 10 })}><option value="">全部记录 / All</option>{Object.entries(CASE_EVENT_LABELS).filter(([kind]) => view !== "student" || !["feedback", "support", "withdrawal"].includes(kind)).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</NativeSelect></label>
+          <label>时间顺序 / Order<NativeSelect className="w-full" value={filters.newest ? "newest" : "oldest"} onChange={(event) => setFilters({ ...filters, newest: event.target.value === "newest", visible: 10 })}><option value="oldest">从早到晚 / Oldest first</option><option value="newest">从晚到早 / Newest first</option></NativeSelect></label></div>
+        <p>{works.length} 份作品 · {works.filter((event) => event.kind === "work" && event.work.objectives.some((item) => item.id === goalId)).length} 份已评价目标 · 当前显示 {entries.length}/{scoped.length} 条记录</p>
+        <p className={styles.meta}>最近更新：{sequenceTime(data.generatedAt)}</p>
         {data.legacyChoiceCount > 0 && <p>另有 {data.legacyChoiceCount} 条旧诊断答案缺少题面快照，无法归入具体目标。</p>}
         <details className={styles.current}><summary>当前支持与家庭任务 / Current tasks（{tasks.length}）</summary><p>以下为读取时的当前内容，未完整保存的历史修改不作为时间线事件。</p>{tasks.map((task) => <article key={task.id}><h4>{task.title}</h4><p>{task.kind === "family" ? `家庭任务 · ${task.revision ? `v${task.revision}` : "版本未留存"}` : "教师支持 · 原班级未留存"} · {({ pending: "待完成", completed: "已完成", archived: "已归档" } as Record<string, string>)[task.status] ?? task.status} · {task.authorName}</p><p className={styles.copy}>{task.detail}</p><p className={styles.meta}>最近保存：{sequenceTime(task.updatedAt)} · {task.id}</p></article>)}{!tasks.length && <p>本目标当前没有可读的支持或家庭任务。</p>}</details>
-        {!scoped.length ? <p className="empty-state">本目标当前没有可追溯事件；缺少证据不表示能力低。</p> : !entries.length ? <p className="empty-state">当前类型没有匹配记录，可切换“全部记录”。</p> : <div className={styles.timeline} key={goalId}>{ordered.slice(0, filters.visible).map((event) => <TimelineEvent key={event.id} event={event} goalId={goalId === unknownGoal ? undefined : goalId}/>)}</div>}
-        {entries.length > filters.visible && <button type="button" className="soft-button" onClick={() => setFilters({ ...filters, visible: filters.visible + 10 })}>查看更多事件（还有 {entries.length - filters.visible} 条）</button>}
-        <p className={styles.meta}>当前可读范围{works.some((event) => event.kind === "work" && event.stage === "迁移任务") ? "已有迁移作品" : "尚无迁移作品"}、{works.some((event) => event.kind === "work" && event.stage === "延后复测") ? "已有复测作品" : "尚无复测作品"}；独立程度、提示次数、新情境与目标表现需结合原始评价判断。</p>
+        {!scoped.length ? <p className="empty-state">本目标还没有学习记录。</p> : !entries.length ? <p className="empty-state">当前类型没有匹配记录，可切换“全部记录”。</p> : <div className={styles.timeline} key={goalId}>{ordered.slice(0, filters.visible).map((event) => <TimelineEvent key={event.id} event={event} goalId={goalId === unknownGoal ? undefined : goalId}/>)}</div>}
+        {entries.length > filters.visible && <Button type="button" variant="outline" onClick={() => setFilters({ ...filters, visible: filters.visible + 10 })}>查看更多事件（还有 {entries.length - filters.visible} 条）</Button>}
+        <details className={styles.meta}><summary>学习记录说明</summary><p>当前{works.some((event) => event.kind === "work" && event.stage === "迁移任务") ? "已有迁移作品" : "尚无迁移作品"}、{works.some((event) => event.kind === "work" && event.stage === "延后复测") ? "已有复测作品" : "尚无复测作品"}。作品与评价分别列出，事件数不等于作品数；帮助程度、提示次数和情境变化请结合教师原始评价查看。</p></details>
       </>}
     </>}
-  </section>;
+  </Card>;
 }

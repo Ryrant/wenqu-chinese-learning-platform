@@ -11,4 +11,7 @@ npm-debug.log
 .env.*
 !.env.example
 data
+work
+coverage
+*.tsbuildinfo
 docs/superpowers

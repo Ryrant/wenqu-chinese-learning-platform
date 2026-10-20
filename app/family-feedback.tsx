@@ -1,5 +1,12 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { SectionHeading, EmptyState } from "./components/workspace-ui";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FamilyTaskGuide } from "./family-task-guide";
 import { FeedbackSupport, emptySupportDraft, type SupportDraft } from "./family-feedback-followups";
@@ -52,7 +59,7 @@ function FeedbackForm({ tasks, entries, available, save }: { tasks: FeedbackTask
   ] as const;
   // 失权时隐藏任务内容，保留未提交输入及幂等请求 ID，恢复读取后再核对。
   if (!available) return null;
-  return <div className={styles.recorder}><button type="button" className="soft-button" disabled={busy} onClick={() => setEditing(!editing)}>{editing ? "收起反馈表单 / Close" : "记录家庭使用情况 / Record family experience"}</button>
+  return <div className={styles.recorder}><Button className="h-auto min-h-10 max-w-full whitespace-normal" type="button" variant="outline" disabled={busy} onClick={() => setEditing(!editing)}>{editing ? "收起反馈表单 / Close" : "记录家庭使用情况 / Record family experience"}</Button>
     {editing && <form onSubmit={async (event) => {
       event.preventDefault(); if (!target || changed || !complete || busy) return;
       const payload = { action: "record", taskId: target.id, revision: target.revision, ...draft, note: draft.note.trim(), responseId: draft.responseId || null, followupOutcome: draft.followupOutcome || null };
@@ -62,30 +69,29 @@ function FeedbackForm({ tasks, entries, available, save }: { tasks: FeedbackTask
       catch (reason) { setError(reason instanceof Error ? reason.message : "保存未确认，请重试；输入已保留。"); }
       finally { setBusy(false); }
     }}><fieldset disabled={busy} className={styles.fields}>
-      <label>反馈对应的家庭任务 / Family task<select required value={target?.id ?? ""} onChange={(event) => { setTarget(tasks.find((item) => item.id === event.target.value) ?? null); setDraft(blankDraft); setAttempt(null); setError(""); }}><option value="">请选择任务 / Select a task</option>{target && !current && <option value={target.id}>所选任务当前不可读取 / Task unavailable</option>}{tasks.map((task) => <option key={task.id} value={task.id}>{task.snapshot.title} · {task.revision ? `v${task.revision}` : "旧版本"} · {task.id.slice(0, 8)}{task.status === "archived" ? " · 已归档" : ""}</option>)}</select></label>
+      <label>反馈对应的家庭任务 / Family task<NativeSelect className="w-full" required value={target?.id ?? ""} onChange={(event) => { setTarget(tasks.find((item) => item.id === event.target.value) ?? null); setDraft(blankDraft); setAttempt(null); setError(""); }}><option value="">请选择任务 / Select a task</option>{target && !current && <option value={target.id}>所选任务当前不可读取 / Task unavailable</option>}{tasks.map((task) => <option key={task.id} value={task.id}>{task.snapshot.title} · {task.revision ? `v${task.revision}` : "旧版本"} · {task.id.slice(0, 8)}{task.status === "archived" ? " · 已归档" : ""}</option>)}</NativeSelect></label>
       {target && <section><h4>{target.snapshot.title}</h4><p>{target.studentName} · {target.className ?? "原班级未关联"} · {target.snapshot.objectiveTitle ?? "目标未关联"} · {target.revision ? `版本 ${target.revision}` : "历史版本未保留"}</p><p className={styles.copy}>{target.snapshot.detail}</p><FamilyTaskGuide plan={target.snapshot.plan}/></section>}
-      {changed && <div role="alert"><p>所选任务已经更新或不可读取，原反馈草稿已保留。 / The task changed or is unavailable.</p>{current && <button type="button" className="soft-button" onClick={() => { setTarget(current); setAttempt(null); setError(""); }}>改用最新版本并核对 / Review latest version</button>}</div>}
-      {target && <label>对应的教师处理记录（可选） / Support to follow up<select value={draft.responseId} onChange={(event) => setDraft({ ...draft, responseId: event.target.value, followupOutcome: "" })}><option value="">记录新的使用情况 / New experience</option>{draft.responseId && !selectedSupport && <option value={draft.responseId}>原处理记录当前不可用 / Support unavailable</option>}{supports.map(({ entry, response }) => <option key={response.id} value={response.id}>{FEEDBACK_RESPONSE_LABELS[response.kind].join(" / ")} · v{entry.revision} · {sequenceTime(response.createdAt)} · {response.id.slice(0, 8)}</option>)}</select></label>}
+      {changed && <div role="alert"><p>所选任务已经更新或不可读取，原反馈草稿已保留。 / The task changed or is unavailable.</p>{current && <Button type="button" variant="outline" onClick={() => { setTarget(current); setAttempt(null); setError(""); }}>改用最新版本并核对 / Review latest version</Button>}</div>}
+      {target && <label>对应的教师处理记录（可选） / Support to follow up<NativeSelect className="w-full" value={draft.responseId} onChange={(event) => setDraft({ ...draft, responseId: event.target.value, followupOutcome: "" })}><option value="">记录新的使用情况 / New experience</option>{draft.responseId && !selectedSupport && <option value={draft.responseId}>原处理记录当前不可用 / Support unavailable</option>}{supports.map(({ entry, response }) => <option key={response.id} value={response.id}>{FEEDBACK_RESPONSE_LABELS[response.kind].join(" / ")} · v{entry.revision} · {sequenceTime(response.createdAt)} · {response.id.slice(0, 8)}</option>)}</NativeSelect></label>}
       {selectedSupport && <div><p className={styles.copy}>原反馈 / Original feedback：{selectedSupport.entry.note || "未补充说明"}</p><p className={styles.copy}>{selectedSupport.response.authorName}：{selectedSupport.response.detail}</p></div>}
-      {draft.responseId && <label>尝试处理办法后的情况 / After trying this support<select required value={draft.followupOutcome} onChange={(event) => setDraft({ ...draft, followupOutcome: event.target.value })}><option value="">请选择实际结果 / Select an outcome</option>{Object.entries(FOLLOWUP_OUTCOME_LABELS).map(([id, labels]) => <option key={id} value={id}>{labels.join(" / ")}</option>)}</select></label>}
+      {draft.responseId && <label>尝试处理办法后的情况 / After trying this support<NativeSelect className="w-full" required value={draft.followupOutcome} onChange={(event) => setDraft({ ...draft, followupOutcome: event.target.value })}><option value="">请选择实际结果 / Select an outcome</option>{Object.entries(FOLLOWUP_OUTCOME_LABELS).map(([id, labels]) => <option key={id} value={id}>{labels.join(" / ")}</option>)}</NativeSelect></label>}
       {draft.responseId && !selectedSupport && <p role="alert">原处理记录当前不可用，请核对授权或选择其他记录；也可选择“记录新的使用情况”。 / Review access or choose another support record.</p>}
-      {fields.map(([field, label, options]) => <label key={field}>{label}<select required value={draft[field]} onChange={(event) => setDraft({ ...draft, [field]: event.target.value })}><option value="">请选择实际情况 / Please select</option>{Object.entries(options).map(([id, labels]) => <option key={id} value={id}>{labels[0]} / {labels[1]}</option>)}</select></label>)}
-      <label>困难、所需帮助或无法完成的原因 / Difficulty or help needed<textarea required={needsReason} maxLength={1500} value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })}/></label>
-      <p>操作帮助指阅读说明、选择任务或上传作品等操作，与孩子表达时得到的语言提示分别记录。 / Platform help is separate from language prompts given to the learner.</p>
-      <p>尚未提交作品或任务已归档，也可以反馈实际使用困难。反馈不会确认交流、完成任务或生成语言成绩。 / Feedback does not confirm an exchange, complete a task or assign a language score.</p>
-      {error && <p role="alert">{error}</p>}<button className="primary-button" disabled={busy || !target || changed || !complete}>{busy ? "保存并核对中… / Saving…" : "保存本次反馈 / Save feedback"}</button>
+      {fields.map(([field, label, options]) => <label key={field}>{label}<NativeSelect className="w-full" required value={draft[field]} onChange={(event) => setDraft({ ...draft, [field]: event.target.value })}><option value="">请选择实际情况 / Please select</option>{Object.entries(options).map(([id, labels]) => <option key={id} value={id}>{labels[0]} / {labels[1]}</option>)}</NativeSelect></label>)}
+      <label>困难、所需帮助或无法完成的原因 / Difficulty or help needed<Textarea required={needsReason} maxLength={1500} value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })}/></label>
+      <details className={styles.meta}><summary>填写说明 / About this feedback</summary><p>操作帮助指阅读说明、选择任务或上传作品，与语言表达中的提示分别记录。尚未提交作品或任务已归档，也可反馈使用困难。 / Platform help is recorded separately from language prompts. You can leave feedback before submitting work or after a task is archived.</p><p>反馈不作为交流确认、任务完成或语言成绩。 / Feedback does not confirm an exchange, complete a task or assign a language score.</p></details>
+      {error && <p role="alert">{error}</p>}<Button type="submit" disabled={busy || !target || changed || !complete}>{busy ? "保存并核对中… / Saving…" : "保存本次反馈 / Save feedback"}</Button>
     </fieldset></form>}
   </div>;
 }
 
 function VoidFeedback({ entry, draft, updateDraft, save }: { entry: FamilyFeedbackEntry; draft: VoidDraft; updateDraft: (patch: Partial<VoidDraft>) => void; save: (body: Record<string, unknown>) => Promise<void> }) {
   const [busy, setBusy] = useState(false);
-  return !draft.editing ? <button type="button" className="soft-button" onClick={() => updateDraft({ editing: true })}>撤销这条反馈 / Withdraw</button> : <form onSubmit={async (event) => {
+  return !draft.editing ? <Button type="button" variant="outline" onClick={() => updateDraft({ editing: true })}>撤销这条反馈 / Withdraw</Button> : <form onSubmit={async (event) => {
     event.preventDefault(); if (busy) return; setBusy(true); updateDraft({ error: "" });
     try { await save({ action: "void", id: entry.id, reason: draft.reason.trim() }); updateDraft({ editing: false, reason: "", error: "" }); }
     catch (reason) { updateDraft({ error: reason instanceof Error ? reason.message : "撤销未确认，请重试；原因已保留。" }); }
     finally { setBusy(false); }
-  }}><fieldset className={styles.fields} disabled={busy}><label>撤销原因 / Reason<textarea required maxLength={1000} value={draft.reason} onChange={(event) => updateDraft({ reason: event.target.value })}/></label>{draft.error && <p role="alert">{draft.error}</p>}<div className={styles.actions}><button className="soft-button" disabled={busy}>{busy ? "撤销并核对中…" : "保存撤销原因"}</button><button className="soft-button" type="button" disabled={busy} onClick={() => updateDraft({ editing: false })}>取消</button></div></fieldset></form>;
+  }}><fieldset className={styles.fields} disabled={busy}><label>撤销原因 / Reason<Textarea required maxLength={1000} value={draft.reason} onChange={(event) => updateDraft({ reason: event.target.value })}/></label>{draft.error && <p role="alert">{draft.error}</p>}<div className={styles.actions}><Button type="submit" variant="outline" disabled={busy}>{busy ? "撤销并核对中…" : "保存撤销原因"}</Button><Button variant="outline" type="button" disabled={busy} onClick={() => updateDraft({ editing: false })}>取消</Button></div></fieldset></form>;
 }
 
 function FeedbackRecords({ data, view, filters, setFilters, voidDrafts, updateVoidDraft, supportDrafts, updateSupportDraft, save }: { data: FamilyFeedbackData; view: FeedbackView; filters: RecordFilters; setFilters: (value: RecordFilters) => void; voidDrafts: Record<string, VoidDraft>; updateVoidDraft: (id: string, patch: Partial<VoidDraft>) => void; supportDrafts: Record<string, SupportDraft>; updateSupportDraft: (id: string, patch: Partial<SupportDraft>) => void; save: (body: Record<string, unknown>) => Promise<void> }) {
@@ -103,21 +109,19 @@ function FeedbackRecords({ data, view, filters, setFilters, voidDrafts, updateVo
   const missing = tasks.filter((task) => !answered.has(JSON.stringify([task.id, task.revision]))).length;
   const reset = () => setFilters(initialFilters);
   return <>
-    <div className={styles.filters}>{view === "teaching" && <><label>反馈班级<select value={classId} onChange={(event) => setFilters({ ...filters, classId: event.target.value, studentId: "", taskId: "", visible: 8 })}><option value="">全部可读班级</option>{classId && !classes.has(classId) && <option value={classId}>先前班级当前无记录</option>}{[...classes].map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label><label>反馈学生<select value={studentId} onChange={(event) => setFilters({ ...filters, studentId: event.target.value, taskId: "", visible: 8 })}><option value="">全部学生</option>{studentId && !students.has(studentId) && <option value={studentId}>先前学生当前无记录</option>}{[...students].map(([id, name]) => <option key={id} value={id}>{name} · {id.slice(0, 8)}</option>)}</select></label></>}
-      <label>反馈任务 / Task<select value={taskId} onChange={(event) => setFilters({ ...filters, taskId: event.target.value, visible: 8 })}><option value="">全部家庭任务</option>{taskId && !taskOptions.has(taskId) && <option value={taskId}>先前任务当前无记录</option>}{[...taskOptions].map(([id, title]) => <option key={id} value={id}>{title} · {id.slice(0, 8)}</option>)}</select></label>
-      <label>处理状态 / Support status<select value={state} onChange={(event) => setFilters({ ...filters, state: event.target.value, visible: 8 })}><option value="">全部状态 / All</option>{Object.entries(FEEDBACK_CASE_LABELS).map(([id, labels]) => <option key={id} value={id}>{labels.join(" / ")}</option>)}</select></label></div>
-    <p>班级、学生与任务范围内 {active.length} 条有效反馈、{scoped.length - active.length} 条撤销记录，涉及 {new Set(active.map((entry) => entry.studentId)).size} 名学生；{missing}/{tasks.length} 份当前可读任务版本尚无有效反馈。处理状态筛选显示 {entries.length} 条。</p>
-    <p>{Object.entries(PARTICIPATION_LABELS).map(([key, label]) => `${label[0]} ${active.filter((entry) => entry.participation === key).length} 条`).join("；")}。</p>
-    <p>需要解释或仍未看懂 {active.filter((entry) => entry.instructions === "needs_explanation" || entry.instructions === "unclear").length} 条；需要操作帮助 {active.filter((entry) => entry.operationHelp !== "none").length} 条；替代交流尝试后不可用 {active.filter((entry) => entry.alternative === "did_not_work").length} 条。</p>
-    <p className={styles.meta}>多次反馈分别保留，反映填报时情况；记录数不等于家庭数或完成任务数。家长报告完成与交流确认、学生语言成绩分开。</p>
-    {!entries.length ? <p className="empty-state">{!data.entries.length ? "尚无家庭使用反馈。无需先完成或提交作品即可记录。" : "当前筛选没有匹配的反馈。"}{(classId || studentId || taskId || state) && <button type="button" className="soft-button" onClick={reset}>清除反馈筛选</button>}</p> : <div className={styles.list}>{entries.slice(0, visible).map((entry) => <details className={styles.entry} key={entry.id}><summary><strong>{entry.studentName} · {entry.snapshot.title}</strong><span>{entry.voidedAt ? "已撤销" : PARTICIPATION_LABELS[entry.participation][0]} · {FEEDBACK_CASE_LABELS[feedbackCaseState(entry, data.entries)].join(" / ")} · {sequenceTime(entry.createdAt)} · {entry.id.slice(0, 8)}</span></summary><div className={styles.detail}>
+    <div className={styles.filters}>{view === "teaching" && <><label>反馈班级<NativeSelect className="w-full" value={classId} onChange={(event) => setFilters({ ...filters, classId: event.target.value, studentId: "", taskId: "", visible: 8 })}><option value="">全部可读班级</option>{classId && !classes.has(classId) && <option value={classId}>先前班级当前无记录</option>}{[...classes].map(([id, name]) => <option key={id} value={id}>{name}</option>)}</NativeSelect></label><label>反馈学生<NativeSelect className="w-full" value={studentId} onChange={(event) => setFilters({ ...filters, studentId: event.target.value, taskId: "", visible: 8 })}><option value="">全部学生</option>{studentId && !students.has(studentId) && <option value={studentId}>先前学生当前无记录</option>}{[...students].map(([id, name]) => <option key={id} value={id}>{name} · {id.slice(0, 8)}</option>)}</NativeSelect></label></>}
+      <label>反馈任务 / Task<NativeSelect className="w-full" value={taskId} onChange={(event) => setFilters({ ...filters, taskId: event.target.value, visible: 8 })}><option value="">全部家庭任务</option>{taskId && !taskOptions.has(taskId) && <option value={taskId}>先前任务当前无记录</option>}{[...taskOptions].map(([id, title]) => <option key={id} value={id}>{title} · {id.slice(0, 8)}</option>)}</NativeSelect></label>
+      <label>处理状态 / Support status<NativeSelect className="w-full" value={state} onChange={(event) => setFilters({ ...filters, state: event.target.value, visible: 8 })}><option value="">全部状态 / All</option>{Object.entries(FEEDBACK_CASE_LABELS).map(([id, labels]) => <option key={id} value={id}>{labels.join(" / ")}</option>)}</NativeSelect></label></div>
+    <div className="flex flex-wrap gap-2"><Badge variant="secondary">{active.length} 条有效反馈</Badge><Badge variant="outline">涉及 {new Set(active.map((entry) => entry.studentId)).size} 名学生</Badge><Badge variant="outline">{missing}/{tasks.length} 份任务未反馈</Badge><Badge variant="outline">当前显示 {entries.length} 条</Badge></div>
+    <details className={styles.meta}><summary>查看反馈概况与统计口径</summary><p>{Object.entries(PARTICIPATION_LABELS).map(([key, label]) => `${label[0]} ${active.filter((entry) => entry.participation === key).length} 条`).join("；")}。</p><p>说明需要解释或未看懂 {active.filter((entry) => entry.instructions === "needs_explanation" || entry.instructions === "unclear").length} 条；需要操作帮助 {active.filter((entry) => entry.operationHelp !== "none").length} 条；替代交流不可用 {active.filter((entry) => entry.alternative === "did_not_work").length} 条；已撤销 {scoped.length - active.length} 条。</p><p>汇总采用当前班级、学生及任务范围。多次反馈分别保留，记录数不等于家庭数或完成任务数。</p></details>
+    {!entries.length ? <EmptyState title={!data.entries.length ? "还没有家庭使用反馈" : "没有匹配的反馈"} description={!data.entries.length ? "无需先提交作品，也可以记录任务中遇到的困难。" : "调整筛选条件后重试。"} action={(classId || studentId || taskId || state) ? <Button type="button" variant="outline" onClick={reset}>清除筛选</Button> : undefined}/> : <div className={styles.list}>{entries.slice(0, visible).map((entry) => <details className={styles.entry} key={entry.id}><summary><strong>{entry.studentName} · {entry.snapshot.title}</strong><span>{entry.voidedAt ? "已撤销" : PARTICIPATION_LABELS[entry.participation][0]} · {FEEDBACK_CASE_LABELS[feedbackCaseState(entry, data.entries)].join(" / ")} · {sequenceTime(entry.createdAt)} · {entry.id.slice(0, 8)}</span></summary><div className={styles.detail}>
       <p>{entry.authorName} · {entry.className ?? "原班级未关联"} · {entry.revision ? `任务版本 ${entry.revision}` : "历史版本未保留"} · {entry.snapshot.objectiveTitle ?? "目标未关联"}</p>
       <p>说明理解：{INSTRUCTION_LABELS[entry.instructions].join(" / ")}</p><p>操作帮助：{OPERATION_LABELS[entry.operationHelp].join(" / ")}</p><p>替代交流：{ALTERNATIVE_LABELS[entry.alternative].join(" / ")}</p><p className={styles.copy}>{entry.note || "未补充说明 / No additional note"}</p>
       <details><summary>查看填报时的任务说明 / Original instructions</summary><p>{entry.snapshot.assignmentTitle ?? "教学作业未关联"}</p><p className={styles.copy}>{entry.snapshot.detail}</p><FamilyTaskGuide plan={entry.snapshot.plan}/></details>
       <FeedbackSupport entry={entry} entries={data.entries} drafts={supportDrafts} update={updateSupportDraft} save={save}/>
       {entry.voidedAt ? <p className={styles.copy}>撤销于 {sequenceTime(entry.voidedAt)}：{entry.voidReason}</p> : entry.canVoid && <VoidFeedback entry={entry} draft={voidDrafts[entry.id] ?? emptyVoidDraft} updateDraft={(patch) => updateVoidDraft(entry.id, patch)} save={save}/>}
     </div></details>)}</div>}
-    {entries.length > visible && <button type="button" className="soft-button" onClick={() => setFilters({ ...filters, visible: visible + 8 })}>查看更多反馈（还有 {entries.length - visible} 条）</button>}
+    {entries.length > visible && <Button type="button" variant="outline" onClick={() => setFilters({ ...filters, visible: visible + 8 })}>查看更多反馈（还有 {entries.length - visible} 条）</Button>}
   </>;
 }
 
@@ -163,15 +167,14 @@ export function FamilyFeedbackPanel({ view, studentId, revision, notify }: { vie
       throw error;
     }
   }
-  return <section className={`panel ${styles.section}`} aria-label="家庭可用性反馈" aria-busy={result.loading && !(view === "guardian" && !studentId)}>
-    <div className={styles.heading}><h3>家庭可用性反馈 / Family experience</h3><button className="soft-button" type="button" disabled={result.loading || (view === "guardian" && !studentId)} onClick={() => void load()}>刷新反馈</button></div>
-    <p>记录说明理解、操作帮助、替代交流和未能完成的情况，用于改进任务安排。反馈不评价孩子的语言能力。 / Tell us what worked and what got in the way; this is not a language assessment.</p>
+  return <Card className={`gap-0 p-6 ${styles.section}`} aria-label="家庭可用性反馈" aria-busy={result.loading && !(view === "guardian" && !studentId)}>
+    <SectionHeading title="家庭使用反馈" description="记录使用中的困难，和教师一起改进任务安排。" action={<Button variant="outline" type="button" disabled={result.loading || (view === "guardian" && !studentId)} onClick={() => void load()}>刷新反馈</Button>}/>
     {view === "guardian" && !studentId ? <p className="empty-state">请先选择孩子。 / Please select a child.</p> : <>
       {result.loading && <p role="status">{result.data ? "正在刷新，保留上次读取的反馈与筛选。" : "正在读取家庭任务与反馈…"}</p>}
-      {result.error && <div role="alert"><p>{result.error}{result.data ? " 已保留上次读取的数据和筛选。" : ""}</p><button type="button" className="soft-button" onClick={() => void load()}>重试读取反馈</button></div>}
+      {result.error && <div role="alert"><p>{result.error}{result.data ? " 已保留上次读取的数据和筛选。" : ""}</p><Button type="button" variant="outline" onClick={() => void load()}>重试读取反馈</Button></div>}
       {result.data && <p className={styles.meta}>读取于 {sequenceTime(result.data.generatedAt)}</p>}
       {view === "guardian" && <FeedbackForm tasks={result.data?.tasks ?? []} entries={result.data?.entries ?? []} available={!!result.data} save={save}/>}
       {result.data && <FeedbackRecords data={result.data} view={view} filters={filters} setFilters={setFilters} voidDrafts={voidDrafts} updateVoidDraft={updateVoidDraft} supportDrafts={supportDrafts} updateSupportDraft={updateSupportDraft} save={save}/>}
     </>}
-  </section>;
+  </Card>;
 }

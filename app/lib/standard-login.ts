@@ -21,7 +21,10 @@ export type InitialAdminInput = {
   email: string;
   password: string;
   displayName?: string;
+  workspaceName?: string;
 };
+
+export const DEFAULT_WORKSPACE_NAME = "我的工作区";
 
 function idPart(value: string) {
   let hash = 2166136261;
@@ -44,16 +47,21 @@ async function hasAnyUser(db: PlatformDatabase) {
   return Number(row?.count ?? 0) > 0;
 }
 
-export async function createInitialAdminAccount({ db, email, password, displayName: configuredDisplayName }: InitialAdminInput) {
+export async function createInitialAdminAccount({ db, email, password, displayName: configuredDisplayName, workspaceName: configuredWorkspaceName }: InitialAdminInput) {
   const normalizedEmail = email.trim().toLowerCase();
   if (!normalizedEmail || !password || await hasAnyUser(db)) return null;
+
+  if (configuredWorkspaceName !== undefined && (typeof configuredWorkspaceName !== "string" || configuredWorkspaceName.trim().length > 120)) {
+    throw new Error("invalid_workspace_name");
+  }
 
   const userId = `usr_${idPart(normalizedEmail)}`;
   const tenantId = `tenant_${idPart(normalizedEmail)}`;
   const displayName = configuredDisplayName?.trim() || normalizedEmail.split("@")[0];
+  const workspaceName = configuredWorkspaceName?.trim() || DEFAULT_WORKSPACE_NAME;
   const passwordHash = await hashPassword(password);
   await db.batch([
-    db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,'sg','active')").bind(tenantId, "华文知行示范学校"),
+    db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,'','active')").bind(tenantId, workspaceName),
     db.prepare("INSERT OR IGNORE INTO users (id,email,display_name,password_hash,must_change_password,status) VALUES (?,?,?,?,0,'active')").bind(userId, normalizedEmail, displayName, passwordHash),
     db.prepare("INSERT OR IGNORE INTO role_memberships (tenant_id,user_id,role,status) VALUES (?,?,?,'active')").bind(tenantId, userId, "admin"),
   ]);

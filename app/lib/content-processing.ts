@@ -12,7 +12,7 @@ export async function extractText(file: File): Promise<ExtractedText> {
 }
 
 export async function extractTxtText(file: File): Promise<ExtractedText> {
-  const text = (await file.text()).replace(/\u0000/g, "").trim();
+  const text = (await file.text()).replaceAll("\u0000", "").trim();
   if (!text) throw new Error("empty_text");
   return { text, kind: "txt" };
 }
@@ -27,18 +27,31 @@ export async function extractDocxText(file: File): Promise<ExtractedText> {
 }
 
 export async function extractPdfText(file: File): Promise<ExtractedText> {
+  const { preparePdfTextRuntime } = await import("./pdf-text-runtime");
+  await preparePdfTextRuntime();
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
-  const pdf = await loadingTask.promise;
-  const pages: string[] = [];
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const content = await page.getTextContent();
-    pages.push(content.items.map((item) => "str" in item ? item.str : "").join(" ").trim());
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(await file.arrayBuffer()),
+    useSystemFonts: false,
+    disableFontFace: true,
+    isOffscreenCanvasSupported: false,
+    isImageDecoderSupported: false,
+  });
+  try {
+    const pdf = await loadingTask.promise;
+    const pages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      pages.push(content.items.map((item) => "str" in item ? item.str : "").join(" ").trim());
+      page.cleanup();
+    }
+    const text = pages.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+    if (!text || text.length < 20) throw new Error("unsupported_scanned_pdf");
+    return { text, kind: "pdf" };
+  } finally {
+    await loadingTask.destroy();
   }
-  const text = pages.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
-  if (!text || text.length < 20) throw new Error("unsupported_scanned_pdf");
-  return { text, kind: "pdf" };
 }
 
 export function chunkText(input: { tenantId: string; sourceDocumentId: string; text: string }): KnowledgeChunkInput[] {

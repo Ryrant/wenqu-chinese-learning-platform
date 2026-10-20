@@ -135,6 +135,17 @@ https://你的项目名.你的子域.workers.dev/
 
 首次打开时会显示初始化表单。填写管理员邮箱、显示名称和密码后，系统会创建租户和仅拥有管理员角色的首个账号，并在 D1 中生成站点级登录签名密钥。其他人员由管理员按账号授权；初始化完成后再次访问会显示登录页。
 
+登录后会进入已授权角色的工作台。页面使用独立 URL，可刷新、收藏，并支持浏览器前进和后退：
+
+| 角色 | 页面路径 |
+| --- | --- |
+| 学生 | `/student/overview`、`/student/tasks`、`/student/tutor`、`/student/portfolio` |
+| 教师 | `/teacher/overview`、`/teacher/lessons`、`/teacher/classes`、`/teacher/reviews` |
+| 家长 | `/guardian/overview`、`/guardian/reports`、`/guardian/tasks`、`/guardian/consents` |
+| 管理员 | `/admin/overview`、`/admin/settings`、`/admin/content`、`/admin/knowledge`、`/admin/members`、`/admin/audits` |
+
+直接打开页面同样需要登录和相应角色授权，服务端继续按租户、班级和监护关系校验数据访问。
+
 ### 升级 Cloudflare Workers
 
 - Cloudflare Workers 连接 GitHub 仓库：在你的 Fork 页面点击 **Sync fork** → **Update branch**，Cloudflare 会检测代码变化并重新部署。
@@ -143,9 +154,11 @@ https://你的项目名.你的子域.workers.dev/
 
 升级后首次访问会自动清理一次可识别的旧演示账号默认附带的学生、教师和家长授权，保留管理员角色及有明确授权记录的角色。其他账号已有的明确角色授权继续保留；需要兼任其他角色时，由管理员在成员管理中为对应账号授权。
 
+当前前端已迁移到纯 Vite + React，HTTP API 由 Hono 统一提供。升级时重新安装依赖并构建即可，部署命令、D1/R2 绑定和 Docker 数据卷路径保持不变；Cloudflare 部署前仍无需填写变量或密钥。机构信息从当前租户读取，服务状态按配置和实际处理方式返回。
+
 ### v1.2.0 升级提示
 
-`v1.2.0` 将 Next.js 升级到 `16.2.12`，并增加 `drizzle/0004_learning_loop.sql` 与 `drizzle/0005_ui_workflow.sql`。迁移只新增学习闭环表、工作流时间与归档字段，不删除或重命名已有结构。旧记录会使用创建时间回填更新时间；`wrangler.toml` 已将迁移目录指定为 `drizzle/`，运行时仍会幂等校验基础表和增量字段。
+`v1.2.0` 的数据库升级增加 `drizzle/0004_learning_loop.sql` 与 `drizzle/0005_ui_workflow.sql`。迁移只新增学习闭环表、工作流时间与归档字段，不删除或重命名已有结构。旧记录会使用创建时间回填更新时间；`wrangler.toml` 已将迁移目录指定为 `drizzle/`，运行时仍会幂等校验基础表和增量字段。
 
 本次基础流程修复另增 `drizzle/0006_learning_workflow_evidence.sql`，为评分维度、家庭作品及帮助程度增加字段和待评作品唯一索引，不回填或重算历史成绩。
 
@@ -288,9 +301,17 @@ AI 未配置、返回内容无法解析或评分不合法时，建议分数为�
 | 模式 | 适用场景 | 身份来源 |
 | --- | --- | --- |
 | `local` | 本地开发 | 默认测试身份，或请求头 `x-huawen-zhixing-dev-user` |
-| `standard` | 用户自托管 Cloudflare Workers | 部署后首次初始化管理员 + HttpOnly JWT Cookie |
+| `standard` | Cloudflare Workers、Node.js 与 Docker 自托管 | 部署后首次初始化管理员 + HttpOnly JWT Cookie |
 
-默认 `npm run build` 使用 `wrangler.toml` 生成标准 Cloudflare Workers 构建。`npm run build:standard` 保留为兼容入口，当前同样用于标准 Workers 部署。
+默认 `npm run build` 使用 Vite 与 Cloudflare 插件读取 `wrangler.toml`，生成 `dist/client/` 前端静态资源和 `dist/server/` Worker 构建，再由 `scripts/build-node.mjs` 生成 `dist/node/index.mjs`。Cloudflare 与 Node.js 共用前端资源和 TypeScript API。`npm run build:standard` 保留为同一构建流程的兼容入口。
+
+### 🧭 页面与 API
+
+前端使用 React Router 管理角色页面，按路由加载角色模块及较重的业务组件。`app/features/` 承载各角色页面，`components/ui/` 保存 shadcn/ui 基础组件；页面通过同域 `/api/v1` HTTP API 读取和提交数据。
+
+工作区支持 `include` 参数按页面读取教学、课程、学习进度、教案、内容、成员等数据分组。写入后仅刷新受影响的分组；未请求的分组不会覆盖已读取数据。未传 `include` 的 `/api/v1/workspace` 仍返回完整工作区，保持原 API 兼容。认证和业务写入继续在服务端校验，页面导航不代替权限检查。
+
+后端由 `server/` 的 Hono 入口挂载标准 `Request` / `Response` 处理器，工作区命令按领域拆分到 `app/lib/commands/`，业务服务复用现有数据库与文件存储接口。Worker 使用 D1/R2，Node.js 使用 SQLite 与本地文件。
 
 ### 数据与绑定
 
@@ -317,7 +338,10 @@ Docker 自部署不需要 Cloudflare 绑定，默认使用 `DATABASE_URL=file:/d
 
 - TypeScript：应用与 Worker 代码
 - React 19：前端交互
-- Next.js 16 + Vinext + Vite：应用路由与 Cloudflare 构建
+- shadcn/ui + Radix UI + Tailwind CSS：四端工作台、表单与弹窗组件
+- Vite：前端开发、静态资源与 Cloudflare Worker 构建
+- React Router：页面 URL、角色路由与按需加载
+- Hono：Cloudflare Workers 与 Node.js 共用的 HTTP API 入口
 - Cloudflare Workers：边缘运行环境
 - Cloudflare D1 / SQLite：结构化数据存储
 - Cloudflare R2 / 本地文件目录：教材与音频对象存储
@@ -329,17 +353,24 @@ Docker 自部署不需要 Cloudflare 绑定，默认使用 `DATABASE_URL=file:/d
 
 ```text
 huawen-zhixing-platform/
-├── app/                       # 页面、四端工作台与版本化 API
-├── app/lib/                   # 身份、租户、数据初始化与共享类型
+├── index.html                 # Vite 单页应用入口
+├── app/main.tsx               # React 客户端入口
+├── app/features/              # 按角色组织的页面与业务模块
+├── app/api/v1/                # 标准 HTTP API 处理器
+├── app/lib/                   # 身份、租户、业务服务与共享类型
+├── app/lib/commands/          # 按领域拆分的工作区写命令
+├── components/ui/             # 可维护的 shadcn/ui 基础组件
+├── server/                    # Hono API 注册与 Node.js 服务入口
 ├── db/                        # Drizzle 数据模型
 ├── drizzle/                   # 数据库迁移
 ├── worker/                    # Cloudflare Worker 入口
 ├── Dockerfile                 # Docker 镜像构建
 ├── docker-compose.yml         # Docker 自部署编排
 ├── public/                    # 静态资源
-├── scripts/                   # 标准 Cloudflare 构建辅助脚本
+├── scripts/                   # 构建、Node/Docker 启动与迁移辅助脚本
 ├── tests/                     # 自动化回归测试
 ├── .github/ISSUE_TEMPLATE/    # GitHub Issue 表单
+├── vite.config.ts             # React 与 Cloudflare 构建配置
 └── wrangler.toml              # 标准 Cloudflare Workers 自托管配置
 ```
 
@@ -360,7 +391,7 @@ npm ci
 npm run dev
 ```
 
-浏览器打开 [http://localhost:3000](http://localhost:3000)。空库首次访问会自动创建本地 D1 表，并为默认开发身份创建仅拥有管理员角色的账号。
+浏览器打开 [http://127.0.0.1:3000](http://127.0.0.1:3000)。Vite 开发服务器仅监听本机回环地址，Cloudflare 插件提供本地 D1/R2 绑定。空库首次访问会自动创建本地 D1 表，并为默认开发身份创建仅拥有管理员角色的账号。
 
 ### 本地测试身份
 
@@ -374,6 +405,7 @@ npm run lint
 npm test
 npm run build
 npm run build:standard
+npm start
 npm run start:docker
 ```
 
@@ -381,12 +413,13 @@ npm run start:docker
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm run dev` | 启动本地开发服务器和 Cloudflare 本地绑定 |
+| `npm run dev` | 在 `127.0.0.1:3000` 启动 Vite、React 和 Cloudflare 本地绑定 |
 | `npm run lint` | 运行代码规范检查 |
 | `npm test` | 默认构建并运行 `tests/` 下的回归测试 |
-| `npm run build` | 生成标准 Cloudflare Workers 构建 |
-| `npm run build:standard` | 标准 Cloudflare Workers 构建兼容入口 |
-| `npm run start:docker` | 以 Node runtime 启动 Docker 自部署服务 |
+| `npm run build` | 生成 `dist/client`、`dist/server` 与 `dist/node/index.mjs` |
+| `npm run build:standard` | 同一构建流程的兼容入口 |
+| `npm start` | 启动已构建的 Node.js 服务，默认使用 `data/` 中的 SQLite 与上传目录 |
+| `npm run start:docker` | 准备 `/data` 目录后启动 Node.js 服务，可通过 `DATABASE_URL` / `UPLOAD_DIR` 覆盖路径 |
 | `npm run cf:preview` | 使用标准 Cloudflare 配置启动 Wrangler 预览 |
 | `npm run cf:deploy` | 使用标准 Cloudflare 配置部署到当前账号 |
 | `npm run db:generate` | 根据 `db/schema.ts` 生成 Drizzle 迁移 |

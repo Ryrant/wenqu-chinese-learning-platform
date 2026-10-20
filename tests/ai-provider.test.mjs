@@ -1,3 +1,4 @@
+import { readCommandSources, readRoleSources } from "./helpers/source-files.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -37,9 +38,9 @@ test("knowledge search route delegates to retrieval service", async () => {
 test("student and teacher generation use grounded provider chain", async () => {
   const [generate, actions, student, staff] = await Promise.all([
     read("app/api/v1/ai/generate/route.ts"),
-    read("app/api/v1/workspace/actions/route.ts"),
-    read("app/student-view.tsx"),
-    read("app/staff-views.tsx"),
+    readCommandSources(),
+    readRoleSources("student"),
+    readRoleSources("teacher", "guardian", "admin"),
   ]);
   assert.match(generate, /searchPublishedKnowledge/);
   assert.match(generate, /generateGroundedText/);
@@ -53,6 +54,9 @@ test("student and teacher generation use grounded provider chain", async () => {
   assert.doesNotMatch(actions, /OPENAI_API_KEY|AI_API_KEY|AI_MODEL/);
   assert.match(actions, /input_tokens,output_tokens/);
   assert.match(student, /no_reviewed_sources/);
-  assert.match(student, /引用来源/);
-  assert.match(staff, /provider|engine/);
+  assert.match(student, /sources\.map\(/);
+  assert.match(student, /source\.title/);
+  assert.match(student, /source\.excerpt/);
+  assert.match(staff, /generated\.citations/);
+  assert.match(staff, /act\("generate_lesson"/);
 });

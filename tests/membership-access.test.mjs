@@ -1,3 +1,4 @@
+import { readCommandSources, readWorkspaceSources } from "./helpers/source-files.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -16,8 +17,8 @@ const transpiled = ts.transpileModule(executableSource, {
 assert.deepEqual((transpiled.diagnostics ?? []).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error), []);
 const membershipService = await import(`data:text/javascript;base64,${Buffer.from(transpiled.outputText).toString("base64")}`);
 const [actionsSource, workspaceSource, platformStoreSource] = await Promise.all([
-  readFile(new URL("app/api/v1/workspace/actions/route.ts", root), "utf8"),
-  readFile(new URL("app/api/v1/workspace/route.ts", root), "utf8"),
+  readCommandSources(),
+  readWorkspaceSources(),
   readFile(new URL("app/lib/platform-store.ts", root), "utf8"),
 ]);
 
@@ -184,8 +185,8 @@ test("workspace routes expose member and guardian management operations", () => 
 
 test("access control helpers centralize teacher student and guardian filters", async () => {
   const access = await readFile(new URL("app/lib/access-control.ts", root), "utf8");
-  const workspace = await readFile(new URL("app/api/v1/workspace/route.ts", root), "utf8");
-  const actions = await readFile(new URL("app/api/v1/workspace/actions/route.ts", root), "utf8");
+  const workspace = await readWorkspaceSources();
+  const actions = await readCommandSources();
   assert.match(access, /export type AccessClause/);
   assert.match(access, /export function classAccessClause/);
   assert.match(access, /export function submissionAccessClause/);
