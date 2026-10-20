@@ -260,7 +260,12 @@ test("docker self-hosting files use SQLite and local upload volume", async () =>
   assert.match(dockerfile, /node:22-bookworm-slim/);
   assert.match(dockerfile, /DATABASE_URL=file:\/data\/huawen-zhixing\.db/);
   assert.match(dockerfile, /UPLOAD_DIR=\/data\/uploads/);
-  assert.match(dockerfile, /"npm", "run", "start:docker"/);
+  assert.match(dockerfile, /^USER root$/m);
+  assert.match(dockerfile, /npm ci --omit=dev/);
+  assert.match(dockerfile, /"node", "scripts\/start-docker\.mjs"/);
+  assert.match(dockerfile, /HEALTHCHECK.*scripts\/check-docker-health\.mjs/);
+  assert.doesNotMatch(dockerfile, /COPY --from=builder \/app \.\//);
+  assert.match(compose, /restart: unless-stopped/);
   assert.match(compose, /huawen-zhixing-data:\/data/);
   assert.match(compose, /HUAWEN_ZHIXING_RUNTIME: node/);
   assert.match(dockerignore, /docs\/superpowers/);

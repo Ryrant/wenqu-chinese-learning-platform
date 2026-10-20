@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -23,21 +22,12 @@ await mkdir(uploadDir, { recursive: true });
 await access(databaseDir, constants.W_OK);
 await access(uploadDir, constants.W_OK);
 
-const child = spawn(process.execPath, ["./dist/node/index.mjs"], {
-  env: {
-    ...process.env,
-    DATABASE_URL: databaseUrl,
-    UPLOAD_DIR: uploadDir,
-    HUAWEN_ZHIXING_RUNTIME: "node",
-    NODE_ENV: process.env.NODE_ENV ?? "production",
-  },
-  stdio: "inherit",
+Object.assign(process.env, {
+  DATABASE_URL: databaseUrl,
+  UPLOAD_DIR: uploadDir,
+  HUAWEN_ZHIXING_RUNTIME: "node",
+  NODE_ENV: process.env.NODE_ENV ?? "production",
 });
 
-child.once("exit", (code, signal) => {
-  if (signal) {
-    console.error("server_start_signal", { signal });
-    process.exit(1);
-  }
-  process.exit(code ?? 1);
-});
+// 在同一进程启动服务，使 Docker 的停止信号直接到达 Node.js。
+await import("../dist/node/index.mjs");
