@@ -1,1 +1,11 @@
-.section{margin-top:20px;min-width:0}.overview{min-width:0;overflow-wrap:anywhere}.overview h4{margin-bottom:10px}.overview p,.record p{font-size:var(--font-caption);line-height:1.7}.table{max-width:100%;overflow:auto}.table table{width:100%;border-collapse:collapse}.table th,.table td{text-align:left;padding:10px;border-bottom:1px solid var(--line);font-size:var(--font-caption)}.fields{display:grid;gap:14px;min-width:0;border:0;padding:0;margin:12px 0}.fields label{display:grid;gap:6px;font-size:var(--font-caption)}.fields input,.fields textarea,.fields select{width:100%;min-width:0;max-width:100%;font:inherit;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}.fields textarea{min-height:100px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap}.record{border-top:1px solid var(--line);padding:14px 0;min-width:0;overflow-wrap:anywhere}.copy{white-space:pre-wrap}.section summary,.overview summary{cursor:pointer}
+.section { margin-top: 24px; min-width: 0; }
+.overview { min-width: 0; overflow-wrap: anywhere; }
+.overview h4 { margin-bottom: 12px; }
+.overview p, .record p { font-size: var(--font-control); line-height: 1.75; }
+.table { max-width: 100%; overflow: auto; margin: 20px 0; }
+.fields { display: grid; gap: 20px; min-width: 0; border: 0; padding: 0; margin: 20px 0; }
+.fields label { display: grid; gap: 8px; font-size: var(--font-control); font-weight: 500; min-width: 0; }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; }
+.record { border-top: 1px solid var(--border); padding: 20px 0; min-width: 0; overflow-wrap: anywhere; }
+.copy { white-space: pre-wrap; }
+.section summary, .overview summary { cursor: pointer; line-height: 1.75; }

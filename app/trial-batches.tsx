@@ -1,5 +1,13 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
+import { SectionHeading, StatCard, EmptyState } from "./components/workspace-ui";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ALTERNATIVE_LABELS, FEEDBACK_RESPONSE_LABELS, FOLLOWUP_OUTCOME_LABELS, INSTRUCTION_LABELS, OPERATION_LABELS, PARTICIPATION_LABELS, type FamilyFeedbackEntry } from "./lib/family-feedback-types";
 import { HELP_LEVEL_LABELS, sequenceTime, unitReportUrl } from "./lib/learning-sequence-types";
@@ -56,26 +64,26 @@ function CreateBatch({ catalog, save }: { catalog: BatchCatalog | null; save: Sa
   const sequences = classroom?.sequences.filter((group) => group.objectiveId === objectiveId && people.includes(group.studentId)) ?? [];
   const families = classroom?.familyTasks.filter((task) => task.objectiveId === objectiveId && people.includes(task.studentId)) ?? [];
   if (!catalog) return null;
-  return <div><button type="button" className="soft-button" disabled={busy} onClick={() => setEditing(!editing)}>{editing ? "收起新批次表单" : "新建试用批次"}</button>{editing && <form className={styles.form} onSubmit={async (event) => {
+  return <div><Button type="button" variant="outline" disabled={busy} onClick={() => setEditing(!editing)}>{editing ? "收起新批次表单" : "新建试用批次"}</Button>{editing && <form className={styles.form} onSubmit={async (event) => {
     event.preventDefault(); if (busy || !classroom || changed || !people.length || !linksValid(links, sequences, families)) return;
     const payload = { action: "create", title: title.trim(), classId, objectiveId, participantIds: [...people].sort(), sequenceIds: [...links.sequenceIds].sort(), familyTasks: [...links.familyTasks].sort((left, right) => left.id.localeCompare(right.id) || left.revision - right.revision), startDate, endDate, workScope: workScope.trim(), catalogVersion: version };
     const key = JSON.stringify(payload); const id = attempt?.key === key ? attempt.id : crypto.randomUUID(); setAttempt({ key, id }); setBusy(true); setError("");
     try { await save({ ...payload, id }); setEditing(false); setTitle(""); setWorkScope(""); setPeople([]); setLinks(blankLinks); setAttempt(null); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "保存尚未确认，请重试。"); } finally { setBusy(false); }
   }}><fieldset disabled={busy} className={styles.fields}>
-    <label>批次名称<input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)}/></label>
-    <div className={styles.columns}><label>试用班级<select required value={classId} onChange={(event) => { const current = catalog.classes.find((item) => item.id === event.target.value); setClassId(event.target.value); setVersion(current?.version ?? ""); setObjectiveId(""); setPeople([]); setLinks(blankLinks); }}><option value="">请选择班级</option>{classId && !classroom && <option value={classId}>原选择班级当前不可读取</option>}{catalog.classes.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.id.slice(0, 8)}</option>)}</select></label>
-    <label>本批次学习目标<select required value={objectiveId} onChange={(event) => { setObjectiveId(event.target.value); setLinks(blankLinks); }}><option value="">请选择目标</option>{classroom?.objectives.map((goal) => <option key={goal.id} value={goal.id}>{goal.title} · {goal.id.slice(0, 8)}</option>)}</select></label></div>
-    <div className={styles.columns}><label>观察开始日期（北京时间）<input required type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)}/></label><label>观察结束日期（含当日）<input required type="date" min={startDate || undefined} value={endDate} onChange={(event) => setEndDate(event.target.value)}/></label></div>
-    <label>单元工作范围与两种方式的可比条件<textarea required maxLength={2000} value={workScope} onChange={(event) => setWorkScope(event.target.value)} placeholder="说明任务范围、难度、人数与实际计时方式；尚不具备可比条件时也请明确记录。"/></label>
-    {classroom && <fieldset className={styles.people}><legend>固定参与名单（已选 {people.length} 人）</legend><button type="button" className="soft-button" onClick={() => setPeople(classroom.participants.filter((person) => person.status === "active").map((person) => person.id))}>选择当前在读学生</button>
+    <label>批次名称<Input required maxLength={120} value={title} onChange={(event) => setTitle(event.target.value)}/></label>
+    <div className={styles.columns}><label>试用班级<NativeSelect className="w-full" required value={classId} onChange={(event) => { const current = catalog.classes.find((item) => item.id === event.target.value); setClassId(event.target.value); setVersion(current?.version ?? ""); setObjectiveId(""); setPeople([]); setLinks(blankLinks); }}><option value="">请选择班级</option>{classId && !classroom && <option value={classId}>原选择班级当前不可读取</option>}{catalog.classes.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.id.slice(0, 8)}</option>)}</NativeSelect></label>
+    <label>本批次学习目标<NativeSelect className="w-full" required value={objectiveId} onChange={(event) => { setObjectiveId(event.target.value); setLinks(blankLinks); }}><option value="">请选择目标</option>{classroom?.objectives.map((goal) => <option key={goal.id} value={goal.id}>{goal.title} · {goal.id.slice(0, 8)}</option>)}</NativeSelect></label></div>
+    <div className={styles.columns}><label>观察开始日期（北京时间）<Input required type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)}/></label><label>观察结束日期（含当日）<Input required type="date" min={startDate || undefined} value={endDate} onChange={(event) => setEndDate(event.target.value)}/></label></div>
+    <label>单元工作范围与两种方式的可比条件<Textarea required maxLength={2000} value={workScope} onChange={(event) => setWorkScope(event.target.value)} placeholder="说明任务范围、难度、人数与实际计时方式；尚不具备可比条件时也请明确记录。"/></label>
+    {classroom && <fieldset className={styles.people}><legend>固定参与名单（已选 {people.length} 人）</legend><Button type="button" variant="outline" onClick={() => setPeople(classroom.participants.filter((person) => person.status === "active").map((person) => person.id))}>选择当前在读学生</Button>
       {classroom.participants.map((person) => <label key={person.id}><input type="checkbox" checked={people.includes(person.id)} onChange={(event) => setPeople(event.target.checked ? [...people, person.id] : people.filter((id) => id !== person.id))}/><span>{person.name} · {person.status === "active" ? "在读" : "已离班"} · {person.id.slice(0, 8)}</span></label>)}
       {people.filter((id) => !classroom.participants.some((person) => person.id === id)).map((id) => <label key={id}><input type="checkbox" checked onChange={() => setPeople(people.filter((item) => item !== id))}/><span>原选择学生当前不可读取 · {id.slice(0, 8)}</span></label>)}
     </fieldset>}
     <LinkChoices sequences={sequences} families={families} value={links} onChange={setLinks} names={new Map(classroom?.participants.map((person) => [person.id, person.name]))}/>
-    {changed && <div role="alert"><p>名单或候选已更新。输入保留，请核对当前显示的学生和任务。</p>{classroom && <button type="button" className="soft-button" onClick={() => setVersion(classroom.version)}>已核对当前候选</button>}</div>}
+    {changed && <div role="alert"><p>名单或候选已更新。输入保留，请核对当前显示的学生和任务。</p>{classroom && <Button type="button" variant="outline" onClick={() => setVersion(classroom.version)}>已核对当前候选</Button>}</div>}
     <p>创建后固定班级、目标、名单、周期与工作范围；新任务组或新家庭版本须明确追加。误建可带原因撤销，原记录保留。</p>
-    {error && <p role="alert">{error}</p>}<button className="primary-button" disabled={busy || changed || !people.length || !linksValid(links, sequences, families) || people.some((id) => !classroom?.participants.some((person) => person.id === id))}>{busy ? "保存并核对中…" : "保存试用批次"}</button>
+    {error && <p role="alert">{error}</p>}<Button type="submit" disabled={busy || changed || !people.length || !linksValid(links, sequences, families) || people.some((id) => !classroom?.participants.some((person) => person.id === id))}>{busy ? "保存并核对中…" : "保存试用批次"}</Button>
   </fieldset></form>}</div>;
 }
 type ActionDraft = Links & { version: string; reason: string; mode: "" | "link" | "void"; error: string };
@@ -87,17 +95,17 @@ function BatchActions({ batch, classroom, draft, update, busy, setBusy, save }: 
   const families = [...(classroom?.familyTasks.filter((task) => task.objectiveId === batch.scope.objectiveId && people.includes(task.studentId) && !batch.scope.familyTasks.some((old) => taskKey(old) === taskKey(task))) ?? []), ...batch.scope.familyTasks.filter((task) => draft.familyTasks.some((target) => taskKey(target) === taskKey(task)))];
   const alreadyLinked = (draft.sequenceIds.length > 0 || draft.familyTasks.length > 0) && draft.sequenceIds.every((id) => batch.scope.sequences.some((group) => group.id === id)) && draft.familyTasks.every((task) => batch.scope.familyTasks.some((old) => taskKey(old) === taskKey(task)));
   const changed = !alreadyLinked && (!classroom || draft.version !== classroom.version);
-  return <div className={styles.actions}><button type="button" className="soft-button" disabled={busy} onClick={() => update({ mode: draft.mode === "link" ? "" : "link", version: draft.version || classroom?.version || "" })}>追加任务关联</button>{batch.canVoid && <button type="button" className="soft-button" disabled={busy} onClick={() => update({ mode: draft.mode === "void" ? "" : "void" })}>撤销本批次</button>}
+  return <div className={styles.actions}><Button type="button" variant="outline" disabled={busy} onClick={() => update({ mode: draft.mode === "link" ? "" : "link", version: draft.version || classroom?.version || "" })}>追加任务关联</Button>{batch.canVoid && <Button type="button" variant="outline" disabled={busy} onClick={() => update({ mode: draft.mode === "void" ? "" : "void" })}>撤销本批次</Button>}
     {draft.mode && <form className={styles.form} onSubmit={async (event) => {
       event.preventDefault(); if (busy || (draft.mode === "link" && (changed || !linksValid(draft, sequences, families)))) return;
       setBusy(true); update({ error: "" });
       try { await save(draft.mode === "void" ? { action: "void", id: batch.id, reason: draft.reason.trim() } : { action: "link", id: batch.id, revision: batch.revision, catalogVersion: draft.version, sequenceIds: draft.sequenceIds, familyTasks: draft.familyTasks }); update(blankAction); }
       catch (reason) { update({ error: reason instanceof Error ? reason.message : "操作尚未确认，请重试。" }); } finally { setBusy(false); }
-    }}><fieldset className={styles.fields} disabled={busy}>{draft.mode === "void" ? <label>批次撤销原因<textarea required maxLength={1000} value={draft.reason} onChange={(event) => update({ reason: event.target.value })}/></label> : <>
+    }}><fieldset className={styles.fields} disabled={busy}>{draft.mode === "void" ? <label>批次撤销原因<Textarea required maxLength={1000} value={draft.reason} onChange={(event) => update({ reason: event.target.value })}/></label> : <>
       <LinkChoices sequences={sequences} families={families} value={draft} onChange={(value) => update(value)} names={new Map(batch.scope.participants.map((person) => [person.id, person.name]))}/>
-      {changed && <div role="alert"><p>任务候选有变化，请核对当前候选及所选版本。</p>{classroom && <button type="button" className="soft-button" onClick={() => update({ version: classroom.version })}>已核对追加候选</button>}</div>}
+      {changed && <div role="alert"><p>任务候选有变化，请核对当前候选及所选版本。</p>{classroom && <Button type="button" variant="outline" onClick={() => update({ version: classroom.version })}>已核对追加候选</Button>}</div>}
       <p>{alreadyLinked ? "所选关联已存在，重试仅核对保存结果，不会重复追加。" : "追加后沿用原名单和观察周期。家庭任务按版本关联，后续教学安排生成的新任务组需另行追加。"}</p></>}
-      {draft.error && <p role="alert">{draft.error}</p>}<button className="primary-button" disabled={busy || (draft.mode === "link" && (changed || (!draft.sequenceIds.length && !draft.familyTasks.length) || !linksValid(draft, sequences, families)))}>{busy ? "保存并核对中…" : draft.mode === "void" ? "保存批次撤销原因" : "保存追加关联"}</button>
+      {draft.error && <p role="alert">{draft.error}</p>}<Button type="submit" disabled={busy || (draft.mode === "link" && (changed || (!draft.sequenceIds.length && !draft.familyTasks.length) || !linksValid(draft, sequences, families)))}>{busy ? "保存并核对中…" : draft.mode === "void" ? "保存批次撤销原因" : "保存追加关联"}</Button>
     </fieldset></form>}
   </div>;
 }
@@ -111,19 +119,17 @@ function BatchFeedbackSupport({ entry }: { entry: FamilyFeedbackEntry }) {
 function BatchResults({ report }: { report: BatchReport }) {
   const summary = batchSummary(report); const workload = trialSummary(report.entries, []); const scope = report.batch.scope;
   return <div className={styles.results}><h4>{report.batch.title}</h4><p>{scope.className} · {scope.objectiveTitle} · {scope.startDate} 至 {scope.endDate}（北京时间，含首尾日期）</p><p className={styles.copy}>{scope.workScope}</p>
-    <p>名单、周期与工作范围为创建时快照。阶段作品按提交时间、用时和家庭反馈按记录创建时间纳入周期；评价截至观察期末或本次读取时间。原单元报告包含周期外完整历史。</p>
-    <p>{summary.participants} 人；无关联任务组 {summary.withoutGroups} 人；关联变更或不可读取 {summary.unavailableGroups} 组；没有期内迁移作品 {summary.missingTransfer} 人。</p>
-    <p>有教师确认独立迁移记录 {summary.independentTransfer} 人、独立复测记录 {summary.independentRetest} 人。记录存在不代表达到能力等级，目标表现和未知项分别保留。</p>
+    <div className="grid gap-4 sm:grid-cols-3"><StatCard label="参与学生" value={summary.participants} detail={`${summary.withoutGroups} 人未关联任务组`}/><StatCard label="独立迁移记录" value={summary.independentTransfer} detail={`${summary.missingTransfer} 人暂无期内迁移作品`}/><StatCard label="独立复测记录" value={summary.independentRetest} detail={`${summary.unavailableGroups} 组关联变更或不可读`}/></div>
     {report.batch.voidedAt && <p role="status" className={styles.copy}>本批次已撤销：{report.batch.voidReason}。以下仅保留原范围及历史供回看。</p>}
     <p><a target="_blank" rel="noopener" href={`/api/v1/trial-batches/${encodeURIComponent(report.batch.id)}/report`}>查看批次报告 / 打印</a></p>
-    <h4>教师实际用时</h4><p>{report.workloadScope === "self" ? "当前仅本人耗时与本班观察；其他教师耗时不进入本批次汇总。" : "当前按本机构权限读取关联记录。"}两种工作方式需核对工作范围和难度，以下合计不能直接证明节省时间。</p>
-    <div className={styles.table}><table><thead><tr><th>工作内容</th><th>方式</th><th>记录数</th><th>实际用时</th></tr></thead><tbody>{workload.workload.map((item) => <tr key={`${item.kind}-${item.method}`}><th>{TRIAL_KIND_LABELS[item.kind]}</th><td>{TRIAL_METHOD_LABELS[item.method]}</td><td>{item.count}</td><td>{item.minutes === null ? "未记录" : `${item.minutes} 分钟`}</td></tr>)}</tbody></table></div>
+    <h4>教师实际用时</h4><p className={styles.meta}>{report.workloadScope === "self" ? "仅统计本人耗时与本班观察。" : "统计本机构授权范围内的记录。"}</p>
+    <div className={styles.table}><Table><TableHeader><TableRow><TableHead>工作内容</TableHead><TableHead>方式</TableHead><TableHead>记录数</TableHead><TableHead>实际用时</TableHead></TableRow></TableHeader><TableBody>{workload.workload.map((item) => <TableRow key={`${item.kind}-${item.method}`}><TableHead>{TRIAL_KIND_LABELS[item.kind]}</TableHead><TableCell>{TRIAL_METHOD_LABELS[item.method]}</TableCell><TableCell>{item.count}</TableCell><TableCell>{item.minutes === null ? "未记录" : `${item.minutes} 分钟`}</TableCell></TableRow>)}</TableBody></Table></div>
     <p>{workload.observations.map((item) => `${TRIAL_KIND_LABELS[item.kind]} ${item.count} 条`).join("；")}。撤销不计入有效汇总；记录数不等于学生人数。</p>
     <h4>固定名单与学习证据</h4>{report.participants.map((person) => <details className={styles.entry} key={person.id}><summary>{person.name} · {person.id.slice(0, 8)} · {person.currentStatus === "active" ? "当前在读" : person.currentStatus === null ? "当前编班不可核对" : "当前已离班"} · {person.groups.length} 个关联任务组</summary>
       <p>建批时{person.status === "active" ? "在读" : "已离班"}；当前离班不自动视为退出。没有关联或缺少作品时保留缺失。</p>
       {!person.groups.length && <p>未关联任务组，学习证据保持缺失。</p>}{person.groups.map((group) => <section key={group.source.id}><h4>{group.source.title} · {group.source.medium === "audio" ? "录音" : "文字"}</h4>{group.available ? <>
         <p>{group.transferStatus}；{group.retestStatus}</p><p><a target="_blank" rel="noopener" href={unitReportUrl(group.source.id)}>查看原始单元证据与全部历史</a></p>
-        <div className={styles.table}><table><thead><tr><th>初次参照</th><th>期内最近练习</th><th>期内最近迁移</th><th>期内最近复测</th></tr></thead><tbody><tr>{[group.baseline, group.practice[0], group.transfer[0], group.retest[0]].map((work, index) => <td key={index}><EvidenceCell work={work}/></td>)}</tr></tbody></table></div>
+        <div className={styles.table}><Table><TableHeader><TableRow><TableHead>初次参照</TableHead><TableHead>期内最近练习</TableHead><TableHead>期内最近迁移</TableHead><TableHead>期内最近复测</TableHead></TableRow></TableHeader><TableBody><TableRow>{[group.baseline, group.practice[0], group.transfer[0], group.retest[0]].map((work, index) => <TableCell key={index}><EvidenceCell work={work}/></TableCell>)}</TableRow></TableBody></Table></div>
         <p>期内练习 {group.practice.length} 份、迁移 {group.transfer.length} 份、复测 {group.retest.length} 份；最近提交待评价时保留该状态。{group.retestAvailableAt ? `复测开放：${sequenceTime(group.retestAvailableAt)}` : "尚未安排复测。"}</p>
         <details><summary>逐份查看期内作品与初次参照</summary>{[...(group.baseline ? [group.baseline] : []), ...group.practice, ...group.transfer, ...group.retest].map((work) => <p key={work.id}><a target="_blank" rel="noopener" href={`${unitReportUrl(group.source.id)}#work-${encodeURIComponent(work.id)}`}>{work.title} · {work.id.slice(0, 8)}</a> · {sequenceTime(work.submittedAt)} · {work.goalScore === null ? "本期评价未核对" : `${work.goalScore}/100`}</p>)}</details>
       </> : <p>{group.transferStatus}</p>}</section>)}
@@ -133,7 +139,7 @@ function BatchResults({ report }: { report: BatchReport }) {
       {report.feedback.map((entry) => <article className={styles.entry} key={entry.id}><h4>{scope.participants.find((person) => person.id === entry.studentId)?.name} · {entry.snapshot.title} · {batchFamilyVersion(entry.revision)}{entry.voidedAt ? " · 已撤销" : ""}</h4><p>{PARTICIPATION_LABELS[entry.participation][0]}；说明：{INSTRUCTION_LABELS[entry.instructions][0]}；操作帮助：{OPERATION_LABELS[entry.operationHelp][0]}；替代交流：{ALTERNATIVE_LABELS[entry.alternative][0]}</p><p className={styles.copy}>{entry.note || "未补充说明"}</p><p className={styles.copy}>原说明：{entry.snapshot.detail}</p><BatchFeedbackSupport entry={entry}/><p>{entry.authorName} · {sequenceTime(entry.createdAt)} · {entry.id.slice(0, 8)}</p>{entry.voidedAt && <p className={styles.copy}>撤销原因：{entry.voidReason}</p>}</article>)}
     </details>
     <details><summary>查看用时、退出及未改善原记录（{report.entries.length} 条）</summary>{!report.entries.length && <p>当前授权范围没有期内记录，保持未记录。</p>}{report.entries.map((entry) => <article className={styles.entry} key={entry.id}><h4>{TRIAL_KIND_LABELS[entry.kind]}{entry.voidedAt ? " · 已撤销" : ""}</h4><p>{entry.teacherName} · {sequenceTime(entry.createdAt)} · {entry.id.slice(0, 8)}</p><p>{entry.method && `${TRIAL_METHOD_LABELS[entry.method]} · ${entry.minutes ?? "未记录"} 分钟`}</p><p className={styles.copy}>{entry.note}</p><a target="_blank" rel="noopener" href={unitReportUrl(entry.sequenceId)}>{entry.sequenceTitle}</a>{entry.voidedAt && <p className={styles.copy}>撤销原因：{entry.voidReason}</p>}</article>)}</details>
-    <p className={styles.meta}>汇总依当前可读记录和撤销状态重新生成；小规模试用用于发现问题，不能将前后变化直接归因于平台。</p>
+    <details className={styles.meta}><summary>汇总范围与统计口径</summary><p>名单、周期与工作范围按创建时保留。阶段作品按提交时间，用时和家庭反馈按记录创建时间纳入周期；评价截至观察期末或本次读取时间，撤销记录不计入有效汇总。原单元报告包含周期外历史。</p><p>独立迁移与复测记录需结合目标评价查看，不代表能力等级。工作方式的范围和难度需另行核对，用时和前后分数变化不能直接归因于平台。</p></details>
   </div>;
 }
 type Snapshot = { catalog: BatchCatalog | null; report: BatchReport | null; scopeId: string; error: string; loading: boolean; failedId?: string };
@@ -189,16 +195,15 @@ export function TrialBatches({ revision, notify }: { revision: string; notify: N
   const classes = new Map([...(catalog?.batches.map((item) => [item.scope.classId, item.scope.className] as const) ?? []), ...(catalog?.classes.map((item) => [item.id, item.name] as const) ?? [])]);
   const batches = catalog?.batches.filter((batch) => !classFilter || batch.scope.classId === classFilter) ?? [];
   const selectedBatch = catalog?.batches.find((batch) => batch.id === selectedId);
-  return <section className={`panel ${styles.panel}`} aria-label="班级试用批次" aria-busy={snapshot.loading}><div className={styles.heading}><h3>班级试用批次与对照汇总</h3><button type="button" className="soft-button" disabled={snapshot.loading} onClick={() => void load()}>刷新试用批次</button></div>
-    <p>围绕同一单元固定参与名单与观察周期，关联现有任务组、教师用时和家庭反馈，保留缺失、退出与未改善情况。</p>
-    {snapshot.loading && <p role="status">正在读取{selectedId ? "所选批次" : "试用范围"}，上次数据与筛选保留。</p>}{snapshot.error && <div role="alert"><p>{snapshot.error}</p><button type="button" className="soft-button" onClick={() => { const id = snapshot.failedId ?? selected.current; selected.current = id; setSelectedId(id); void load(id); }}>重试读取批次</button></div>}
+  return <Card className={`gap-0 p-6 ${styles.panel}`} aria-label="班级试用批次" aria-busy={snapshot.loading}><SectionHeading title="班级试用批次" description="汇总同一观察周期内的学习作品、教师用时与家庭反馈。" action={<Button type="button" variant="outline" disabled={snapshot.loading} onClick={() => void load()}>刷新批次</Button>}/>
+    {snapshot.loading && <p role="status">正在读取{selectedId ? "所选批次" : "试用范围"}，上次数据与筛选保留。</p>}{snapshot.error && <div role="alert"><p>{snapshot.error}</p><Button type="button" variant="outline" onClick={() => { const id = snapshot.failedId ?? selected.current; selected.current = id; setSelectedId(id); void load(id); }}>重试读取批次</Button></div>}
     <CreateBatch catalog={catalog} save={save}/>
-    {catalog && <><div className={styles.columns}><label>批次班级<select value={classFilter} onChange={(event) => setClassFilter(event.target.value)}><option value="">全部可读班级</option>{classFilter && !classes.has(classFilter) && <option value={classFilter}>原班级当前无批次</option>}{[...classes].map(([id, name]) => <option key={id} value={id}>{name} · {id.slice(0, 8)}</option>)}</select></label>
-      <label>查看试用批次<select value={selectedId} onChange={(event) => choose(event.target.value)}><option value="">请选择批次</option>{selectedBatch && !batches.some((batch) => batch.id === selectedId) && <option value={selectedId}>{selectedBatch.title} · 当前筛选外</option>}{selectedId && !selectedBatch && <option value={selectedId}>原批次当前不可读取</option>}{batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.title} · {batch.scope.className} · {batch.id.slice(0, 8)}{batch.voidedAt ? " · 已撤销" : ""}</option>)}</select></label></div>
+    {catalog && <><div className={styles.columns}><label>批次班级<NativeSelect className="w-full" value={classFilter} onChange={(event) => setClassFilter(event.target.value)}><option value="">全部可读班级</option>{classFilter && !classes.has(classFilter) && <option value={classFilter}>原班级当前无批次</option>}{[...classes].map(([id, name]) => <option key={id} value={id}>{name} · {id.slice(0, 8)}</option>)}</NativeSelect></label>
+      <label>查看试用批次<NativeSelect className="w-full" value={selectedId} onChange={(event) => choose(event.target.value)}><option value="">请选择批次</option>{selectedBatch && !batches.some((batch) => batch.id === selectedId) && <option value={selectedId}>{selectedBatch.title} · 当前筛选外</option>}{selectedId && !selectedBatch && <option value={selectedId}>原批次当前不可读取</option>}{batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.title} · {batch.scope.className} · {batch.id.slice(0, 8)}{batch.voidedAt ? " · 已撤销" : ""}</option>)}</NativeSelect></label></div>
       <p className={styles.meta}>当前筛选 {batches.length}/{catalog.batches.length} 个批次；读取于 {sequenceTime(catalog.generatedAt)}。</p>
-      {!batches.length && <p className="empty-state">{catalog.batches.length ? "当前筛选没有批次。" : "尚未创建试用批次。"}{classFilter && <button type="button" className="soft-button" onClick={() => setClassFilter("")}>清除批次筛选</button>}</p>}
+      {!batches.length && <EmptyState title={catalog.batches.length ? "没有匹配的批次" : "还没有试用批次"} description={catalog.batches.length ? "调整班级筛选后重试。" : "创建批次，选择参与学生与观察周期。"} action={classFilter ? <Button type="button" variant="outline" onClick={() => setClassFilter("")}>清除筛选</Button> : undefined}/>}
     </>}
     {report && <BatchResults report={report}/>}
     {selectedId && <BatchActions batch={report?.batch ?? null} classroom={catalog?.classes.find((item) => item.id === report?.batch.scope.classId)} draft={drafts[selectedId] ?? blankAction} update={(patch) => setDrafts((previous) => ({ ...previous, [selectedId]: { ...(previous[selectedId] ?? blankAction), ...patch } }))} busy={busy[selectedId] ?? false} setBusy={(value) => setBusy((previous) => ({ ...previous, [selectedId]: value }))} save={save}/>}
-  </section>;
+  </Card>;
 }

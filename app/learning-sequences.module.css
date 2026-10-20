@@ -1,6 +1,30 @@
-.section,.reports{display:grid;gap:16px;margin-top:20px;min-width:0}.reports>h3,.reports>p{margin:0}.report{min-width:0;overflow-wrap:anywhere}.report>summary{cursor:pointer;font-weight:700;color:var(--green);line-height:1.6}.stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.stages>section{min-width:0}.work{padding:12px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}.work p{font-size:var(--font-caption);line-height:1.7}.work audio{display:block;max-width:100%;width:100%;margin:12px 0}.copy{white-space:pre-wrap;line-height:1.7}.table{max-width:100%;overflow:auto}.table table{width:100%;border-collapse:collapse}.table th,.table td{padding:10px;text-align:left;border-bottom:1px solid var(--line);font-size:var(--font-caption)}.fields{border:0;padding:0;margin:0;display:grid;gap:14px;min-width:0}.selector{display:grid;gap:6px;font-size:var(--font-caption);margin:12px 0}.selector select{width:100%;min-width:0;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}.fields input,.fields textarea,.fields select{min-width:0;max-width:100%}.fields p,.fields li{font-size:var(--font-caption);line-height:1.7}
-.stages.withRetest{grid-template-columns:repeat(2,minmax(0,1fr))}.scheduler{margin-top:16px}.scheduler form{margin-top:12px}
-.decisions{margin-top:20px;min-width:0}.decision{border-top:1px solid var(--line);padding:14px 0;min-width:0}.decision summary{cursor:pointer}.decision a,.report>p a{color:var(--green);text-decoration:underline}
-.report,.creator{scroll-margin-top:100px}
-@media(max-width:900px){.stages,.stages.withRetest{grid-template-columns:1fr}}
-.observations{display:grid;gap:12px;min-width:0;padding:14px;border:1px solid var(--line);border-radius:12px}.observations legend{font-weight:600}.observations select{width:100%;min-width:0;font:inherit;min-height:48px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}.observations .check{display:flex;gap:10px;align-items:flex-start}.observations .check input{width:auto;min-height:0;padding:0;margin-top:5px;flex-shrink:0}
+.section, .reports { display: grid; gap: 24px; margin-top: 24px; min-width: 0; }
+.reports > h3, .reports > p { margin: 0; }
+.report { min-width: 0; overflow-wrap: anywhere; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.report > summary { cursor: pointer; font-weight: 600; color: var(--foreground); line-height: 1.75; }
+.stages { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 24px; }
+.stages > section { min-width: 0; }
+.work { padding: 16px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.work p { font-size: var(--font-control); line-height: 1.75; }
+.work audio { display: block; max-width: 100%; width: 100%; margin: 16px 0; }
+.copy { white-space: pre-wrap; line-height: 1.75; }
+.meta { font-size: var(--font-caption); color: var(--muted-foreground); }
+.table { max-width: 100%; overflow: auto; margin: 20px 0; }
+.fields { border: 0; padding: 0; margin: 0; display: grid; gap: 20px; min-width: 0; }
+.fields label, .selector { display: grid; gap: 8px; font-size: var(--font-control); font-weight: 500; min-width: 0; }
+.selector { margin: 20px 0; }
+.fields p, .fields li { font-size: var(--font-control); line-height: 1.75; }
+.stages.withRetest { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.scheduler { margin-top: 24px; }
+.scheduler form { margin-top: 20px; }
+.decisions { margin-top: 24px; min-width: 0; }
+.decision { border-top: 1px solid var(--border); padding: 20px 0; min-width: 0; }
+.decision summary { cursor: pointer; }
+.decision a, .report > p a { color: var(--primary); text-decoration: underline; text-underline-offset: 4px; }
+.report, .creator { scroll-margin-top: 100px; }
+.observations { display: grid; gap: 16px; min-width: 0; padding: 20px 0; border: 0; border-top: 1px solid var(--border); }
+.observations legend { font-weight: 600; }
+.observations .check { display: flex; gap: 12px; align-items: flex-start; }
+.observations .check input { flex-shrink: 0; margin-top: 5px; }
+@media (max-width: 900px) { .stages, .stages.withRetest { grid-template-columns: 1fr; } }
+@media (max-width: 600px) { .report { padding: 20px; } }

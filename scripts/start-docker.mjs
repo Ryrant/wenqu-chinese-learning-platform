@@ -23,7 +23,7 @@ await mkdir(uploadDir, { recursive: true });
 await access(databaseDir, constants.W_OK);
 await access(uploadDir, constants.W_OK);
 
-const child = spawn(process.execPath, ["./node_modules/vinext/dist/cli.js", "start"], {
+const child = spawn(process.execPath, ["./dist/node/index.mjs"], {
   env: {
     ...process.env,
     DATABASE_URL: databaseUrl,
@@ -36,7 +36,7 @@ const child = spawn(process.execPath, ["./node_modules/vinext/dist/cli.js", "sta
 
 child.once("exit", (code, signal) => {
   if (signal) {
-    console.error("vinext_start_signal", { signal });
+    console.error("server_start_signal", { signal });
     process.exit(1);
   }
   process.exit(code ?? 1);

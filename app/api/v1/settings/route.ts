@@ -1,7 +1,6 @@
 import { loadPlatformSettings, publicPlatformSettings, savePlatformSettings } from "../../../lib/platform-settings";
 import { platformApiError, platformContext } from "../../../lib/platform-store";
 
-export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {

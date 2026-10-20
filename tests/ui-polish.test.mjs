@@ -1,3 +1,4 @@
+import { readCommandSources, readWorkspaceSources, readRoleSources, readSourceDirectory } from "./helpers/source-files.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -44,9 +45,9 @@ test("ui workflow migration is additive and runtime initialization stays idempot
 
 test("workspace actions expose tenant-scoped editable and archival workflows", async () => {
   const [actions, service, workspace] = await Promise.all([
-    read("app/api/v1/workspace/actions/route.ts"),
+    readCommandSources(),
     read("app/lib/learning-loop-service.ts"),
-    read("app/api/v1/workspace/route.ts"),
+    readWorkspaceSources(),
   ]);
   for (const action of ["update_lesson_plan", "archive_lesson_plan", "update_family_task", "archive_family_task", "reprocess_content", "archive_content"]) {
     assert.match(actions, new RegExp(action));
@@ -70,46 +71,30 @@ test("admin audit API supports tenant-scoped filters and pagination", async () =
 });
 
 test("workspace returns structured quality metrics with real denominators and details", async () => {
-  const [types, workspace, views] = await Promise.all([
+  const [types, workspace] = await Promise.all([
     read("app/lib/platform-types.ts"),
-    read("app/api/v1/workspace/route.ts"),
-    read("app/learning-loop-views.tsx"),
+    readWorkspaceSources(),
   ]);
   assert.match(types, /export type QualityMetric/);
   for (const key of ["numerator", "denominator", "unit", "details", "trendAvailable"]) {
     assert.match(types, new RegExp(key));
     assert.match(workspace, new RegExp(key));
   }
-  assert.match(views, /暂无趋势数据/);
-  assert.match(views, /quality-detail/);
 });
 
-test("four-end UI uses readable typography and explicit management controls", async () => {
-  const [css, student, staff, loop, members] = await Promise.all([
-    read("app/globals.css"),
-    read("app/student-view.tsx"),
-    read("app/staff-views.tsx"),
-    read("app/learning-loop-views.tsx"),
+test("four-end UI preserves teaching and account management actions", async () => {
+  const [staff, loop, members] = await Promise.all([
+    readRoleSources("teacher", "guardian", "admin"),
+    readSourceDirectory("app/features"),
     read("app/member-management-view.tsx"),
   ]);
-  for (const token of ["--font-body:16px", "--font-control:15px", "--font-caption:13px"]) assert.match(css, new RegExp(token));
-  assert.match(css, /\.teacher-class-grid\{grid-template-columns:minmax\(0,2fr\) minmax\(0,3fr\)/);
-  assert.match(css, /@media\(max-width:600px\)/);
-  assert.match(student, /根据已审核来源：/);
-  assert.match(student, /来源化回答 · 已关联审核资料/);
-  assert.match(staff, /编辑草稿/);
-  assert.match(staff, /归档草稿/);
-  assert.match(staff, /选择待批阅作品/);
-  assert.match(loop, /重新打开/);
-  assert.match(loop, /归档任务/);
-  assert.match(loop, /当前孩子/);
-  assert.match(loop, /暂无趋势数据/);
-  assert.match(members, /监护人/);
-  assert.match(members, /学生/);
+  for (const action of ["update_lesson_plan", "archive_lesson_plan"]) assert.match(staff, new RegExp(action));
+  for (const action of ["update_family_task", "archive_family_task"]) assert.match(loop, new RegExp(action));
+  for (const action of ["create_member", "set_guardian_links", "reset_member_password", "set_member_status"]) assert.match(members, new RegExp(action));
 });
 
 test("institution UI localizes service content and audit status", async () => {
-  const staff = await read("app/staff-views.tsx");
+  const staff = await readRoleSources("teacher", "guardian", "admin");
   for (const label of ["数据库", "文件存储", "知识检索", "内容生成", "语音评测", "内容审核", "内置模式", "人工复核", "基础规则"]) {
     assert.match(staff, new RegExp(label));
   }
@@ -121,12 +106,12 @@ test("institution UI localizes service content and audit status", async () => {
 });
 
 test("guardian child selector de-duplicates repeated active bindings", async () => {
-  const workspaceRoute = await read("app/api/v1/workspace/route.ts");
+  const workspaceRoute = await readWorkspaceSources();
   assert.match(workspaceRoute, /SELECT DISTINCT u\.id,u\.display_name AS displayName/);
 });
 
 test("initial admin audit records include actor display names", async () => {
-  const workspaceRoute = await read("app/api/v1/workspace/route.ts");
+  const workspaceRoute = await readWorkspaceSources();
   assert.match(workspaceRoute, /u\.display_name AS actorDisplayName/);
   assert.match(workspaceRoute, /audit_logs a LEFT JOIN users u ON u\.id=a\.actor_user_id/);
 });

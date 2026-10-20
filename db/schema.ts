@@ -6,7 +6,7 @@ const createdAt = () => text("created_at").notNull().default(sql`CURRENT_TIMESTA
 export const tenants = sqliteTable("tenants", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  region: text("region").notNull().default("sg"),
+  region: text("region").notNull().default(""),
   status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
   createdAt: createdAt(),
 });

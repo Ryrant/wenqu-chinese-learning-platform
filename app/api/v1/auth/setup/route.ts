@@ -23,14 +23,18 @@ export async function POST(request: Request) {
     await ensurePlatformSchema(db);
     if (!(await isInitialSetupRequired(db))) return json("setup_closed", 409);
 
-    const payload = await request.json().catch(() => null) as { email?: unknown; password?: unknown; displayName?: unknown } | null;
+    const payload = await request.json().catch(() => null) as { email?: unknown; password?: unknown; displayName?: unknown; workspaceName?: unknown } | null;
     const email = typeof payload?.email === "string" ? payload.email.trim().toLowerCase() : "";
     const password = typeof payload?.password === "string" ? payload.password : "";
     const displayName = typeof payload?.displayName === "string" ? payload.displayName.trim() : "";
     if (!EMAIL_PATTERN.test(email)) return json("invalid_email", 400);
     if (password.length < 8) return json("password_too_short", 400);
+    if (payload?.workspaceName !== undefined && (typeof payload.workspaceName !== "string" || payload.workspaceName.trim().length > 120)) {
+      return json("invalid_workspace_name", 400);
+    }
+    const workspaceName = typeof payload?.workspaceName === "string" ? payload.workspaceName.trim() : undefined;
 
-    const account = await createInitialAdminAccount({ db, email, password, displayName });
+    const account = await createInitialAdminAccount({ db, email, password, displayName, workspaceName });
     if (!account) return json("setup_closed", 409);
 
     const now = Math.floor(Date.now() / 1000);

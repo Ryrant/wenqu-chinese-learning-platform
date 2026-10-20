@@ -29,7 +29,7 @@ export type QualityMetric = {
 };
 export type QualityMetrics = Record<string, QualityMetric>;
 export type WorkspaceData = {
-  workspace: { tenantId: string; name: string; region: string; sampleData: boolean };
+  workspace: { tenantId: string; name: string; region: string };
   user: { id: string; email: string; displayName: string; roles: Role[]; mustChangePassword?: boolean };
   classes: Row[]; assignments: Row[]; submissions: Row[]; submissionReviews: Row[]; mastery: Row[]; documents: Row[];
   lessonPlans: Row[]; notifications: Row[]; consents: Row[]; audits: Row[]; invitations: Row[]; members: MemberRow[]; guardianLinks: GuardianLinkRow[];
@@ -43,6 +43,11 @@ export type WorkspaceData = {
   platformSettings?: PublicPlatformSettings;
   generatedAt: string;
 };
+export const WORKSPACE_SECTIONS = ["teaching", "curriculum", "progress", "lessons", "content", "members", "notifications", "consents", "audits", "quality", "trials", "settings"] as const;
+export type WorkspaceSection = typeof WORKSPACE_SECTIONS[number];
+export type WorkspaceBootstrap = Pick<WorkspaceData, "workspace" | "user" | "availableStudents" | "selectedStudent" | "generatedAt">;
+export type WorkspacePatch = WorkspaceBootstrap & Partial<Omit<WorkspaceData, keyof WorkspaceBootstrap>>;
+
 export type Notify = (title: string, detail: string, tone?: "success" | "error") => void;
 export type Act = (action: string, payload?: Record<string, unknown>) => Promise<Record<string, unknown>>;
 export const stringValue = (value: unknown, fallback = "—") => typeof value === "string" && value ? value : fallback;

@@ -167,6 +167,7 @@ export async function createNodeRuntime(input: NodeRuntimeInput = {}): Promise<P
   await mkdir(dirname(resolve(databasePath)), { recursive: true });
   await mkdir(uploadDir, { recursive: true });
   return {
+    kind: "node",
     database: new NodeSqliteDatabase(databaseUrl),
     storage: new LocalFileStorage(uploadDir),
   };
