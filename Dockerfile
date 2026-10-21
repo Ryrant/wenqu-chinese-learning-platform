@@ -1,4 +1,3 @@
-# 构建阶段使用宿主架构，运行依赖按目标架构单独安装。
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
