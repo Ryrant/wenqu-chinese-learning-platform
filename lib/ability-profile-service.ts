@@ -2,6 +2,7 @@ import { studentAccessClause, submissionAccessClause } from "./access-control";
 import type { AbilityEvidence, AbilityProfile, ChoiceSnapshot, WorkDiagnosticSnapshot } from "./diagnostic-types";
 import type { PlatformContext } from "./platform-store";
 import { readReviewEvidence, submissionHelpLevel } from "./learning-sequence-types";
+import { learningAnalyticsConsentSql, readLearningAnalyticsState } from "./learning-analytics";
 
 export async function readAbilityProfile(context: PlatformContext, studentId: string): Promise<AbilityProfile> {
   const { db, tenantId } = context;
@@ -11,12 +12,16 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
     WHERE u.id=? AND u.status='active' AND ${access.sql}`)
     .bind(tenantId, studentId, ...access.args).first<{ id: string; displayName: string }>();
   if (!student) throw new Error("ability_profile_not_found");
+  const analytics = await readLearningAnalyticsState(db, tenantId, studentId);
+  if (!analytics.available) return { student, legacyAnswerCount: 0, evidence: [], ...analytics };
   const submissions = submissionAccessClause(context, "s", "c");
   const [choices, works] = await Promise.all([
     db.prepare(`SELECT da.evidence_json AS snapshot,da.selected_option AS selectedOption,da.is_correct AS isCorrect,
         dt.id AS attemptId,dt.level,dt.completed_at AS completedAt,dt.rowid AS sequence
       FROM diagnostic_answers da JOIN diagnostic_attempts dt ON dt.id=da.attempt_id AND dt.tenant_id=da.tenant_id
-      WHERE da.tenant_id=? AND dt.student_user_id=? ORDER BY dt.completed_at DESC,dt.id,da.rowid`)
+      WHERE da.tenant_id=? AND dt.student_user_id=? AND COALESCE(json_extract(da.evidence_json,'$.analyticsAllowed'),1)=1
+        AND ${learningAnalyticsConsentSql("da.tenant_id", "dt.student_user_id")}
+      ORDER BY dt.completed_at DESC,dt.id,da.rowid`)
       .bind(tenantId, studentId).all<{ snapshot: string; selectedOption: number; isCorrect: number; attemptId: string; level: string; completedAt: string; sequence: number }>(),
     db.prepare(`SELECT s.id,s.text_answer AS textAnswer,s.asset_key AS assetKey,s.review_status AS reviewStatus,
         s.created_at AS submittedAt,s.reviewed_at AS reviewedAt,s.feedback,s.family_help_level AS familyHelp,
@@ -27,6 +32,9 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
       LEFT JOIN submission_reviews sr ON sr.tenant_id=s.tenant_id AND sr.submission_id=s.id AND sr.status='confirmed'
       LEFT JOIN users u ON u.id=sr.reviewer_user_id
       WHERE s.tenant_id=? AND s.student_user_id=? AND s.diagnostic_snapshot_json!='{}' AND ${submissions.sql}
+        AND COALESCE(json_extract(sr.evidence_json,'$.analyticsAllowed'),1)=1
+        AND COALESCE(json_extract(s.diagnostic_snapshot_json,'$.analyticsAllowed'),1)=1
+        AND ${learningAnalyticsConsentSql("s.tenant_id", "s.student_user_id")}
       ORDER BY s.created_at DESC,s.rowid DESC`)
       .bind(tenantId, studentId, ...submissions.args).all<{ id: string; textAnswer: string | null; assetKey: string | null; reviewStatus: string; submittedAt: string; reviewedAt: string | null; feedback: string | null; familyHelp: string | null; snapshot: string; objectiveScores: string | null; dimensions: string | null; reviewEvidence: string | null; reviewer: string | null; sequence: number }>(),
   ]);
@@ -69,5 +77,5 @@ export async function readAbilityProfile(context: PlatformContext, studentId: st
     });
   }
   evidence.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt) || a.id.localeCompare(b.id));
-  return { student, legacyAnswerCount, evidence };
+  return { student, legacyAnswerCount, evidence, ...analytics };
 }

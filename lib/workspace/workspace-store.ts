@@ -2,7 +2,7 @@ import type { WorkspaceData, WorkspacePatch, WorkspaceSection } from "../platfor
 import { ApiError, readWorkspace } from "./api";
 
 type Reader = typeof readWorkspace;
-type LoadOptions = { force?: boolean; revalidate?: boolean; studentId?: string };
+type LoadOptions = { force?: boolean; revalidate?: boolean; studentId?: string | null };
 export type WorkspaceSnapshot = { data: WorkspaceData | null; receivedAt: number };
 
 const sectionFields: Record<WorkspaceSection, readonly (keyof WorkspaceData)[]> = {
@@ -17,7 +17,7 @@ function initialData(patch: WorkspacePatch): WorkspaceData {
     classes: [], assignments: [], submissions: [], submissionReviews: [], mastery: [], masteryMatrix: [], learningObjectives: [], diagnosticItems: [],
     diagnosticSummary: null, recommendations: [], learningPlan: [], learningSequences: [], sequenceSources: [], trialEntries: [], enrollments: [],
     documents: [], lessonPlans: [], notifications: [], consents: [], audits: [], invitations: [], members: [], guardianLinks: [], qualityMetrics: null, services: {},
-    weeklyReport: { submittedCount: 0, reviewedCount: 0, averageScore: null, masteryAverage: null, pendingRecommendations: 0 },
+    weeklyReport: { available: false, consentStatus: "not_granted", submittedCount: null, reviewedCount: null, averageScore: null, masteryAverage: null, pendingRecommendations: null },
     workspace: patch.workspace, user: patch.user, availableStudents: patch.availableStudents,
     selectedStudent: patch.selectedStudent, generatedAt: patch.generatedAt,
   };
@@ -36,6 +36,7 @@ export function createWorkspaceStore(reader: Reader = readWorkspace) {
   const versions = new Map<WorkspaceSection, number>();
   const latestRequests = new Map<WorkspaceSection, number>();
   let switching: Promise<void> | null = null;
+  let recoveringStudent: Promise<boolean> | null = null;
   const pending = new Map<string, Promise<void>>();
   const controllers = new Set<AbortController>();
   const listeners = new Set<() => void>();
@@ -47,7 +48,7 @@ export function createWorkspaceStore(reader: Reader = readWorkspace) {
   function reset() {
     generation++;
     controllers.forEach((controller) => controller.abort()); controllers.clear(); pending.clear();
-    loaded.clear(); dirty.clear(); versions.clear(); latestRequests.clear(); switching = null; committedStudent = undefined; requestedStudent = undefined; metadataNumber = 0;
+    loaded.clear(); dirty.clear(); versions.clear(); latestRequests.clear(); switching = null; recoveringStudent = null; committedStudent = undefined; requestedStudent = undefined; metadataNumber = 0;
     snapshot = { data: null, receivedAt: 0 };
     listeners.forEach((listener) => listener());
   }
@@ -63,7 +64,8 @@ export function createWorkspaceStore(reader: Reader = readWorkspace) {
       await switching;
       if (waitingGeneration !== generation) return;
     }
-    const selected = options.studentId ?? requestedStudent;
+    // null 明确要求服务端重新选择合法孩子，undefined 继续当前孩子。
+    const selected = options.studentId === null ? undefined : options.studentId ?? requestedStudent;
     const changingStudent = selected !== requestedStudent;
     if (changingStudent) {
       generation++; requestedStudent = selected;
@@ -131,10 +133,43 @@ export function createWorkspaceStore(reader: Reader = readWorkspace) {
     return task;
   }
 
+  async function recoverStudent(sections: readonly WorkspaceSection[]) {
+    if (recoveringStudent) {
+      const recovered = await recoveringStudent;
+      if (recovered) await load(sections);
+      return recovered;
+    }
+    const previous = snapshot.data;
+    const studentId = committedStudent;
+    if (!previous?.user.roles.includes("guardian") || !studentId) return false;
+    const token = generation;
+    const controller = new AbortController(); controllers.add(controller);
+    const operation = (async () => {
+      // 对象 403 不退出账号；先独立确认旧孩子确已撤权，再原子切换整页数据。
+      const metadata = await reader([], undefined, controller.signal);
+      if (token !== generation) return true;
+      if (previous.user.id !== metadata.user.id || previous.workspace.tenantId !== metadata.workspace.tenantId) {
+        reset();
+        throw new ApiError(401, "session_changed");
+      }
+      if (metadata.availableStudents.some((student) => student.id === studentId) ||
+        (metadata.user.roles.includes("student") && metadata.user.id === studentId)) return false;
+      // 复合学生/家长账号的默认 selectedStudent 可能是本人；家长恢复只能选择可监护孩子。
+      await load(sections, { force: true, studentId: metadata.availableStudents[0]?.id ?? null });
+      return true;
+    })();
+    const task = operation.finally(() => {
+      controllers.delete(controller);
+      if (recoveringStudent === task) recoveringStudent = null;
+    });
+    recoveringStudent = task;
+    return task;
+  }
+
   return {
     getSnapshot: () => snapshot,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     ready: (sections: readonly WorkspaceSection[]) => Boolean(snapshot.data) && sections.every((section) => loaded.has(section) && !dirty.has(section)),
-    loaded: () => [...loaded], reset, invalidate, load,
+    loaded: () => [...loaded], reset, invalidate, load, recoverStudent,
   };
 }

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
@@ -178,6 +178,11 @@ export class LocalFileStorage implements PlatformStorage {
       arrayBuffer: async () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
       text: async () => data.toString("utf8"),
     };
+  }
+
+  async delete(key: string) {
+    const target = assertStoragePath(this.root, key);
+    await Promise.all([rm(target, { force: true }), rm(`${target}.meta.json`, { force: true })]);
   }
 }
 

@@ -1,6 +1,6 @@
 import { createMember, resetMemberPassword, setGuardianLinks, setMemberStatus } from "../membership-service";
 import type { PlatformRole } from "../platform-store";
-import { text, requireText, auditStatement, type WorkspaceActionHandler } from "./shared";
+import { text, requireText, requireStringArray, auditStatement, type WorkspaceActionHandler } from "./shared";
 import type { WorkspaceActionName } from "../workspace-actions";
 
 const allowedInviteRoles = new Set<PlatformRole>(["student", "teacher", "guardian", "admin"]);
@@ -32,7 +32,7 @@ export const membershipCommands = {
 
   set_guardian_links: async (body, context) => {
     const { db, tenantId, userId } = context;
-    const studentUserIds = Array.isArray(body.studentUserIds) ? body.studentUserIds.map((value) => text(value, 120)).filter(Boolean) : [];
+    const studentUserIds = requireStringArray(body.studentUserIds, "student_ids");
     await setGuardianLinks(db, { tenantId, actorUserId: userId, guardianUserId: requireText(body.guardianUserId, "guardian_user_id", 120), studentUserIds });
     return Response.json({ ok: true });
   },

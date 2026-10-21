@@ -326,3 +326,92 @@ test("a failed latest child switch cannot fall back to an earlier in-flight sele
   requests.at(-1).resolve(patch("child-a", { submissions: [{ id: "a-refreshed" }] }));
   await refresh;
 });
+
+test("revoked current child recovers metadata and commits the replacement page atomically", { timeout: 5000 }, async () => {
+  const { store, requests } = controlledStore();
+  await seed(store, requests, ["progress", "teaching"], { submissions: [{ id: "a-work" }], classes: [{ id: "a-class" }] });
+  const staleRead = store.load(["progress"], { force: true });
+  const staleRequest = requests.at(-1);
+  const recovering = store.recoverStudent(["progress", "teaching"]);
+  const metadata = requests.at(-1);
+  assert.deepEqual(metadata.sections, []);
+  assert.equal(metadata.studentId, undefined, "bootstrap must not carry the revoked child ID");
+  metadata.resolve(patch("child-b", { availableStudents: [{ id: "child-b", displayName: "B" }] }));
+  await Promise.resolve();
+  const replacement = requests.at(-1);
+  assert.equal(replacement.studentId, "child-b");
+  assert.deepEqual(replacement.sections, ["progress", "teaching"]);
+  assert.equal(store.getSnapshot().data.selectedStudent.id, "child-a", "metadata alone must not replace the old complete page");
+  replacement.resolve(patch("child-b", { availableStudents: [{ id: "child-b", displayName: "B" }], submissions: [{ id: "b-work" }], classes: [{ id: "b-class" }] }));
+  assert.equal(await recovering, true);
+  staleRequest.resolve(patch("child-a", { submissions: [{ id: "late-a-work" }] }));
+  await staleRead;
+  assert.equal(store.getSnapshot().data.selectedStudent.id, "child-b");
+  assert.deepEqual(store.getSnapshot().data.submissions, [{ id: "b-work" }]);
+  assert.deepEqual(store.getSnapshot().data.classes, [{ id: "b-class" }]);
+});
+
+test("ordinary object denial does not replace an authorized current child", { timeout: 5000 }, async () => {
+  const { store, requests } = controlledStore();
+  await seed(store, requests, ["progress"], { submissions: [{ id: "a-work" }] });
+  const previous = store.getSnapshot();
+  const recovering = store.recoverStudent(["progress"]);
+  requests.at(-1).resolve(patch("child-a"));
+  assert.equal(await recovering, false);
+  assert.equal(store.getSnapshot(), previous);
+  assert.equal(requests.length, 2, "unrelated denial must not force a child switch or reread");
+});
+
+test("a combined student and guardian recovers to an available child instead of its own bootstrap selection", { timeout: 5000 }, async () => {
+  const { store, requests } = controlledStore();
+  const user = { id: "guardian", email: "guardian@example.test", displayName: "复合角色账号", roles: ["student", "guardian"] };
+  await seed(store, requests, ["progress"], { user, submissions: [{ id: "a-work" }] });
+  const recovering = store.recoverStudent(["progress"]);
+  requests.at(-1).resolve(patch("guardian", { user, availableStudents: [{ id: "child-b", displayName: "B" }] }));
+  await Promise.resolve();
+  assert.equal(requests.at(-1).studentId, "child-b");
+  assert.equal(store.getSnapshot().data.selectedStudent.id, "child-a");
+  requests.at(-1).resolve(patch("child-b", { user, availableStudents: [{ id: "child-b", displayName: "B" }], submissions: [{ id: "b-work" }] }));
+  await recovering;
+  assert.equal(store.getSnapshot().data.selectedStudent.id, "child-b");
+  assert.deepEqual(store.getSnapshot().data.submissions, [{ id: "b-work" }]);
+});
+
+test("removing the last guardian link commits an empty authorized context without retaining the old child", { timeout: 5000 }, async () => {
+  const { store, requests } = controlledStore();
+  await seed(store, requests, ["progress"], { submissions: [{ id: "a-work" }] });
+  const recovering = store.recoverStudent(["progress"]);
+  requests.at(-1).resolve(patch(null, { availableStudents: [] }));
+  await Promise.resolve();
+  assert.equal(requests.at(-1).studentId, undefined);
+  requests.at(-1).resolve(patch(null, { availableStudents: [], submissions: [] }));
+  assert.equal(await recovering, true);
+  assert.equal(store.getSnapshot().data.selectedStudent, null);
+  assert.deepEqual(store.getSnapshot().data.availableStudents, []);
+  assert.deepEqual(store.getSnapshot().data.submissions, []);
+});
+
+test("identity changes during child recovery clear the old account rather than merge metadata", { timeout: 5000 }, async () => {
+  const { store, requests } = controlledStore();
+  await seed(store, requests, ["progress"]);
+  const recovering = store.recoverStudent(["progress"]);
+  const rejected = assert.rejects(recovering, { status: 401, code: "session_changed" });
+  requests.at(-1).resolve(patch("child-b", { user: { id: "another-account", roles: ["guardian"] } }));
+  await rejected;
+  assert.equal(store.getSnapshot().data, null);
+  assert.deepEqual(store.loaded(), []);
+});
+
+test("a newer child selection supersedes recovery metadata without discarding the selected context", { timeout: 5000 }, async () => {
+  const { store, requests } = controlledStore();
+  await seed(store, requests, ["progress"]);
+  const recovering = store.recoverStudent(["progress"]);
+  const metadata = requests.at(-1);
+  const selected = store.load(["progress"], { studentId: "child-c" });
+  requests.at(-1).resolve(patch("child-c", { submissions: [{ id: "c-work" }] }));
+  await selected;
+  metadata.resolve(patch("child-b", { availableStudents: [{ id: "child-b", displayName: "B" }] }));
+  await recovering;
+  assert.equal(store.getSnapshot().data.selectedStudent.id, "child-c");
+  assert.deepEqual(store.getSnapshot().data.submissions, [{ id: "c-work" }]);
+});

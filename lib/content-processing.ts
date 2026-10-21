@@ -1,9 +1,20 @@
-import { strFromU8, unzipSync } from "fflate";
+import { FlateErrorCode, strFromU8, unzipSync } from "fflate";
 import type { PlatformDatabase } from "./platform-runtime";
 import { auditStatement } from "./audit";
 
 export type ExtractedText = { text: string; kind: "txt" | "docx" | "pdf" };
 export type KnowledgeChunkInput = { id: string; tenantId: string; sourceDocumentId: string; content: string; metadataJson: string };
+
+const processingErrors = new Set(["empty_text", "unsupported_scanned_pdf", "docx_document_missing", "unsupported_file_type"]);
+const zipErrors = new Set<number>(Object.values(FlateErrorCode));
+
+export function contentProcessingError(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  if (processingErrors.has(error.message)) return error.message;
+  if (["InvalidPDFException", "PasswordException"].includes(error.name)
+    || ("code" in error && typeof error.code === "number" && zipErrors.has(error.code))) return "unsupported_file_type";
+  return null;
+}
 
 export async function extractText(file: File): Promise<ExtractedText> {
   if (file.type === "text/plain" || file.name.toLowerCase().endsWith(".txt")) return extractTxtText(file);

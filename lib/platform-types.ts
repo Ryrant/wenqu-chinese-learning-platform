@@ -1,6 +1,7 @@
 import type { LearningSequence, SequenceSource } from "./learning-sequence-types";
 import type { TrialEntry } from "./trial-types";
 import type { EvidencePlanItem } from "./learning-plan-types";
+import type { LearningAnalyticsState } from "./learning-analytics";
 
 export type Role = "student" | "teacher" | "guardian" | "admin";
 export type Row = Record<string, unknown>;
@@ -26,6 +27,7 @@ export type QualityMetric = {
   note: string;
   details: QualityMetricDetail[];
   trendAvailable: boolean;
+  available?: boolean;
 };
 export type QualityMetrics = Record<string, QualityMetric>;
 export type WorkspaceData = {
@@ -37,7 +39,7 @@ export type WorkspaceData = {
   learningSequences: LearningSequence[]; sequenceSources: SequenceSource[];
   trialEntries: TrialEntry[];
   availableStudents: Array<{ id: string; displayName: string }>; selectedStudent: { id: string; displayName: string } | null;
-  weeklyReport: { submittedCount: number; reviewedCount: number; averageScore: number | null; masteryAverage: number | null; pendingRecommendations: number };
+  weeklyReport: { submittedCount: number | null; reviewedCount: number | null; averageScore: number | null; masteryAverage: number | null; pendingRecommendations: number | null } & Partial<LearningAnalyticsState>;
   masteryMatrix: Row[]; qualityMetrics: QualityMetrics | null; enrollments: Row[];
   services: Record<string, { status: string; label: string }>;
   platformSettings?: PublicPlatformSettings;

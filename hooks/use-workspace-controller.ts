@@ -35,6 +35,14 @@ export function useWorkspaceController() {
   committed.current = committedRoute;
   const desiredRoute = useMemo(() => matchWorkspaceRoute(location.pathname), [location.pathname]);
 
+  const loadWorkspace = useCallback(async (sections: readonly WorkspaceSection[], options: { force?: boolean; revalidate?: boolean; studentId?: string } = {}, recoverySections = sections) => {
+    try { await store.load(sections, options); }
+    catch (reason) {
+      if (reason instanceof ApiError && reason.status === 403 && reason.code === "forbidden" && await store.recoverStudent(recoverySections)) return;
+      throw reason;
+    }
+  }, [store]);
+
   const handleAccessError = useCallback((reason: unknown) => {
     const failure = workspaceAccessFailure(reason);
     if (failure) {
@@ -86,14 +94,23 @@ export function useWorkspaceController() {
     const snapshot = store.getSnapshot().data;
     const guardianStudent = snapshot?.availableStudents.some((student) => student.id === snapshot.selectedStudent?.id)
       ? snapshot.selectedStudent?.id : snapshot?.availableStudents[0]?.id;
-    const studentId = desiredRoute.role === "student" ? userId : desiredRoute.role === "guardian" ? new URLSearchParams(location.search).get("studentId") ?? guardianStudent : undefined;
+    const query = new URLSearchParams(location.search);
+    const requestedStudent = query.get("studentId");
+    const guardianTarget = requestedStudent && snapshot?.availableStudents.some((student) => student.id === requestedStudent) ? requestedStudent : guardianStudent;
+    // 撤权恢复后移除 URL 中的旧孩子，避免下一次重访重新请求已撤权的对象。
+    if (desiredRoute.role === "guardian" && requestedStudent && requestedStudent !== guardianTarget) {
+      if (guardianTarget) query.set("studentId", guardianTarget); else query.delete("studentId");
+      navigate(`${location.pathname}${query.size ? `?${query}` : ""}`, { replace: true });
+      return;
+    }
+    const studentId = desiredRoute.role === "student" ? userId : desiredRoute.role === "guardian" ? guardianTarget : undefined;
     const sections = [...pageSections(desiredRoute), "notifications" as const];
     setPageLoading(true); setPageError("");
     void (async () => {
       try {
         // 写入可能使在途的读取失效；只在所有页面分组都已接收时切换可见导航。
         for (let attempt = 0; attempt < 3; attempt++) {
-          await store.load(sections, { studentId, revalidate: attempt === 0 });
+          await loadWorkspace(sections, { studentId, revalidate: attempt === 0 });
           if (!active || ticket !== epoch.current) return;
           if (store.ready(sections)) { setCommittedRoute(desiredRoute); setRefreshError(""); return; }
         }
@@ -106,7 +123,7 @@ export function useWorkspaceController() {
       } finally { if (active && ticket === epoch.current) setPageLoading(false); }
     })();
     return () => { active = false; };
-  }, [initializing, userId, rolesKey, studentsKey, session?.authenticated, session?.user?.mustChangePassword, desiredRoute, location.pathname, location.search, navigate, store, handleAccessError, retry]);
+  }, [initializing, userId, rolesKey, studentsKey, session?.authenticated, session?.user?.mustChangePassword, desiredRoute, location.pathname, location.search, navigate, store, loadWorkspace, handleAccessError, retry]);
 
   useEffect(() => {
     if (!session?.authenticated || session.user?.mustChangePassword || !committedRoute || !rolesKey.split(",").includes(committedRoute.role) ||
@@ -116,7 +133,7 @@ export function useWorkspaceController() {
       const ticket = epoch.current;
       // 会话失效后清空快照；迟到的窗口事件不得重新启动已退出的读取。
       if (!store.getSnapshot().data) return;
-      void store.load([...pageSections(committedRoute), "notifications"], { revalidate: true }).then(() => {
+      void loadWorkspace([...pageSections(committedRoute), "notifications"], { revalidate: true }).then(() => {
         if (active && ticket === epoch.current) setRefreshError("");
       }).catch((reason) => {
         if (ticket !== epoch.current) return;
@@ -127,7 +144,7 @@ export function useWorkspaceController() {
       });
     });
     return () => { active = false; stop(); };
-  }, [session?.authenticated, session?.user?.mustChangePassword, rolesKey, committedRoute, desiredRoute, store, handleAccessError]);
+  }, [session?.authenticated, session?.user?.mustChangePassword, rolesKey, committedRoute, desiredRoute, store, loadWorkspace, handleAccessError]);
 
   const refresh = useCallback(async (studentId?: string) => {
     const route = committed.current;
@@ -135,16 +152,17 @@ export function useWorkspaceController() {
     try {
       // 独立上传、设置等入口可能改变其他已缓存分组；只读取当前页，其余留待访问时更新。
       store.invalidate(store.loaded());
-      await store.load(sections, { force: true, studentId });
+      await loadWorkspace(sections, { force: true, studentId });
+      if (!store.ready(sections)) throw new Error("数据正在更新，请重新读取页面。");
       setRefreshError("");
     } catch (reason) { handleAccessError(reason); throw reason; }
-  }, [store, handleAccessError]);
+  }, [store, loadWorkspace, handleAccessError]);
 
   const act = useCallback(async (action: string, payload: Record<string, unknown> = {}) => {
     const ticket = epoch.current;
     let result: Record<string, unknown>;
     try { result = await postJson<Record<string, unknown>>("/api/v1/workspace/actions", { action, ...payload }); }
-    catch (reason) { handleAccessError(reason); throw reason; }
+    catch (reason) { if (ticket === epoch.current) handleAccessError(reason); throw reason; }
     if (ticket !== epoch.current) return result;
     const changed = [...sectionsChangedByAction(action)];
     if (action !== "mark_notification" && action !== "suggest_intervention") changed.push("audits");
@@ -153,14 +171,16 @@ export function useWorkspaceController() {
     const visible = current ? [...pageSections(current), "notifications" as const] : [];
     try {
       const affected = visible.filter((section) => changed.includes(section));
-      if (affected.length) await store.load(affected);
-      setRefreshError("");
+      if (affected.length) await loadWorkspace(affected, {}, visible);
+      if (ticket === epoch.current) setRefreshError("");
     } catch (reason) {
-      handleAccessError(reason);
-      setRefreshError(`操作已保存，读取最新数据失败：${errorMessage(reason)}。无需重复提交。`);
+      if (ticket === epoch.current) {
+        handleAccessError(reason);
+        setRefreshError(`操作已保存，读取最新数据失败：${errorMessage(reason)}。无需重复提交。`);
+      }
     }
     return result;
-  }, [store, handleAccessError]);
+  }, [store, loadWorkspace, handleAccessError]);
 
   const logout = useCallback(async () => {
     await postJson("/api/v1/auth/logout", {});

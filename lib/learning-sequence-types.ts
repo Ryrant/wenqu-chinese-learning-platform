@@ -10,13 +10,14 @@ export function submissionHelpLevel(familyHelp: string | null, reviewHelp?: Help
 }
 export const TEACHING_DECISION_LABELS = { practice: "继续练习", fade_support: "减少提示", challenge: "进阶挑战", collect_evidence: "补充证据" } as const;
 export type TeachingDecisionKind = keyof typeof TEACHING_DECISION_LABELS;
-export type ReviewEvidence = { version: 1; rubric: RubricDimension[]; objectives: Array<{ id: string; title: string }>; helpLevel: HelpLevel; contextConfirmed: boolean; promptCount?: number | null };
+export type ReviewEvidence = { version: 1; rubric: RubricDimension[]; objectives: Array<{ id: string; title: string }>; helpLevel: HelpLevel; contextConfirmed: boolean; promptCount?: number | null; analyticsAllowed?: boolean | 0 | 1 };
 export type SequenceWorkSnapshot = { version: 1; sequenceId: string; stage: SequenceStage; title: string; prompt: string; context: string; objectiveId: string; objectiveTitle: string; rubric: RubricDimension[]; medium: "text" | "audio"; availableAt?: string; referenceSubmissionId?: string };
 export type SequenceEvidence = {
   id: string; title: string; prompt: string; mediaId: string | null; textAnswer: string | null; hasAudio: boolean;
   submittedAt: string; reviewedAt: string | null; reviewed: boolean; score: number | null; feedback: string;
   objectives: Array<{ id: string; title: string; score: number }>; dimensions: Array<{ name: string; score: number }>;
   rubric: RubricDimension[] | null; helpLevel: HelpLevel; contextConfirmed: boolean; promptCount: number | null;
+  analyticsAllowed?: boolean | 0 | 1;
 };
 export type SequenceSource = { studentUserId: string; studentName: string; assignmentId: string; assignmentStatus: string; referenceRubric: RubricDimension[]; work: SequenceEvidence };
 export type TeachingDecision = { id: string; reference: SequenceEvidence; kind: TeachingDecisionKind; rationale: string; remaining: string; nextSequenceId: string; nextTitle: string; teacherName: string; createdAt: string };

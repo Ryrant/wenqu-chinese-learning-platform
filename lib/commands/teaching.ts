@@ -1,15 +1,14 @@
 import { validateRubric } from "../learning-loop";
 import { setClassEnrollments } from "../learning-loop-service";
 import { assertDiagnosticMedia } from "../diagnostic-media";
-import { text, requireText, auditStatement, type WorkspaceActionHandler } from "./shared";
+import { text, requireText, requireStringArray, auditStatement, type WorkspaceActionHandler } from "./shared";
 import type { WorkspaceActionName } from "../workspace-actions";
 
 export const teachingCommands = {
   set_class_enrollments: async (body, context) => {
     const { db } = context;
-    const studentUserIds = Array.isArray(body.studentUserIds) ? body.studentUserIds.map((value) => text(value, 120)).filter(Boolean) : [];
-    if (body.expectedStudentUserIds !== undefined && !Array.isArray(body.expectedStudentUserIds)) throw new Error("invalid_expected_student_ids");
-    const expectedStudentUserIds = Array.isArray(body.expectedStudentUserIds) ? body.expectedStudentUserIds.map((value) => text(value, 120)).filter(Boolean) : undefined;
+    const studentUserIds = requireStringArray(body.studentUserIds, "student_ids");
+    const expectedStudentUserIds = body.expectedStudentUserIds === undefined ? undefined : requireStringArray(body.expectedStudentUserIds, "expected_student_ids");
     const result = await setClassEnrollments(db, context, { classId: requireText(body.classId, "class_id", 120), studentUserIds, expectedStudentUserIds });
     return Response.json(result);
   },

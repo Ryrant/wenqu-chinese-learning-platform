@@ -7,6 +7,7 @@ import type { PlatformContext } from "./platform-store";
 import { WORKSPACE_SECTIONS, type Row, type WorkspacePatch, type WorkspaceSection } from "./platform-types";
 import { readSequenceWorkspace } from "./learning-sequence-service";
 import { readTrialEntries } from "./trial-service";
+import { learningAnalyticsConsentSql, readLearningAnalyticsState } from "./learning-analytics";
 
 const empty = { results: [] as Row[] };
 
@@ -31,7 +32,7 @@ async function qualityMetrics(db: PlatformDatabase, tenantId: string) {
     db.prepare(`WITH latest AS (
       SELECT student_user_id,objective_id,mastery,
         ROW_NUMBER() OVER (PARTITION BY student_user_id,objective_id ORDER BY id DESC) AS rn
-      FROM mastery_snapshots WHERE tenant_id=?
+      FROM mastery_snapshots WHERE tenant_id=? AND ${learningAnalyticsConsentSql("mastery_snapshots.tenant_id", "mastery_snapshots.student_user_id")}
     ) SELECT COUNT(*) AS count FROM latest
       JOIN learning_objectives lo ON lo.tenant_id=? AND lo.id=latest.objective_id AND lo.status='active'
       JOIN role_memberships rm ON rm.tenant_id=? AND rm.user_id=latest.student_user_id
@@ -42,24 +43,16 @@ async function qualityMetrics(db: PlatformDatabase, tenantId: string) {
       .bind(tenantId, tenantId, tenantId, tenantId).first<{ count: number }>(),
     db.prepare(`WITH latest AS (
       SELECT id,ROW_NUMBER() OVER (PARTITION BY student_user_id,objective_id ORDER BY id DESC) AS rn
-      FROM mastery_snapshots WHERE tenant_id=?
+      FROM mastery_snapshots WHERE tenant_id=? AND ${learningAnalyticsConsentSql("mastery_snapshots.tenant_id", "mastery_snapshots.student_user_id")}
     ) SELECT COUNT(*) AS count FROM latest WHERE rn=1`).bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM source_documents WHERE tenant_id=? AND archived_at IS NULL AND processing_status IN ('uploaded','processed')").bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM source_documents WHERE tenant_id=? AND archived_at IS NULL").bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(*) AS count FROM ai_sessions WHERE tenant_id=? AND created_at>=datetime('now','-7 days')").bind(tenantId).first<{ count: number }>(),
     db.prepare("SELECT COUNT(DISTINCT user_id) AS count FROM role_memberships WHERE tenant_id=? AND role='student' AND status='active'").bind(tenantId).first<{ count: number }>(),
-    db.prepare(`WITH latest AS (
-      SELECT cr.student_user_id,cr.status,cr.expires_at,
-        ROW_NUMBER() OVER (PARTITION BY cr.student_user_id,cr.scope ORDER BY cr.created_at DESC,cr.id DESC) AS rn
-      FROM consent_records cr
-      WHERE cr.tenant_id=? AND cr.scope='learning_analytics'
-    ) SELECT COUNT(DISTINCT latest.student_user_id) AS count
-      FROM latest
-      JOIN role_memberships rm ON rm.tenant_id=? AND rm.user_id=latest.student_user_id
-        AND rm.role='student' AND rm.status='active'
-      WHERE latest.rn=1 AND latest.status='granted'
-        AND (latest.expires_at IS NULL OR latest.expires_at>CURRENT_TIMESTAMP)`)
-      .bind(tenantId, tenantId).first<{ count: number }>(),
+    db.prepare(`SELECT COUNT(DISTINCT rm.user_id) AS count FROM role_memberships rm
+      WHERE rm.tenant_id=? AND rm.role='student' AND rm.status='active'
+        AND ${learningAnalyticsConsentSql("rm.tenant_id", "rm.user_id")}`)
+      .bind(tenantId).first<{ count: number }>(),
     db.prepare(`SELECT a.id,a.title AS label,'未关联学习目标' AS meta FROM assignments a
       WHERE a.tenant_id=? AND a.status='published' AND NOT EXISTS (
         SELECT 1 FROM assignment_objectives ao WHERE ao.tenant_id=a.tenant_id AND ao.assignment_id=a.id
@@ -70,7 +63,7 @@ async function qualityMetrics(db: PlatformDatabase, tenantId: string) {
       ORDER BY s.created_at DESC LIMIT 5`).bind(tenantId).all(),
     db.prepare(`WITH latest AS (
       SELECT ms.*,ROW_NUMBER() OVER (PARTITION BY ms.student_user_id,ms.objective_id ORDER BY ms.id DESC) AS rn
-      FROM mastery_snapshots ms WHERE ms.tenant_id=?
+      FROM mastery_snapshots ms WHERE ms.tenant_id=? AND ${learningAnalyticsConsentSql("ms.tenant_id", "ms.student_user_id")}
     ) SELECT CAST(latest.id AS TEXT) AS id,COALESCE(u.display_name,'学生')||' · '||lo.title AS label,
       ROUND(latest.mastery*100)||'%' AS meta FROM latest JOIN users u ON u.id=latest.student_user_id
       JOIN learning_objectives lo ON lo.id=latest.objective_id AND lo.tenant_id=?
@@ -99,7 +92,7 @@ async function qualityMetrics(db: PlatformDatabase, tenantId: string) {
   return {
     objectiveCoverage: metric("目标覆盖率", coveredCount, publishedAssignments, "percent", "已发布任务关联目标", uncoveredDetails.results),
     pendingReviews: metric("待批阅作业", Number(reviews?.count ?? 0), Number(submissions?.count ?? 0), "count", "等待教师评价的提交", reviewDetails.results),
-    lowMasteryObjectives: metric("低掌握度目标", Number(weak?.count ?? 0), Number(masteryTotal?.count ?? 0), "count", "最新快照低于 60%", weakDetails.results),
+    lowMasteryObjectives: { ...metric("低掌握度目标", Number(weak?.count ?? 0), Number(masteryTotal?.count ?? 0), "count", consentCount ? "仅统计有效授权学生，最新快照低于 60%" : "无有效学习分析授权，累计分析暂不可用", weakDetails.results), available: consentCount > 0 },
     pendingContent: metric("内容待审核", Number(content?.count ?? 0), Number(documents?.count ?? 0), "count", "未发布且未归档内容", contentDetails.results),
     consentCoverage: metric("授权覆盖", consentCount, activeStudents, "percent", "学习分析有效授权", []),
     aiSessions7d: metric("AI 使用情况", Number(ai?.count ?? 0), 7, "count", "最近 7 天会话", aiDetails.results),
@@ -215,6 +208,7 @@ async function readCurriculum(context: PlatformContext, objectives: () => Promis
 
 async function readProgress(context: PlatformContext, focusStudentId: string, selectedStudentId: string | null, objectives: () => Promise<Row[]>) {
   const { db, tenantId, userId, roles } = context;
+  const analytics = await readLearningAnalyticsState(db, tenantId, focusStudentId);
   const admin = roles.includes("admin");
   const teacher = roles.includes("teacher");
   const submissionAccess = submissionAccessClause(context, "s", "c");
@@ -237,10 +231,14 @@ async function readProgress(context: PlatformContext, focusStudentId: string, se
   const weeklyStatsQuery = db.prepare(`SELECT
     SUM(CASE WHEN created_at>=datetime('now','-7 days') THEN 1 ELSE 0 END) AS submittedCount,
     SUM(CASE WHEN review_status='reviewed'
+      AND COALESCE((SELECT json_extract(sr.evidence_json,'$.analyticsAllowed') FROM submission_reviews sr WHERE sr.tenant_id=submissions.tenant_id AND sr.submission_id=submissions.id AND sr.status='confirmed' ORDER BY sr.rowid DESC LIMIT 1),1)=1
       AND COALESCE(reviewed_at,created_at)>=datetime('now','-7 days') THEN 1 ELSE 0 END) AS reviewedCount,
     AVG(CASE WHEN review_status='reviewed'
+      AND COALESCE((SELECT json_extract(sr.evidence_json,'$.analyticsAllowed') FROM submission_reviews sr WHERE sr.tenant_id=submissions.tenant_id AND sr.submission_id=submissions.id AND sr.status='confirmed' ORDER BY sr.rowid DESC LIMIT 1),1)=1
       AND COALESCE(reviewed_at,created_at)>=datetime('now','-7 days') THEN score END) AS averageScore
-    FROM submissions WHERE tenant_id=? AND student_user_id=?`)
+    FROM submissions WHERE tenant_id=? AND student_user_id=?
+      AND COALESCE(json_extract(diagnostic_snapshot_json,'$.analyticsAllowed'),1)=1
+      AND ${learningAnalyticsConsentSql("submissions.tenant_id", "submissions.student_user_id")}`)
     .bind(tenantId, focusStudentId);
   const submissionReviewsQuery = (admin || teacher)
     ? db.prepare(`SELECT sr.* FROM submission_reviews sr
@@ -253,6 +251,7 @@ async function readProgress(context: PlatformContext, focusStudentId: string, se
   const masteryQuery = db.prepare(`WITH ranked AS (
     SELECT ms.*,ROW_NUMBER() OVER (PARTITION BY ms.student_user_id,ms.objective_id ORDER BY ms.id DESC) AS rn
     FROM mastery_snapshots ms WHERE ms.tenant_id=? AND ms.student_user_id=?
+      AND ${learningAnalyticsConsentSql("ms.tenant_id", "ms.student_user_id")}
   ) SELECT r.student_user_id AS studentUserId,r.objective_id AS objectiveId,lo.title,lo.skill,
     r.mastery,r.evidence_count AS evidenceCount,r.created_at AS measuredAt
     FROM ranked r JOIN learning_objectives lo ON lo.id=r.objective_id AND lo.tenant_id=?
@@ -261,7 +260,7 @@ async function readProgress(context: PlatformContext, focusStudentId: string, se
   const masteryMatrixQuery = (admin || teacher)
     ? db.prepare(`WITH ranked AS (
         SELECT ms.*,ROW_NUMBER() OVER (PARTITION BY ms.student_user_id,ms.objective_id ORDER BY ms.id DESC) AS rn
-        FROM mastery_snapshots ms WHERE ms.tenant_id=?
+        FROM mastery_snapshots ms WHERE ms.tenant_id=? AND ${learningAnalyticsConsentSql("ms.tenant_id", "ms.student_user_id")}
       ) SELECT r.student_user_id AS studentUserId,u.display_name AS studentName,r.objective_id AS objectiveId,
         lo.title,lo.skill,r.mastery,r.evidence_count AS evidenceCount
         FROM ranked r JOIN users u ON u.id=r.student_user_id
@@ -294,9 +293,12 @@ async function readProgress(context: PlatformContext, focusStudentId: string, se
     ? Math.round(mastery.results.reduce((sum, item) => sum + Number(item.mastery ?? 0), 0) / mastery.results.length * 100)
     : null;
   const weeklyReport = {
-    submittedCount: Number(weeklyStats?.submittedCount ?? 0), reviewedCount: Number(weeklyStats?.reviewedCount ?? 0),
-    averageScore: weeklyStats?.averageScore === null || weeklyStats?.averageScore === undefined ? null : Math.round(Number(weeklyStats.averageScore)),
-    masteryAverage, pendingRecommendations: recommendations.results.filter((item) => item.status === "pending").length,
+    ...analytics,
+    submittedCount: analytics.available ? Number(weeklyStats?.submittedCount ?? 0) : null,
+    reviewedCount: analytics.available ? Number(weeklyStats?.reviewedCount ?? 0) : null,
+    averageScore: !analytics.available || weeklyStats?.averageScore === null || weeklyStats?.averageScore === undefined ? null : Math.round(Number(weeklyStats.averageScore)),
+    masteryAverage: analytics.available ? masteryAverage : null,
+    pendingRecommendations: analytics.available ? recommendations.results.filter((item) => item.status === "pending").length : null,
   };
   const learningPlan = await readLearningPlan(context, selectedStudentId, sequenceWorkspace.learningSequences, learningObjectives);
   return {

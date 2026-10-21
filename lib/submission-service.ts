@@ -3,6 +3,7 @@ import type { PlatformContext } from "./platform-store";
 import type { DiagnosticMode, WorkDiagnosticSnapshot } from "./diagnostic-types";
 import { exchangePartner, FAMILY_EXCHANGE_RUBRIC, readFamilyPlan, readFamilyWorkSnapshot, type FamilyWorkSnapshot } from "./family-task";
 import { assertSequenceTarget } from "./learning-sequence-service";
+import { learningAnalyticsConsentSql } from "./learning-analytics";
 
 export type SubmissionTargetInput = { assignmentId: string; familyTaskId?: string | null; familyPartner?: string; familyRevision?: number; sequenceId?: string | null; sequenceStage?: string };
 export async function assertSubmissionTarget(db: PlatformDatabase, context: PlatformContext, input: SubmissionTargetInput) {
@@ -86,12 +87,14 @@ export async function createStudentSubmission(db: PlatformDatabase, context: Pla
   try {
     const results = await db.batch([
       db.prepare(`INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,text_answer,asset_key,family_task_id,diagnostic_snapshot_json,family_snapshot_json,sequence_id,sequence_stage,sequence_snapshot_json,confidence,review_status)
-        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,0,'human_review'
+        SELECT ?,?,?,?,?,?,?,json_set(?,'$.analyticsAllowed',${learningAnalyticsConsentSql("subject.tenant_id", "subject.student_user_id")}),?,?,?,?,0,'human_review'
+        FROM (SELECT ? AS tenant_id,? AS student_user_id) subject
         WHERE ? IS NULL OR EXISTS (SELECT 1 FROM learning_recommendations lr
           WHERE lr.id=? AND lr.tenant_id=? AND lr.student_user_id=? AND lr.assignment_id=?
             AND lr.source_type='family' AND lr.status='pending' AND lr.archived_at IS NULL AND lr.family_plan_json=?)`)
         .bind(id, context.tenantId, input.assignmentId, context.userId, answer, input.assetKey ?? null, input.familyTaskId || null, snapshot ? JSON.stringify(snapshot) : "{}", assignment.familySnapshot ? JSON.stringify(assignment.familySnapshot) : "{}",
           assignment.sequenceSnapshot?.sequenceId ?? null, assignment.sequenceSnapshot?.stage ?? null, assignment.sequenceSnapshot ? JSON.stringify(assignment.sequenceSnapshot) : "{}",
+          context.tenantId, context.userId,
           input.familyTaskId || null, input.familyTaskId || null, context.tenantId, context.userId, input.assignmentId, assignment.familyPlanJson),
       db.prepare(`INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json)
         SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM submissions WHERE id=? AND tenant_id=?)`)

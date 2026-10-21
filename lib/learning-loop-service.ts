@@ -7,13 +7,23 @@ import { suggestIntervention } from "./intervention-support";
 import { createFamilyPlan, exchangePartner, readFamilyPlan, readFamilyWorkSnapshot } from "./family-task";
 import { assertSubmissionReviewAccess } from "./access-control";
 import { auditStatement } from "./audit";
+import { learningAnalyticsConsentSql, learningAnalyticsSubmissionSql } from "./learning-analytics";
 
 type DiagnosticAnswerInput = { itemId: string; selectedOption: number; revision: number };
 type RecommendationSource = "diagnostic" | "teacher" | "family" | "system";
 
 const tomorrowIso = () => new Date(Date.now() + 86400000).toISOString();
 
+async function assertTenantStudent(db: PlatformDatabase, context: PlatformContext, studentUserId: string) {
+  // 管理员可跨班管理本机构学生，但不能把其他机构或任意账号当作学生；停用角色仍可回看历史证据。
+  const student = await db.prepare(`SELECT 1 FROM users u JOIN role_memberships rm ON rm.user_id=u.id
+    WHERE u.id=? AND rm.tenant_id=? AND rm.role='student' LIMIT 1`)
+    .bind(studentUserId, context.tenantId).first();
+  if (!student) throw new Error("forbidden");
+}
+
 export async function assertGuardianStudentAccess(db: PlatformDatabase, context: PlatformContext, studentUserId: string) {
+  await assertTenantStudent(db, context, studentUserId);
   if (context.roles.includes("admin")) return;
   const link = await db.prepare(`SELECT id FROM guardian_student_links
     WHERE tenant_id=? AND guardian_user_id=? AND student_user_id=? AND status='active'`)
@@ -23,6 +33,7 @@ export async function assertGuardianStudentAccess(db: PlatformDatabase, context:
 }
 
 export async function assertTeacherStudentAccess(db: PlatformDatabase, context: PlatformContext, studentUserId: string) {
+  await assertTenantStudent(db, context, studentUserId);
   if (context.roles.includes("admin")) return;
   const enrollment = await db.prepare(`SELECT e.id FROM enrollments e
     JOIN classes c ON c.id=e.class_id AND c.tenant_id=e.tenant_id
@@ -39,6 +50,7 @@ export function prepareMasteryEvidenceInsert(db: PlatformDatabase, input: {
   score: number;
   evidenceCount?: number;
   onlyIfChanged?: boolean;
+  sourceSubmissionId?: string;
 }) {
   const score = Math.max(0, Math.min(1, input.score));
   const evidenceCount = Math.max(1, input.evidenceCount ?? 1);
@@ -47,16 +59,19 @@ export function prepareMasteryEvidenceInsert(db: PlatformDatabase, input: {
     SELECT ?,?,?,
       CASE WHEN latest.id IS NULL THEN ? ELSE ROUND(latest.mastery*0.7 + ?*0.3,4) END,
       COALESCE(latest.evidence_count,0)+?
-    FROM (SELECT 1) seed
+    FROM (SELECT ? AS tenant_id,? AS student_user_id) seed
     LEFT JOIN (
       SELECT id,mastery,evidence_count FROM mastery_snapshots
       WHERE tenant_id=? AND student_user_id=? AND objective_id=?
       ORDER BY id DESC LIMIT 1
-    ) latest ON 1=1${input.onlyIfChanged ? " WHERE changes()>0" : ""}`)
+    ) latest ON 1=1 WHERE ${input.onlyIfChanged ? "changes()>0 AND " : ""}${learningAnalyticsConsentSql("seed.tenant_id", "seed.student_user_id")}
+      ${input.sourceSubmissionId === undefined ? "" : `AND ${learningAnalyticsSubmissionSql("seed.tenant_id", "seed.student_user_id", "?")}`}`)
     .bind(
       input.tenantId, input.studentUserId, input.objectiveId,
       score, score, evidenceCount,
+      input.tenantId, input.studentUserId,
       input.tenantId, input.studentUserId, input.objectiveId,
+      ...(input.sourceSubmissionId === undefined ? [] : [input.sourceSubmissionId]),
     );
 }
 
@@ -116,7 +131,9 @@ export async function submitDiagnostic(db: PlatformDatabase, context: PlatformCo
         const snapshot: ChoiceSnapshot = { version: 1, revision: item.revision, ability: item.ability, objectiveId: item.objectiveId, objectiveTitle: item.objectiveTitle,
           prompt: item.prompt, options: JSON.parse(item.optionsJson), correctOption: Number(item.correctOption), mediaId: item.mediaId };
         return db.prepare(`INSERT INTO diagnostic_answers (id,tenant_id,attempt_id,item_id,selected_option,is_correct,evidence_json)
-          VALUES (?,?,?,?,?,?,?)`).bind(crypto.randomUUID(), context.tenantId, attemptId, item.id, selectedOption, selectedOption === Number(item.correctOption) ? 1 : 0, JSON.stringify(snapshot));
+          SELECT ?,?,?,?,?,?,json_set(?, '$.analyticsAllowed',${learningAnalyticsConsentSql("subject.tenant_id", "subject.student_user_id")})
+          FROM (SELECT ? AS tenant_id,? AS student_user_id) subject`)
+          .bind(crypto.randomUUID(), context.tenantId, attemptId, item.id, selectedOption, selectedOption === Number(item.correctOption) ? 1 : 0, JSON.stringify(snapshot), context.tenantId, context.userId);
       }),
       ...Object.entries(objectiveScores).map(([objectiveId, result]) => prepareMasteryEvidenceInsert(db, {
         tenantId: context.tenantId,
@@ -163,9 +180,9 @@ export async function answerReviewItem(db: PlatformDatabase, context: PlatformCo
       AND EXISTS (SELECT 1 FROM diagnostic_items di WHERE di.id=? AND di.tenant_id=learning_recommendations.tenant_id
         AND di.revision=? AND di.objective_id=learning_recommendations.objective_id)`)
       .bind(correct ? "completed" : "pending", nextDueAt, correct ? 1 : 0, row.id, context.tenantId, context.userId, row.dueAt, row.itemId, row.revision),
-    // 必须紧邻条件更新；未成功答题时不能产生掌握度证据或成功审计。
-    prepareMasteryEvidenceInsert(db, { tenantId: context.tenantId, studentUserId: context.userId, objectiveId: row.objectiveId, score: correct ? 1 : 0, onlyIfChanged: true }),
+    // 审计紧邻条件更新；未授权可保存本次答题，但不生成累计掌握度。
     auditStatement(db, context.tenantId, context.userId, "review_item.answered", "learning_recommendation", row.id, { correct }, true),
+    prepareMasteryEvidenceInsert(db, { tenantId: context.tenantId, studentUserId: context.userId, objectiveId: row.objectiveId, score: correct ? 1 : 0, onlyIfChanged: true }),
   ]);
   if (!updated.meta.changes) throw new Error("review_item_changed");
   return { id: row.id, correct, status: correct ? "completed" : "pending", dueAt: nextDueAt };

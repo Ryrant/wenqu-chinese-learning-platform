@@ -29,6 +29,7 @@ async function fixture(t) {
     db.prepare("INSERT INTO classes(id,tenant_id,name,level,teacher_user_id,academic_year) VALUES ('class','school','测试班','A2','teacher','2026')"),
     db.prepare("INSERT INTO enrollments(tenant_id,class_id,student_user_id) VALUES ('school','class','student')"),
     db.prepare("INSERT INTO guardian_student_links(tenant_id,guardian_user_id,student_user_id,status) VALUES ('school','guardian','student','active')"),
+    db.prepare("INSERT INTO consent_records(id,tenant_id,student_user_id,guardian_user_id,scope,status) VALUES ('analytics','school','student','guardian','learning_analytics','granted')"),
     db.prepare("INSERT INTO learning_objectives(id,tenant_id,code,title,skill,level) VALUES ('goal','school','A2-1','阅读目标','阅读','A2')"),
     db.prepare("INSERT INTO assignments(id,tenant_id,class_id,title,activity_type,status,rubric_json,created_by) VALUES ('task','school','class','阅读任务','文字','published',?,'teacher')").bind(JSON.stringify(rubric)),
     db.prepare("INSERT INTO assignment_objectives(tenant_id,assignment_id,objective_id) VALUES ('school','task','goal')"),

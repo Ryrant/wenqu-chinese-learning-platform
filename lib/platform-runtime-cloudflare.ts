@@ -19,6 +19,7 @@ function wrapObject(object: Awaited<ReturnType<R2Bucket["get"]>>): PlatformStore
 function createStorage(bucket: R2Bucket): PlatformStorage {
   return {
     put: (key, body, options) => bucket.put(key, body, options),
+    delete: (key) => bucket.delete(key),
     async get(key) {
       return wrapObject(await bucket.get(key));
     },

@@ -70,6 +70,8 @@ async function fixture(t) {
   await db.prepare("INSERT INTO tenants (id,name) VALUES ('other-tenant','另一学校')").run();
   await db.prepare("UPDATE role_memberships SET tenant_id='other-tenant' WHERE user_id=?").bind(ids.otherTenant).run();
   await act(admin, "set_guardian_links", { guardianUserId: ids.guardian, studentUserIds: [ids.student] });
+  await act(actors.guardian, "update_consent", { studentUserId: ids.student, scope: "learning_analytics", status: "granted" });
+  await act(admin, "update_consent", { studentUserId: ids.stranger, scope: "learning_analytics", status: "granted" });
   const classroom = await act(actors.teacher, "create_class", { name: "测试班级", level: "A2" }, 201);
   await act(admin, "set_class_enrollments", { classId: classroom.id, studentUserIds: [ids.student, ids.stranger] });
   const goals = [];

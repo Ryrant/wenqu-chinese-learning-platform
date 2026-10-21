@@ -17,6 +17,7 @@ type R2ObjectBody = {
   text(): Promise<string>;
 };
 type R2Bucket = {
+  delete(key: string): Promise<void>;
   put(key: string, value: ReadableStream | ArrayBuffer | string, options?: unknown): Promise<unknown>;
   get(key: string): Promise<R2ObjectBody | null>;
 };

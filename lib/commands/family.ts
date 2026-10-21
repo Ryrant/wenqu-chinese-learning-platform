@@ -1,6 +1,7 @@
 import { archiveFamilyTask, assertGuardianStudentAccess, createFamilyTask, confirmFamilySubmission, updateFamilyTask } from "../learning-loop-service";
 import { text, requireText, auditStatement, type WorkspaceActionHandler } from "./shared";
 import type { WorkspaceActionName } from "../workspace-actions";
+import { LEARNING_ANALYTICS_SCOPE } from "../learning-analytics";
 
 const confirmFamilySubmissionCommand: WorkspaceActionHandler = async (body, context, action) => {
   const { db } = context;
@@ -56,12 +57,14 @@ export const familyCommands = {
   update_consent: async (body, context) => {
     const { db, tenantId, userId } = context;
     const scope = requireText(body.scope, "scope", 80);
-    const status = body.status === "withdrawn" ? "withdrawn" : "granted";
+    if (scope !== LEARNING_ANALYTICS_SCOPE) throw new Error("invalid_consent_scope");
+    const status = body.status;
+    if (status !== "withdrawn" && status !== "granted") throw new Error("invalid_consent_status");
     const studentUserId = requireText(body.studentUserId, "student_user_id", 120);
     await assertGuardianStudentAccess(db, context, studentUserId);
     const id = `${tenantId}-consent-${studentUserId}-${scope.replace(/[^a-z0-9_-]/gi, "-")}`;
     await db.batch([
-      db.prepare(`INSERT INTO consent_records (id,tenant_id,student_user_id,guardian_user_id,scope,status) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET guardian_user_id=excluded.guardian_user_id,status=excluded.status,created_at=CURRENT_TIMESTAMP`).bind(id, tenantId, studentUserId, userId, scope, status),
+      db.prepare(`INSERT INTO consent_records (id,tenant_id,student_user_id,guardian_user_id,scope,status) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET guardian_user_id=excluded.guardian_user_id,status=excluded.status,expires_at=NULL,created_at=CURRENT_TIMESTAMP`).bind(id, tenantId, studentUserId, userId, scope, status),
       auditStatement(db, tenantId, userId, "consent.updated", "consent", id, { studentUserId, scope, status }),
     ]);
     return Response.json({ id, studentUserId, scope, status });

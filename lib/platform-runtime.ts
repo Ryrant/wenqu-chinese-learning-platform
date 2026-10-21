@@ -40,6 +40,7 @@ export type PlatformStoredObject = {
 export interface PlatformStorage {
   put(key: string, body: ReadableStream, options?: StoragePutOptions): Promise<unknown>;
   get(key: string): Promise<PlatformStoredObject | null>;
+  delete(key: string): Promise<unknown>;
 }
 
 export type PlatformRuntime = {

@@ -19,6 +19,7 @@ export async function readLearningPlan(context: PlatformContext, studentId: stri
     if (error instanceof Error && error.message === "ability_profile_not_found") return [];
     throw error;
   }
+  if (profile.available === false) return [];
   const { db, tenantId } = context;
   const [assignments, recommendations] = await Promise.all([
     db.prepare(`SELECT a.*,group_concat(DISTINCT ao.objective_id) AS objectiveIds,

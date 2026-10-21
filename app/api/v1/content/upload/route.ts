@@ -1,8 +1,7 @@
-import { chunkText, extractText } from "../../../../../lib/content-processing";
+import { chunkText, contentProcessingError, extractText, type ExtractedText } from "../../../../../lib/content-processing";
 import { ensurePlatformRuntime } from "../../../../../lib/platform-runtime";
 import { platformApiError, platformContext } from "../../../../../lib/platform-store";
-
-const processingErrors = new Set(["empty_text", "unsupported_scanned_pdf", "docx_document_missing", "unsupported_file_type"]);
+import { discardFailedUpload } from "../../../../../lib/upload-cleanup";
 
 export async function POST(request: Request) {
   try {
@@ -18,9 +17,20 @@ export async function POST(request: Request) {
     const objectKey = `${context.tenantId}/sources/${id}/${safeName}`;
     const storage = (await ensurePlatformRuntime()).storage;
     if (!storage) return Response.json({ error: "storage_unavailable" }, { status: 503 });
-    await storage.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { tenantId: context.tenantId, uploadedBy: context.userId } });
     try {
-      const extracted = await extractText(file);
+      await storage.put(objectKey, file.stream(), { httpMetadata: { contentType: file.type }, customMetadata: { tenantId: context.tenantId, uploadedBy: context.userId } });
+      let extracted: ExtractedText;
+      try {
+        extracted = await extractText(file);
+      } catch (error) {
+        const message = contentProcessingError(error);
+        if (!message) throw error;
+        await context.db.batch([
+          context.db.prepare("INSERT INTO source_documents (id,tenant_id,title,object_key,media_type,rights_status,processing_status,processing_error,version,created_by) VALUES (?,?,?,?,?,?, 'failed',?,1,?)").bind(id, context.tenantId, file.name.slice(0, 200), objectKey, file.type, rightsStatus, message, context.userId),
+          context.db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), context.tenantId, context.userId, "source.uploaded", "source_document", id, JSON.stringify({ fileName: safeName, size: file.size, rightsStatus, error: message })),
+        ]);
+        return Response.json({ id, status: "failed", error: message }, { status: 201 });
+      }
       const chunks = chunkText({ tenantId: context.tenantId, sourceDocumentId: id, text: extracted.text });
       await context.db.batch([
         context.db.prepare("INSERT INTO source_documents (id,tenant_id,title,object_key,media_type,rights_status,processing_status,version,created_by) VALUES (?,?,?,?,?,?, 'processed',1,?)").bind(id, context.tenantId, file.name.slice(0, 200), objectKey, file.type, rightsStatus, context.userId),
@@ -29,12 +39,8 @@ export async function POST(request: Request) {
       ]);
       return Response.json({ id, status: "processed", next: "rights_review" }, { status: 201 });
     } catch (error) {
-      const message = error instanceof Error && processingErrors.has(error.message) ? error.message : "unsupported_file_type";
-      await context.db.batch([
-        context.db.prepare("INSERT INTO source_documents (id,tenant_id,title,object_key,media_type,rights_status,processing_status,processing_error,version,created_by) VALUES (?,?,?,?,?,?, 'failed',?,1,?)").bind(id, context.tenantId, file.name.slice(0, 200), objectKey, file.type, rightsStatus, message, context.userId),
-        context.db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)").bind(crypto.randomUUID(), context.tenantId, context.userId, "source.uploaded", "source_document", id, JSON.stringify({ fileName: safeName, size: file.size, rightsStatus, error: message })),
-      ]);
-      return Response.json({ id, status: "failed", error: message }, { status: 201 });
+      await discardFailedUpload(storage, objectKey, error);
+      throw error;
     }
   } catch (error) { return platformApiError(error); }
 }

@@ -40,6 +40,9 @@ export function workEvidence(row: WorkRow): SequenceEvidence {
   const diagnostic = jsonValue<Partial<WorkDiagnosticSnapshot>>(row.diagnostic_snapshot_json, {});
   const titles = review?.objectives ?? (family ? [{ id: family.objectiveId, title: family.objectiveTitle }] : diagnostic.objectives ?? jsonValue<Array<{ id: string; title: string }>>(row.objectiveTitlesJson, []));
   const scores = row.review_status === "reviewed" ? jsonValue<Array<{ objectiveId: string; score: number }>>(row.objectiveScoresJson, []) : [];
+  // 原件与评价任一明确暂停时都不能重新纳入分析；新评价不能覆盖原件保存时的选择。
+  const analyticsAllowed = [review?.analyticsAllowed, diagnostic.analyticsAllowed].some((value) => value === false || value === 0)
+    ? 0 : review?.analyticsAllowed ?? diagnostic.analyticsAllowed;
   return {
     id: row.id, title: task?.title ?? family?.title ?? diagnostic.title ?? row.assignmentTitle,
     prompt: task?.prompt ?? family?.detail ?? diagnostic.prompt ?? "", mediaId: diagnostic.mediaId ?? null,
@@ -52,5 +55,6 @@ export function workEvidence(row: WorkRow): SequenceEvidence {
     rubric: review?.rubric ?? task?.rubric ?? family?.rubric ?? (diagnostic.version === 1 ? diagnostic.rubric ?? null : null),
     helpLevel: submissionHelpLevel(row.family_help_level, review?.helpLevel),
     contextConfirmed: review?.contextConfirmed ?? false, promptCount: readPromptCount(review?.promptCount),
+    ...(analyticsAllowed === undefined ? {} : { analyticsAllowed }),
   };
 }

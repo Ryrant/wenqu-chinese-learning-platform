@@ -1,6 +1,7 @@
 import { diagnosticMediaKey } from "../../../../lib/diagnostic-media";
 import { ensurePlatformRuntime } from "../../../../lib/platform-runtime";
 import { platformApiError, platformContext } from "../../../../lib/platform-store";
+import { discardFailedUpload } from "../../../../lib/upload-cleanup";
 
 export async function POST(request: Request) {
   try {
@@ -24,11 +25,17 @@ export async function POST(request: Request) {
     const storage = (await ensurePlatformRuntime()).storage;
     if (!storage) return Response.json({ error: "storage_unavailable" }, { status: 503 });
     const id = crypto.randomUUID();
-    await storage.put(diagnosticMediaKey(context.tenantId, id), file.stream(), {
-      httpMetadata: { contentType: file.type }, customMetadata: { tenantId: context.tenantId, createdBy: context.userId, kind },
-    });
-    await context.db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)")
-      .bind(crypto.randomUUID(), context.tenantId, context.userId, "diagnostic_media.created", "diagnostic_media", id, JSON.stringify({ kind })).run();
+    const key = diagnosticMediaKey(context.tenantId, id);
+    try {
+      await storage.put(key, file.stream(), {
+        httpMetadata: { contentType: file.type }, customMetadata: { tenantId: context.tenantId, createdBy: context.userId, kind },
+      });
+      await context.db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)")
+        .bind(crypto.randomUUID(), context.tenantId, context.userId, "diagnostic_media.created", "diagnostic_media", id, JSON.stringify({ kind })).run();
+    } catch (error) {
+      await discardFailedUpload(storage, key, error);
+      throw error;
+    }
     return Response.json({ id }, { status: 201 });
   } catch (error) { return platformApiError(error); }
 }

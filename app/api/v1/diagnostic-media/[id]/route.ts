@@ -1,5 +1,5 @@
 import { classAccessClause, studentAccessClause, submissionAccessClause } from "../../../../../lib/access-control";
-import { diagnosticMediaKey } from "../../../../../lib/diagnostic-media";
+import { diagnosticMediaKey, isDiagnosticMediaCommitted } from "../../../../../lib/diagnostic-media";
 import { ensurePlatformRuntime } from "../../../../../lib/platform-runtime";
 import { platformApiError, platformContext } from "../../../../../lib/platform-store";
 
@@ -8,6 +8,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const context = await platformContext(request);
     const { id } = await params;
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("diagnostic_media_not_found");
+    if (!await isDiagnosticMediaCommitted(context, id)) throw new Error("diagnostic_media_not_found");
     const object = await (await ensurePlatformRuntime()).storage?.get(diagnosticMediaKey(context.tenantId, id));
     if (!object || object.customMetadata.tenantId !== context.tenantId) throw new Error("diagnostic_media_not_found");
     if (!context.roles.includes("admin") && object.customMetadata.createdBy !== context.userId) {

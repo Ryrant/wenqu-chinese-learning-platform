@@ -145,6 +145,11 @@ test("LocalFileStorage writes reads and rejects traversal keys", async () => {
     assert.deepEqual(new Uint8Array(await object.arrayBuffer()), expected);
     await assert.rejects(() => storage.put("../escape.txt", new Blob(["bad"]).stream()), /invalid_storage_key/);
     await assert.rejects(() => storage.get("tenant-a/../../escape.txt"), /invalid_storage_key/);
+    await assert.rejects(() => storage.delete("../escape.txt"), /invalid_storage_key/);
+    await storage.delete("tenant-a/sources/doc-1/story.txt");
+    assert.equal(await storage.get("tenant-a/sources/doc-1/story.txt"), null);
+    await assert.rejects(readFile(path.join(dir, "tenant-a/sources/doc-1/story.txt.meta.json")), { code: "ENOENT" });
+    await storage.delete("tenant-a/sources/doc-1/story.txt");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

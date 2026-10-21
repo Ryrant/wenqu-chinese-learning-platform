@@ -52,7 +52,10 @@ async function fixture(t) {
     const token = await api.createSessionToken({ email: `${userId}@example.test`, displayName: userId, iat: now, exp: now + 3600 }, secret);
     return api.media(new Request(`http://127.0.0.1/api/v1/diagnostic-media/${id}`, { headers: { cookie: `huawen_zhixing_session=${token}` } }), { params: Promise.resolve({ id }) });
   };
-  const addMedia = (id, tenantId = "school") => objects.set(`${tenantId}/diagnostic-media/${id}`, { content: `fixture-${id}`, metadata: { tenantId, kind: "image", createdBy: "teacher" } });
+  const addMedia = async (id, tenantId = "school") => {
+    objects.set(`${tenantId}/diagnostic-media/${id}`, { content: `fixture-${id}`, metadata: { tenantId, kind: "image", createdBy: "teacher" } });
+    await db.prepare("INSERT INTO audit_logs(id,tenant_id,actor_user_id,action,target_type,target_id) VALUES (?,?,'teacher','diagnostic_media.created','diagnostic_media',?)").bind(crypto.randomUUID(), tenantId, id).run();
+  };
   return { db, read, consent, media, addMedia };
 }
 
@@ -74,7 +77,7 @@ test("学生和家长仅接收已发布作业，草稿权限按任教班级判�
 test("退班后拒绝班级新素材，仍允许当前监护人回看孩子已有作品和诊断答案素材", async (t) => {
   const f = await fixture(t);
   const [oldMedia, newMedia, answerMedia] = Array.from({ length: 3 }, () => crypto.randomUUID());
-  for (const id of [oldMedia, newMedia, answerMedia]) f.addMedia(id);
+  for (const id of [oldMedia, newMedia, answerMedia]) await f.addMedia(id);
   await f.db.batch([
     f.db.prepare("UPDATE assignments SET diagnostic_media_id=? WHERE id='class-published'").bind(oldMedia),
     f.db.prepare("INSERT INTO submissions(id,tenant_id,assignment_id,student_user_id,diagnostic_snapshot_json) VALUES ('historical-work','school','class-published','student',?)").bind(JSON.stringify({ mediaId: oldMedia })),

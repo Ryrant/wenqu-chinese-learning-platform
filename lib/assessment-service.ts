@@ -8,6 +8,7 @@ import { readFamilyWorkSnapshot } from "./family-task";
 import { HELP_LEVEL_LABELS, jsonValue, readPromptCount, readSequenceWork, type HelpLevel, type ReviewEvidence } from "./learning-sequence-types";
 import type { WorkDiagnosticSnapshot } from "./diagnostic-types";
 import { auditStatement } from "./audit";
+import { learningAnalyticsConsentSql, learningAnalyticsSubmissionSql } from "./learning-analytics";
 
 export type ObjectiveReviewScore = { objectiveId: string; score: number };
 export type DimensionReviewScore = { name: string; score: number };
@@ -125,8 +126,10 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
         (id,tenant_id,submission_id,reviewer_user_id,score,comment)
         VALUES (?,?,?,?,?,?)`)
         .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, comment),
-      db.prepare("INSERT INTO submission_reviews (id,tenant_id,submission_id,reviewer_user_id,final_score,final_comment,weakness_tags_json,objective_scores_json,dimension_scores_json,evidence_json,status) VALUES (?,?,?,?,?,?,?,?,?,?,'confirmed')")
-        .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, comment, "[]", JSON.stringify(objectiveScores), JSON.stringify(dimensionScores), JSON.stringify(reviewEvidence)),
+      db.prepare(`INSERT INTO submission_reviews (id,tenant_id,submission_id,reviewer_user_id,final_score,final_comment,weakness_tags_json,objective_scores_json,dimension_scores_json,evidence_json,status)
+        SELECT ?,?,?,?,?,?,?,?,?,json_set(?, '$.analyticsAllowed',${learningAnalyticsConsentSql("subject.tenant_id", "subject.student_user_id")} AND ${learningAnalyticsSubmissionSql("subject.tenant_id", "subject.student_user_id", "?")}), 'confirmed'
+        FROM (SELECT ? AS tenant_id,? AS student_user_id) subject`)
+        .bind(crypto.randomUUID(), context.tenantId, input.submissionId, context.userId, score, comment, "[]", JSON.stringify(objectiveScores), JSON.stringify(dimensionScores), JSON.stringify(reviewEvidence), input.submissionId, context.tenantId, submission.studentUserId),
       db.prepare(`UPDATE submissions
         SET score=?,confidence=1,feedback=?,review_status='reviewed',reviewed_at=CURRENT_TIMESTAMP
         WHERE id=? AND tenant_id=? AND review_status!='reviewed'`)
@@ -137,6 +140,7 @@ export async function confirmSubmissionReview(db: PlatformDatabase, context: Pla
         studentUserId: submission.studentUserId,
         objectiveId: item.objectiveId,
         score: item.score / 100,
+        sourceSubmissionId: input.submissionId,
       })),
       ...(submission.familyTaskId ? [db.prepare(`UPDATE learning_recommendations SET status='completed',completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND tenant_id=? AND student_user_id=? AND source_type='family'`)

@@ -2,6 +2,7 @@ import type { ChoiceSnapshot } from "./diagnostic-types";
 import type { FamilyFeedbackEntry, FamilyFeedbackResponse } from "./family-feedback-types";
 import type { FamilyWorkSnapshot } from "./family-task";
 import type { SequenceEvidence, TeachingDecision } from "./learning-sequence-types";
+import type { LearningAnalyticsState } from "./learning-analytics";
 
 export type CaseView = "student" | "guardian" | "teaching";
 export type CaseGoal = { id: string; title: string };
@@ -21,5 +22,5 @@ export type CaseTask = { id: string; kind: "teacher" | "family"; title: string; 
 export type StudentCaseData = {
   students: Array<{ id: string; displayName: string }>; student: { id: string; displayName: string } | null;
   objectives: CaseGoal[]; events: CaseEvent[]; tasks: CaseTask[]; legacyChoiceCount: number; generatedAt: string;
-};
+} & Partial<LearningAnalyticsState>;
 export const caseTimestamp = (value: string) => Date.parse(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? value.replace(" ", "T") + "Z" : value);

@@ -38,6 +38,8 @@ export function MemberManagementView({ data, act, notify }: Props) {
   const [resetMember, setResetMember] = useState<MemberRow | null>(null);
   const [resetPassword, setResetPassword] = useState("");
   const [busyAction, setBusyAction] = useState("");
+  const [guardianSaving, setGuardianSaving] = useState(false);
+  const guardianSubmitting = useRef(false);
   const [editor, setEditor] = useState<"create" | "guardian" | null>(null);
   const [query, setQuery] = useState("");
   const dialogTrigger = useRef<HTMLButtonElement | null>(null);
@@ -50,9 +52,15 @@ export function MemberManagementView({ data, act, notify }: Props) {
   ])).values()], [data.guardianLinks]);
   const guardians = data.members.filter((member) => stringValue(member.roles, "").split(",").includes("guardian"));
   const students = data.members.filter((member) => stringValue(member.roles, "").split(",").includes("student"));
+  const selectedGuardian = guardians.find((member) => member.id === guardianUserId);
+  const availableStudentIds = students.filter((member) => member.status === "active").map((member) => member.id);
+  const selectedStudentIds = selectedGuardian?.status === "active" ? studentUserIds.filter((id) => availableStudentIds.includes(id)) : [];
+  const unavailableLinks = uniqueGuardianLinks.filter((link) => link.guardianUserId === guardianUserId &&
+    (selectedGuardian?.status !== "active" || !availableStudentIds.includes(link.studentUserId)));
   const filteredMembers = data.members.filter((member) => `${member.displayName} ${member.email}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
 
   function selectGuardian(id: string) {
+    if (guardianSubmitting.current) return;
     setGuardianUserId(id);
     setStudentUserIds(uniqueGuardianLinks.filter((link) => String(link.guardianUserId) === id).map((link) => String(link.studentUserId)));
   }
@@ -76,9 +84,11 @@ export function MemberManagementView({ data, act, notify }: Props) {
 
   async function saveGuardianLinks(event: React.FormEvent) {
     event.preventDefault();
-    setBusyAction("guardian-links");
+    if (guardianSubmitting.current || !guardianUserId) return;
+    guardianSubmitting.current = true; setGuardianSaving(true);
+    const submission = { guardianUserId, studentUserIds: [...selectedStudentIds] };
     try {
-      await act("set_guardian_links", { guardianUserId, studentUserIds });
+      await act("set_guardian_links", submission);
       setStudentUserIds([]);
       setGuardianUserId("");
       setEditor(null);
@@ -86,7 +96,7 @@ export function MemberManagementView({ data, act, notify }: Props) {
     } catch (reason) {
       notify("绑定失败", readableError(reason), "error");
     } finally {
-      setBusyAction("");
+      guardianSubmitting.current = false; setGuardianSaving(false);
     }
   }
 
@@ -155,13 +165,13 @@ export function MemberManagementView({ data, act, notify }: Props) {
       <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 py-5"><label className="grid gap-2 text-sm font-medium">显示名称<Input autoComplete="name" value={memberDisplayName} onChange={(event) => setMemberDisplayName(event.target.value)} placeholder="例如：林老师" required/></label><label className="grid gap-2 text-sm font-medium">邮箱<Input type="email" autoComplete="email" value={memberEmail} onChange={(event) => setMemberEmail(event.target.value)} placeholder="member@example.com" required/></label><label className="grid gap-2 text-sm font-medium">角色<NativeSelect className="w-full" value={memberRole} onChange={(event) => setMemberRole(event.target.value)}><option value="teacher">教师</option><option value="guardian">家长</option><option value="student">学生</option><option value="admin">管理员</option></NativeSelect></label><label className="grid gap-2 text-sm font-medium">临时密码<Input type="password" minLength={10} autoComplete="new-password" value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} placeholder="至少 10 个字符" required/></label></div>
       <DialogFooter className="mx-0 mb-0 shrink-0 border-t px-6 py-4"><Button type="button" variant="outline" disabled={!!busyAction} onClick={() => setEditor(null)}>取消</Button><Button type="submit" disabled={busyAction === "create-member"}>{busyAction === "create-member" ? "创建中…" : "创建成员"}</Button></DialogFooter>
     </form></DialogContent></Dialog>
-    <Dialog open={editor === "guardian"} onOpenChange={(open) => { if (!open && !busyAction) setEditor(null); }}><DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); (dialogTrigger.current?.isConnected ? dialogTrigger.current : createMemberTrigger.current)?.focus(); }} className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0"><form onSubmit={saveGuardianLinks} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <Dialog open={editor === "guardian"} onOpenChange={(open) => { if (!open && !guardianSubmitting.current) setEditor(null); }}><DialogContent showCloseButton={!guardianSaving} onEscapeKeyDown={(event) => { if (guardianSubmitting.current) event.preventDefault(); }} onPointerDownOutside={(event) => { if (guardianSubmitting.current) event.preventDefault(); }} onCloseAutoFocus={(event) => { event.preventDefault(); (dialogTrigger.current?.isConnected ? dialogTrigger.current : createMemberTrigger.current)?.focus(); }} className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0"><form onSubmit={saveGuardianLinks} className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <DialogHeader className="shrink-0 border-b px-6 py-5"><DialogTitle>管理监护人绑定</DialogTitle><DialogDescription>保存后以本次所选学生更新该监护人的访问范围。</DialogDescription></DialogHeader>
-      <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto px-6 py-5"><label className="grid gap-2 text-sm font-medium">监护人<NativeSelect className="w-full" value={guardianUserId} onChange={(event) => selectGuardian(event.target.value)} required><option value="">请选择监护人</option>{guardians.map((member) => <option key={String(member.id)} value={String(member.id)}>{stringValue(member.displayName)} · {stringValue(member.email)}</option>)}</NativeSelect></label><fieldset className="grid gap-2"><legend className="mb-2 text-sm font-medium">关联学生</legend>{students.length ? students.map((member) => {
+      <div className="grid min-h-0 flex-1 gap-5 overflow-y-auto px-6 py-5"><label className="grid gap-2 text-sm font-medium">监护人<NativeSelect className="w-full" value={guardianUserId} disabled={guardianSaving} onChange={(event) => selectGuardian(event.target.value)} required><option value="">请选择监护人</option>{guardians.map((member) => <option key={String(member.id)} value={String(member.id)}>{stringValue(member.displayName)} · {stringValue(member.email)}{member.status !== "active" ? " · 已停用，仅可清理绑定" : ""}</option>)}</NativeSelect></label>{selectedGuardian?.status !== "active" && guardianUserId && <p>该监护人已停用，保存将清除其全部绑定；启用账号后才能添加学生。</p>}{!!unavailableLinks.length && <p role="status">以下历史绑定已不可用，保存时将移除：{unavailableLinks.map((link) => memberById.get(link.studentUserId)?.displayName ?? link.studentUserId).join("、")}</p>}<fieldset className="grid gap-2" disabled={guardianSaving}><legend className="mb-2 text-sm font-medium">关联学生</legend>{students.length ? students.map((member) => {
         const id = String(member.id);
-        return <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-3" key={id}><input type="checkbox" className="size-4 accent-primary" disabled={!guardianUserId} checked={studentUserIds.includes(id)} onChange={(event) => setStudentUserIds(event.target.checked ? [...studentUserIds, id] : studentUserIds.filter((studentId) => studentId !== id))}/><span className="min-w-0"><span className="block text-sm font-medium">{stringValue(member.displayName)}</span><span className="block break-all text-xs text-muted-foreground">{stringValue(member.email)}</span></span></label>;
+        return <label className="flex cursor-pointer items-center gap-3 rounded-lg border p-3" key={id}><input type="checkbox" className="size-4 accent-primary" disabled={selectedGuardian?.status !== "active" || member.status !== "active"} checked={selectedStudentIds.includes(id)} onChange={(event) => { if (!guardianSubmitting.current) setStudentUserIds(event.target.checked ? [...studentUserIds, id] : studentUserIds.filter((studentId) => studentId !== id)); }}/><span className="min-w-0"><span className="block text-sm font-medium">{stringValue(member.displayName)}</span><span className="block break-all text-xs text-muted-foreground">{stringValue(member.email)}{member.status !== "active" ? " · 已停用，不能添加绑定" : ""}</span></span></label>;
       }) : <EmptyState title="尚无学生账号" description="先创建学生，再建立监护关系。"/>}</fieldset></div>
-      <DialogFooter className="mx-0 mb-0 shrink-0 border-t px-6 py-4"><Button type="button" variant="outline" disabled={!!busyAction} onClick={() => setEditor(null)}>取消</Button><Button type="submit" disabled={busyAction === "guardian-links" || !guardianUserId}>{busyAction === "guardian-links" ? "保存中…" : "保存绑定"}</Button></DialogFooter>
+      <DialogFooter className="mx-0 mb-0 shrink-0 border-t px-6 py-4"><Button type="button" variant="outline" disabled={guardianSaving} onClick={() => { if (!guardianSubmitting.current) setEditor(null); }}>取消</Button><Button type="submit" disabled={guardianSaving || !guardianUserId}>{guardianSaving ? "保存中…" : "保存绑定"}</Button></DialogFooter>
     </form></DialogContent></Dialog>
     <Dialog open={!!resetMember} onOpenChange={(open) => { if (!open && !busyAction) { setResetMember(null); setResetPassword(""); } }}><DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); (dialogTrigger.current?.isConnected ? dialogTrigger.current : createMemberTrigger.current)?.focus(); }} className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0"><form onSubmit={resetMemberPassword} className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <DialogHeader className="shrink-0 border-b px-6 py-5"><DialogTitle>重置成员密码</DialogTitle><DialogDescription>{stringValue(resetMember?.displayName)} · {stringValue(resetMember?.email)}<br/>该成员下次登录时必须修改密码。</DialogDescription></DialogHeader>

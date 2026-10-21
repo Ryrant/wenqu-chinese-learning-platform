@@ -7,6 +7,7 @@ import { jsonValue, readSequenceWork, SEQUENCE_STAGE_LABELS } from "./learning-s
 import type { PlatformContext } from "./platform-store";
 import { caseTimestamp, type CaseEvent, type CaseGoal, type CaseTask, type CaseView, type StudentCaseData } from "./student-case-types";
 import { readWorkRows, workEvidence, type WorkRow } from "./work-evidence-service";
+import { readLearningAnalyticsState } from "./learning-analytics";
 
 function caseContext(context: PlatformContext, view: CaseView): PlatformContext {
   // 当前查看身份不能借用另一个角色的授权范围。
@@ -39,10 +40,12 @@ export async function readStudentCase(original: PlatformContext, view: CaseView,
   const student = students.find((item) => item.id === (requestedId ?? (view === "student" ? userId : students[0]?.id))) ?? null;
   if (requestedId !== undefined && !student) throw new Error("student_case_not_found");
   if (!student) return { students, student, objectives: [], events: [], tasks: [], legacyChoiceCount: 0, generatedAt: new Date().toISOString() };
+  const analytics = await readLearningAnalyticsState(db, tenantId, student.id);
+  if (!analytics.available) return { students, student, objectives: [], events: [], tasks: [], legacyChoiceCount: 0, generatedAt: new Date().toISOString(), ...analytics };
   const classAccess = classAccessClause(context);
   const taskAccess = view === "teaching" && !context.roles.includes("admin") ? "((lr.source_type='family' AND c.teacher_user_id=?) OR (lr.source_type='teacher' AND lr.created_by=?))" : "1=1";
   const [works, metadata, taskRows, currentGoals, eligible] = await Promise.all([
-    readWorkRows(db, context, "s.student_user_id=?", [student.id]),
+    readWorkRows(db, context, "s.student_user_id=? AND COALESCE(json_extract(s.diagnostic_snapshot_json,'$.analyticsAllowed'),1)=1 AND COALESCE(json_extract(sr.evidence_json,'$.analyticsAllowed'),1)=1", [student.id]),
     db.prepare(`SELECT ls.id,ls.created_at FROM learning_sequences ls JOIN submissions s ON s.id=ls.baseline_submission_id AND s.tenant_id=ls.tenant_id
       AND s.student_user_id=ls.student_user_id AND s.assignment_id=ls.assignment_id
       JOIN assignments a ON a.id=s.assignment_id AND a.tenant_id=s.tenant_id JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
@@ -67,7 +70,7 @@ export async function readStudentCase(original: PlatformContext, view: CaseView,
     view === "student" ? Promise.resolve({ entries: [] }) : readFamilyFeedback(context, view === "guardian" ? "guardian" : "teaching", view === "guardian" ? student.id : undefined),
     eligible ? db.prepare(`SELECT da.id,da.evidence_json,da.selected_option,da.is_correct,dt.id AS attemptId,dt.completed_at FROM diagnostic_answers da
       JOIN diagnostic_attempts dt ON dt.id=da.attempt_id AND dt.tenant_id=da.tenant_id
-      WHERE da.tenant_id=? AND dt.student_user_id=? ORDER BY dt.completed_at,dt.rowid,da.rowid`).bind(tenantId, student.id)
+      WHERE da.tenant_id=? AND dt.student_user_id=? AND COALESCE(json_extract(da.evidence_json,'$.analyticsAllowed'),1)=1 ORDER BY dt.completed_at,dt.rowid,da.rowid`).bind(tenantId, student.id)
       .all<{ id: string; evidence_json: string; selected_option: number; is_correct: number; attemptId: string; completed_at: string }>() : Promise.resolve({ results: [] }),
     db.prepare(`SELECT target_id,created_at FROM audit_logs WHERE tenant_id=? AND action='learning_sequence.retest_scheduled'
       AND target_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid`).bind(tenantId, JSON.stringify(sequenceIds)).all<{ target_id: string; created_at: string }>(),
@@ -111,5 +114,5 @@ export async function readStudentCase(original: PlatformContext, view: CaseView,
     revision: row.source_type === "family" ? readFamilyPlan(row.family_plan_json)?.revision ?? null : null, updatedAt: row.updated_at ?? row.created_at, authorName: row.authorName }));
   const objectives = [...new Map([...events.flatMap((item) => item.goals), ...tasks.flatMap((item) => item.goal ? [item.goal] : []), ...currentGoals.results].map((goal) => [goal.id, goal])).values()];
   events.sort((a, b) => caseTimestamp(a.at) - caseTimestamp(b.at) || a.id.localeCompare(b.id));
-  return { students, student, objectives, events, tasks, legacyChoiceCount, generatedAt: new Date().toISOString() };
+  return { students, student, objectives, events, tasks, legacyChoiceCount, generatedAt: new Date().toISOString(), ...analytics };
 }

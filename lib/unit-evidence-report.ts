@@ -22,11 +22,12 @@ function workEvidence(work: SequenceEvidence, objectiveId: string, anchor: strin
 }
 
 function comparison(sequence: LearningSequence, before: SequenceEvidence | undefined, after: SequenceEvidence | undefined, labels: [string, string]) {
-  const comparable = !!before?.reviewed && !!after?.reviewed && sameRubric(before.rubric, after.rubric);
+  const analyticsAllowed = ![before?.analyticsAllowed, after?.analyticsAllowed].some((value) => value === false || value === 0);
+  const comparable = analyticsAllowed && !!before?.reviewed && !!after?.reviewed && sameRubric(before.rubric, after.rubric);
   const scores = [{ title: `目标：${sequence.objectiveTitle}`, before: before?.objectives.find((item) => item.id === sequence.objectiveId)?.score, after: after?.objectives.find((item) => item.id === sequence.objectiveId)?.score },
     ...[...new Set([...sequence.rubric.map((item) => item.name), ...(before?.dimensions ?? []).map((item) => item.name), ...(after?.dimensions ?? []).map((item) => item.name)])].map((name) => ({ title: name, before: before?.dimensions.find((item) => item.name === name)?.score, after: after?.dimensions.find((item) => item.name === name)?.score }))];
   return `<section><h2>${labels[0]}与${labels[1]}的分项对照</h2>
-    <p>${comparable ? "两份作品使用相同量规，差值只描述本次作品表现，仍需结合任务难度和原始作品判断。" : "量规不同、历史量规缺失或作品尚未评价，暂不计算前后差值。"}</p>
+    <p>${!analyticsAllowed ? "作品包含学习分析暂停期间保存的记录，保留原始评分，不回填或计算前后差值。" : comparable ? "两份作品使用相同量规，差值只描述本次作品表现，仍需结合任务难度和原始作品判断。" : "量规不同、历史量规缺失或作品尚未评价，暂不计算前后差值。"}</p>
     <div class="table"><table><thead><tr><th>评价项</th><th>${labels[0]} /100</th><th>${labels[1]} /100</th><th>差值</th></tr></thead><tbody>${scores.map((row) => {
       const left = before?.reviewed ? row.before : undefined;
       const right = after?.reviewed ? row.after : undefined;

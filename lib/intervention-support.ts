@@ -1,6 +1,7 @@
 import { readAbilityProfile } from "./ability-profile-service";
 import { ABILITY_LABELS, type Ability, type AbilityProfile, type InterventionSuggestion } from "./diagnostic-types";
 import type { PlatformContext } from "./platform-store";
+import { learningAnalyticsMessage } from "./learning-analytics";
 
 const supportSteps: Record<Ability, string> = {
   listening: "听力支持：使用本单元老师选定的音频，先分段听并记下关键词，再听完整内容，用自己的话复述；最后不看关键词再听一次，核对遗漏。",
@@ -39,6 +40,7 @@ export async function suggestIntervention(context: PlatformContext, studentUserI
     .bind(objectiveId, context.tenantId).first<{ title: string }>();
   if (!objective) throw new Error("objective_not_found");
   const profile = await readAbilityProfile(context, studentUserId);
+  if (profile.available === false) return { studentUserId, objectiveId, ready: false, title: "", detail: "", rationale: learningAnalyticsMessage(profile.consentStatus), evidenceKey: null, supports: [], measures: [] };
   const { measures, ready, supports } = measureIntervention(profile, objectiveId);
   const direction = supports.length ? supports.map((ability) => ABILITY_LABELS[ability]).join("、") : "综合巩固";
   const summary = measures.map((item) => `${ABILITY_LABELS[item.ability]}：${item.score === null ? `待评估（${item.availableCount} 次可用记录）` : `最近两次${item.ability === "reading" || item.ability === "listening" ? "正确率" : "教师目标评分"}均值 ${item.score}/100`}`).join("；");

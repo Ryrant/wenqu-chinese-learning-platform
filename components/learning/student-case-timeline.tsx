@@ -12,6 +12,7 @@ import { sequenceTime, TEACHING_DECISION_LABELS } from "../../lib/learning-seque
 import { CASE_EVENT_LABELS, type CaseEvent, type CaseView, type StudentCaseData } from "../../lib/student-case-types";
 import { UnitReportLink } from "./unit-report-links";
 import styles from "./student-case-timeline.module.css";
+import { learningAnalyticsMessage } from "../../lib/learning-analytics";
 
 function EventDetail({ event, goalId }: { event: CaseEvent; goalId?: string }) {
   if (event.kind === "choice") return <><p className={styles.copy}>{event.snapshot.prompt}</p>{event.snapshot.mediaId && <DiagnosticStimulus id={event.snapshot.mediaId} kind="audio"/>}<p>原始回答：{event.snapshot.options[event.selected]} · {event.correct ? "正确" : `参考答案：${event.snapshot.options[event.snapshot.correctOption]}`}</p><p>诊断批次：{event.attemptId}。本条仅表示这道题的作答。</p></>;
@@ -83,7 +84,7 @@ export function StudentCaseTimeline({ view, studentId, revision }: { view: CaseV
     {!data && !snapshot.loading && !snapshot.error && <p className="empty-state">请先选择孩子。 / Please select a learner.</p>}
     {data && <>
       {view === "teaching" && <label className={styles.selector}>案例学生<NativeSelect className="w-full" value={data.student?.id ?? ""} onChange={(event) => void load(event.target.value)}><option value="" disabled>请选择授权学生</option>{data.students.map((student) => <option key={student.id} value={student.id}>{student.displayName} · {student.id.slice(0, 8)}</option>)}</NativeSelect></label>}
-      {!data.student ? <p className="empty-state">当前授权范围没有学生案例。</p> : <>
+      {!data.student ? <p className="empty-state">当前授权范围没有学生案例。</p> : data.available === false ? <p role="status">{learningAnalyticsMessage(data.consentStatus)}原始作品和教师反馈可在作品列表中查看。</p> : <>
         <h4>{data.student.displayName} · {goalId === unknownGoal ? "原目标未留存" : goal?.title ?? "先前目标当前无记录"}</h4>
         <div className={styles.filters}><label>案例学习目标 / Learning goal<NativeSelect className="w-full" value={goalId} onChange={(event) => setFilters({ ...filters, goalId: event.target.value, visible: 10 })}>{filters.goalId && filters.goalId !== unknownGoal && !goal && <option value={goalId}>先前目标当前无记录</option>}{data.objectives.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.id.slice(0, 8)}</option>)}<option value={unknownGoal}>原目标未留存 / Original goal unavailable</option></NativeSelect></label>
           <label>记录类型 / Record type<NativeSelect className="w-full" value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.target.value, visible: 10 })}><option value="">全部记录 / All</option>{Object.entries(CASE_EVENT_LABELS).filter(([kind]) => view !== "student" || !["feedback", "support", "withdrawal"].includes(kind)).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</NativeSelect></label>

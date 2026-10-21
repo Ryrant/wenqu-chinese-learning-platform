@@ -1,10 +1,11 @@
 import type { HelpLevel } from "./learning-sequence-types";
+import type { LearningAnalyticsState } from "./learning-analytics";
 
 export const ABILITY_LABELS = { listening: "听力", speaking: "口语", reading: "阅读", writing: "书面表达" } as const;
 export type Ability = keyof typeof ABILITY_LABELS;
 export type DiagnosticMode = "" | "speaking" | "writing";
-export type ChoiceSnapshot = { version: 1; revision: number; ability: "listening" | "reading"; objectiveId: string; objectiveTitle: string; prompt: string; options: string[]; correctOption: number; mediaId: string | null };
-export type WorkDiagnosticSnapshot = { version: 1; ability: "speaking" | "writing"; title: string; prompt: string; mediaId: string | null; objectives: Array<{ id: string; title: string }>; rubric: Array<{ name: string; weight: number }> };
+export type ChoiceSnapshot = { version: 1; revision: number; ability: "listening" | "reading"; objectiveId: string; objectiveTitle: string; prompt: string; options: string[]; correctOption: number; mediaId: string | null; analyticsAllowed?: boolean | 0 | 1 };
+export type WorkDiagnosticSnapshot = { version: 1; ability: "speaking" | "writing"; title: string; prompt: string; mediaId: string | null; objectives: Array<{ id: string; title: string }>; rubric: Array<{ name: string; weight: number }>; analyticsAllowed?: boolean | 0 | 1 };
 export type EvidenceScore = { objectiveId: string; title: string; score: number };
 export type ChoiceEvidenceAnswer = { prompt: string; selected: string; expected: string; correct: boolean; mediaId: string | null };
 export type AbilityEvidence = {
@@ -16,7 +17,7 @@ export type AbilityEvidence = {
 };
 export type AbilityProfile = {
   student: { id: string; displayName: string }; legacyAnswerCount: number; evidence: AbilityEvidence[];
-};
+} & Partial<LearningAnalyticsState>;
 export type SupportEvidence = { id: string; title: string; score: number; measuredAt: string };
 export type InterventionSuggestion = {
   studentUserId: string; objectiveId: string; ready: boolean; title: string; detail: string;

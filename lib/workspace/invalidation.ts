@@ -16,7 +16,7 @@ const changedSections: Record<WorkspaceActionName, readonly WorkspaceSection[]> 
   set_class_enrollments: ["teaching", "progress", "quality"], set_guardian_links: ["members", "teaching", "progress", "consents", "quality"],
   set_member_status: ["members", "teaching", "progress", "consents", "quality"],
   submit_diagnostic: ["progress", "quality"], submit_text: ["progress", "teaching", "quality"],
-  suggest_intervention: [], suggest_text_review: ["progress", "quality"], update_consent: ["consents", "quality"],
+  suggest_intervention: [], suggest_text_review: ["progress", "quality"], update_consent: ["consents", "progress", "quality"],
   update_family_task: ["progress"], update_lesson_plan: ["lessons"], update_recommendation_status: ["progress", "quality"],
   upsert_diagnostic_item: ["curriculum", "progress", "quality"], upsert_learning_objective: ["curriculum", "progress", "quality"], void_trial_record: ["trials"],
 };

@@ -50,6 +50,7 @@ async function fixture(t) {
     db.prepare("INSERT INTO classes(id,tenant_id,name,level,teacher_user_id,academic_year) VALUES ('class','school','本班','A2','teacher','2026'),('other-class','school','其他班','A2','other-teacher','2026')"),
     db.prepare("INSERT INTO enrollments(tenant_id,class_id,student_user_id) VALUES ('school','class','student'),('school','other-class','other-student')"),
     db.prepare("INSERT INTO guardian_student_links(tenant_id,guardian_user_id,student_user_id,status) VALUES ('school','guardian','student','active')"),
+    db.prepare("INSERT INTO consent_records(id,tenant_id,student_user_id,guardian_user_id,scope,status) VALUES ('analytics','school','student','guardian','learning_analytics','granted')"),
     db.prepare("INSERT INTO learning_objectives(id,tenant_id,code,title,skill,level) VALUES ('goal','school','A2-1','阅读目标','阅读','A2'),('foreign-goal','other-school','A2-2','其他机构目标','阅读','A2')"),
     db.prepare("INSERT INTO diagnostic_items(id,tenant_id,objective_id,level,prompt,options_json,correct_option,explanation,created_by) VALUES ('item','school','goal','A2','选择答案','[\"甲\",\"乙\"]',1,'答案说明','admin')"),
     db.prepare("INSERT INTO assignments(id,tenant_id,class_id,title,activity_type,status,created_by) VALUES ('task','school','class','阅读任务','文字','published','teacher'),('other-task','school','other-class','其他班任务','文字','published','other-teacher')"),
@@ -204,7 +205,7 @@ test("quality partitions retain actual denominators and latest measured evidence
   assert.equal(data.qualityMetrics.pendingReviews.value, 0);
   assert.equal(data.qualityMetrics.lowMasteryObjectives.value, 0);
   assert.equal(data.qualityMetrics.consentCoverage.denominator, 2);
-  assert.equal(data.qualityMetrics.consentCoverage.numerator, 0);
+  assert.equal(data.qualityMetrics.consentCoverage.numerator, 1);
   assert.equal(data.qualityMetrics.pendingContent.details[0].id, "source");
   assert.equal("services" in data, false);
   assert.doesNotMatch(f.executed.join("\n"), /FROM (lesson_plans|app_settings|learning_trial_records)/);

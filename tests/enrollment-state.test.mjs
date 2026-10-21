@@ -53,3 +53,32 @@ test("不同班级的草稿不能成为当前班级的选择或提交基线", ()
   assert.deepEqual(view.expectedStudentUserIds, ["student-c"]);
   assert.equal(view.conflict, false);
 });
+
+test("停用学生只参与当前学籍比较，保存名单仅包含可用学生", () => {
+  const view = enrollmentDraftView("class", ["disabled-student"], null, ["active-student"]);
+  assert.deepEqual(view.studentUserIds, []);
+  assert.deepEqual(view.expectedStudentUserIds, ["disabled-student"]);
+  const edited = enrollmentDraftView("class", ["disabled-student"], {
+    classId: "class", baseIds: ["disabled-student"], studentUserIds: ["active-student"],
+  }, ["active-student"]);
+  assert.deepEqual(edited.studentUserIds, ["active-student"]);
+  assert.deepEqual(edited.expectedStudentUserIds, ["disabled-student"]);
+  assert.equal(edited.conflict, false);
+});
+
+test("写入成功而读回失败时保留已保存名单并阻止旧缓存成为编辑基线", () => {
+  const saved = { classId: "class", baseIds: ["student-b"], studentUserIds: ["student-b"], awaitingRead: true };
+  const unread = enrollmentDraftView("class", ["student-a"], saved);
+  assert.equal(unread.pendingRead, true);
+  assert.equal(unread.conflict, false);
+  assert.deepEqual(unread.studentUserIds, ["student-b"]);
+  assert.deepEqual(unread.expectedStudentUserIds, ["student-b"]);
+  const confirmed = enrollmentDraftView("class", ["student-b"], saved);
+  assert.equal(confirmed.pendingRead, false);
+  assert.equal(confirmed.dirty, false);
+  const continued = enrollmentDraftView("class", ["student-b"], {
+    classId: "class", baseIds: confirmed.expectedStudentUserIds, studentUserIds: ["student-b", "student-c"],
+  });
+  assert.equal(continued.conflict, false);
+  assert.deepEqual(continued.expectedStudentUserIds, ["student-b"]);
+});

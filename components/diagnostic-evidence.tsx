@@ -7,6 +7,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { useEffect, useState } from "react";
 import { ABILITY_LABELS, diagnosticMediaUrl, type AbilityProfile } from "../lib/diagnostic-types";
 import { FAMILY_HELP_LABELS, type Notify, type WorkspaceData } from "../lib/platform-types";
+import { learningAnalyticsMessage } from "../lib/learning-analytics";
 
 export function DiagnosticStimulus({ id, kind }: { id: string; kind: "audio" | "image" }) {
   return kind === "audio"
@@ -67,7 +68,8 @@ export function AbilityEvidenceProfile({ studentId, revision }: { studentId: str
     <SectionHeading title={`听说读写${current?.data ? ` · ${current.data.student.displayName}` : ""}`} description="查看各项能力的作品与教师评价。"/>
     {!current && <p role="status">正在读取证据…</p>}
     {current?.error && <div role="alert"><p>{current.error}</p><Button variant="outline" type="button" onClick={() => setRetry(retry + 1)}>重试读取画像</Button></div>}
-    {current?.data && <>
+    {current?.data?.available === false && <p role="status">{learningAnalyticsMessage(current.data.consentStatus)}原始作品与教师反馈仍可查看。</p>}
+    {current?.data && current.data.available !== false && <>
       {!!current.data.legacyAnswerCount && <p>另有 {current.data.legacyAnswerCount} 条历史答案未保存题面快照，未计入本画像；原诊断记录保持保留。</p>}
       <div className="ability-grid">{Object.entries(ABILITY_LABELS).map(([ability, label]) => {
         const records = current.data!.evidence.filter((item) => item.ability === ability);
