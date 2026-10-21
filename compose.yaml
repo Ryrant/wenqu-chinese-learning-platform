@@ -1,7 +1,6 @@
 services:
   huawen-zhixing:
-    image: huawen-zhixing:local
-    build: .
+    image: ghcr.io/ryrant/huawen-zhixing:latest
     container_name: huawen-zhixing
     restart: unless-stopped
     init: true
