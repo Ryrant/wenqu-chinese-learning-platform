@@ -232,17 +232,15 @@ test("CI is lightweight and default deployment workflow is not committed", async
 });
 
 test("deployment relies on Cloudflare automatic D1 and R2 provisioning", async () => {
-  const [standardWrangler, pkgRaw, envExample, readme] = await Promise.all([
+  const [standardWrangler, pkgRaw, readme] = await Promise.all([
     read("wrangler.toml"),
     read("package.json"),
-    read(".env.example"),
     read("README.md"),
   ]);
   const pkg = JSON.parse(pkgRaw);
   assert.equal(pkg.scripts.deploy, "wrangler deploy");
   assert.doesNotMatch(JSON.stringify(pkg.scripts), /render-wrangler-config|D1_DATABASE_ID|R2_BUCKET_NAME/);
   assert.doesNotMatch(standardWrangler, /database_id|bucket_name|replace-with|00000000/);
-  assert.doesNotMatch(envExample, /D1_DATABASE_ID|R2_BUCKET_NAME/);
   assert.match(readme, /D1\/R2.*自动创建/s);
   assert.doesNotMatch(readme, /把 `wrangler\.toml` 中的占位值替换|D1_DATABASE_ID|R2_BUCKET_NAME|replace-with-r2-bucket-name/);
   await assert.rejects(read("scripts/render-wrangler-config.mjs"));
@@ -251,7 +249,7 @@ test("deployment relies on Cloudflare automatic D1 and R2 provisioning", async (
 test("docker self-hosting files use SQLite and local upload volume", async () => {
   const [dockerfile, compose, dockerignore, startScript, pkgRaw] = await Promise.all([
     read("Dockerfile"),
-    read("docker-compose.yml"),
+    read("compose.yaml"),
     read(".dockerignore"),
     read("scripts/start-docker.mjs"),
     read("package.json"),
@@ -267,7 +265,8 @@ test("docker self-hosting files use SQLite and local upload volume", async () =>
   assert.doesNotMatch(dockerfile, /COPY --from=builder \/app \.\//);
   assert.match(compose, /restart: unless-stopped/);
   assert.match(compose, /huawen-zhixing-data:\/data/);
-  assert.match(compose, /HUAWEN_ZHIXING_RUNTIME: node/);
+  assert.match(compose, /image: ghcr\.io\/ryrant\/huawen-zhixing:latest/);
+  assert.match(dockerfile, /HUAWEN_ZHIXING_RUNTIME=node/);
   assert.match(dockerignore, /docs\/superpowers/);
   assert.match(startScript, /HUAWEN_ZHIXING_RUNTIME: "node"/);
   assert.equal(pkg.scripts["start:docker"], "node scripts/start-docker.mjs");
@@ -313,20 +312,12 @@ test("standard build launcher delegates through the active npm CLI", async () =>
 });
 
 test("standard cloudflare deployment configuration has no variable prerequisites and remains secret-safe", async () => {
-  const [standardWrangler, envExample] = await Promise.all([
-    read("wrangler.toml"),
-    read(".env.example"),
-  ]);
+  const standardWrangler = await read("wrangler.toml");
   assert.match(standardWrangler, /main = "worker\/index\.ts"/);
   assert.match(standardWrangler, /binding = "DB"/);
   assert.match(standardWrangler, /binding = "CONTENT"/);
   assert.doesNotMatch(standardWrangler, /database_id|bucket_name|replace-with|00000000/);
   assert.doesNotMatch(standardWrangler, /\[vars\]|AUTH_MODE|JWT_TTL_SECONDS|ADMIN_PASSWORD|JWT_SECRET|required =|CLOUDFLARE_API_TOKEN/);
-  assert.doesNotMatch(envExample, /AUTH_MODE=|JWT_TTL_SECONDS=|ADMIN_PASSWORD=|JWT_SECRET=|OPENAI_API_KEY=|AI_API_KEY=|AI_MODEL=|SPEECH_API_KEY=|MODERATION_API_KEY=/);
-  assert.doesNotMatch(envExample, /D1_DATABASE_ID|R2_BUCKET_NAME/);
-  assert.doesNotMatch(envExample, /CLOUDFLARE_API_TOKEN|CLOUDFLARE_ACCOUNT_ID/);
-  assert.doesNotMatch(envExample, /sk-|eyJ|-----BEGIN|password123/);
-  assert.doesNotMatch(envExample, /ChatGPT|Platform Sites|\.openai|wrangler\.chatgpt|oai-authenticated-user-email/i);
 });
 
 test("login has best-effort throttling and malformed cookies fail closed", async () => {
@@ -453,9 +444,8 @@ test("admin UI exposes post-deploy platform settings stored in D1", async () => 
 });
 
 test("README documents pilot workflow without exposing secrets", async () => {
-  const [readme, envExample, openaiProvider] = await Promise.all([
+  const [readme, openaiProvider] = await Promise.all([
     read("README.md"),
-    read(".env.example"),
     read("lib/ai/openai-provider.ts"),
   ]);
   assert.match(readme, /成员账号/);
@@ -463,10 +453,9 @@ test("README documents pilot workflow without exposing secrets", async () => {
   assert.match(readme, /PDF\/DOCX\/TXT/);
   assert.match(readme, /AI 辅助批阅/);
   assert.match(readme, /教师确认/);
-  assert.doesNotMatch(envExample, /OPENAI_API_KEY=|AI_MODEL=/);
   assert.match(openaiProvider, /https:\/\/api\.openai\.com\/v1\/responses/);
-  assert.doesNotMatch(`${readme}\n${envExample}`, /sk-|password123|JWT_SECRET=.{12,}/);
-  assert.doesNotMatch(`${readme}\n${envExample}`, /ChatGPT|Platform Sites|\.openai|wrangler\.chatgpt|oai-authenticated-user-email/i);
+  assert.doesNotMatch(readme, /sk-|password123|JWT_SECRET=.{12,}/);
+  assert.doesNotMatch(readme, /ChatGPT|Platform Sites|\.openai|wrangler\.chatgpt|oai-authenticated-user-email/i);
 });
 
 test("repository infrastructure includes issue forms and self-hosted Cloudflare deployment docs", async () => {
