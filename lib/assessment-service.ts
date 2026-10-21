@@ -7,6 +7,7 @@ import { searchPublishedKnowledge } from "./retrieval";
 import { readFamilyWorkSnapshot } from "./family-task";
 import { HELP_LEVEL_LABELS, jsonValue, readPromptCount, readSequenceWork, type HelpLevel, type ReviewEvidence } from "./learning-sequence-types";
 import type { WorkDiagnosticSnapshot } from "./diagnostic-types";
+import { auditStatement } from "./audit";
 
 export type ObjectiveReviewScore = { objectiveId: string; score: number };
 export type DimensionReviewScore = { name: string; score: number };
@@ -77,6 +78,7 @@ export async function suggestTextReview(db: PlatformDatabase, context: PlatformC
     db.prepare(`UPDATE submissions SET review_status='ai_suggested_pending_review'
       WHERE id=? AND tenant_id=? AND review_status!='reviewed'`)
       .bind(submissionId, context.tenantId),
+    auditStatement(db, context.tenantId, context.userId, "submission.ai_review_suggested", "submission", submissionId, {}, true),
   ]);
   if (!outcomes[1].meta.changes) throw new Error("submission_already_reviewed");
   return { submissionId, ...suggestion };

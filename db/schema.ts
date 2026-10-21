@@ -18,6 +18,7 @@ export const users = sqliteTable("users", {
   locale: text("locale").notNull().default("zh-CN"),
   passwordHash: text("password_hash"),
   mustChangePassword: integer("must_change_password", { mode: "boolean" }).notNull().default(false),
+  sessionVersion: integer("session_version").notNull().default(0),
   status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
   lastLoginAt: text("last_login_at"),
   createdAt: createdAt(),
@@ -197,6 +198,29 @@ export const learningTrialRecords = sqliteTable("learning_trial_records", {
   note: text("note").notNull(), createdBy: text("created_by").notNull(), createdAt: createdAt(),
   voidedAt: text("voided_at"), voidedBy: text("voided_by"), voidReason: text("void_reason"),
 }, (table) => [index("trial_records_sequence_idx").on(table.tenantId, table.sequenceId, table.createdAt)]);
+
+export const familyUsabilityFeedback = sqliteTable("family_usability_feedback", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), familyTaskId: text("family_task_id").notNull(),
+  studentUserId: text("student_user_id").notNull(), assignmentId: text("assignment_id"), classId: text("class_id"),
+  taskRevision: integer("task_revision").notNull(), taskSnapshotJson: text("task_snapshot_json").notNull(),
+  participation: text("participation").notNull(), instructions: text("instructions").notNull(), operationHelp: text("operation_help").notNull(), alternative: text("alternative").notNull(),
+  note: text("note").notNull().default(""), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+  voidedAt: text("voided_at"), voidedBy: text("voided_by"), voidReason: text("void_reason"),
+  responseId: text("response_id"), followupOutcome: text("followup_outcome"),
+}, (table) => [index("family_feedback_task_idx").on(table.tenantId, table.familyTaskId, table.createdAt), index("family_feedback_response_idx").on(table.tenantId, table.responseId, table.createdAt)]);
+
+export const learningTrialBatches = sqliteTable("learning_trial_batches", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(),
+  title: text("title").notNull(), scopeJson: text("scope_json").notNull(), requestJson: text("request_json").notNull(),
+  revision: integer("revision").notNull().default(1), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+  voidedAt: text("voided_at"), voidedBy: text("voided_by"), voidReason: text("void_reason"),
+}, (table) => [index("trial_batches_class_idx").on(table.tenantId, table.classId, table.createdAt)]);
+
+export const familyFeedbackResponses = sqliteTable("family_feedback_responses", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), feedbackId: text("feedback_id").notNull(),
+  kind: text("kind").notNull(), detail: text("detail").notNull(), createdBy: text("created_by").notNull(), createdAt: createdAt(),
+  voidedAt: text("voided_at"), voidedBy: text("voided_by"), voidReason: text("void_reason"),
+}, (table) => [index("feedback_responses_source_idx").on(table.tenantId, table.feedbackId, table.createdAt)]);
 
 export const masterySnapshots = sqliteTable("mastery_snapshots", {
   id: integer("id").primaryKey({ autoIncrement: true }), tenantId: text("tenant_id").notNull(), studentUserId: text("student_user_id").notNull(), objectiveId: text("objective_id").notNull(), mastery: real("mastery").notNull(), evidenceCount: integer("evidence_count").notNull().default(0), measuredAt: createdAt(),

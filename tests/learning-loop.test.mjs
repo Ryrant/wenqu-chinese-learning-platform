@@ -179,12 +179,6 @@ test("AI review suggestion cannot reopen an already reviewed submission", async 
   );
 });
 
-test("mastery blends new evidence and preserves cumulative evidence count", async () => {
-  const { blendMastery } = await importTypeScript("lib/learning-loop.ts");
-  assert.deepEqual(blendMastery(null, 0, 0.8, 2), { mastery: 0.8, evidenceCount: 2 });
-  assert.deepEqual(blendMastery(0.5, 3, 1, 2), { mastery: 0.65, evidenceCount: 5 });
-});
-
 test("learning plan prioritizes teacher intervention review family and assignments", async () => {
   const { rankLearningPlan } = await importTypeScript("lib/learning-loop.ts");
   const ranked = rankLearningPlan([

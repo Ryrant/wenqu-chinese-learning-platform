@@ -1,10 +1,10 @@
 import { upsertDiagnosticItem, upsertLearningObjective } from "../learning-loop-service";
-import { text, requireText, number, audit, type WorkspaceActionHandler } from "./shared";
+import { text, requireText, number, type WorkspaceActionHandler } from "./shared";
 import type { WorkspaceActionName } from "../workspace-actions";
 
 export const curriculumCommands = {
   upsert_learning_objective: async (body, context) => {
-    const { db, tenantId, userId } = context;
+    const { db } = context;
     const result = await upsertLearningObjective(db, context, {
       id: text(body.id, 120) || undefined,
       code: requireText(body.code, "objective_code", 40),
@@ -13,12 +13,11 @@ export const curriculumCommands = {
       level: requireText(body.level, "objective_level", 20),
       status: body.status === "inactive" ? "inactive" : "active",
     });
-    await audit(db, tenantId, userId, "learning_objective.saved", "learning_objective", result.id, { status: result.status });
     return Response.json(result, { status: body.id ? 200 : 201 });
   },
 
   upsert_diagnostic_item: async (body, context) => {
-    const { db, tenantId, userId } = context;
+    const { db } = context;
     const options = Array.isArray(body.options) ? body.options.map((value) => text(value, 200)) : [];
     const result = await upsertDiagnosticItem(db, context, {
       id: text(body.id, 120) || undefined,
@@ -32,7 +31,6 @@ export const curriculumCommands = {
       mediaId: text(body.mediaId, 120) || null,
       status: body.status === "inactive" ? "inactive" : "active",
     });
-    await audit(db, tenantId, userId, "diagnostic_item.saved", "diagnostic_item", result.id, { status: result.status });
     return Response.json(result, { status: body.id ? 200 : 201 });
   },
 } satisfies Partial<Record<WorkspaceActionName, WorkspaceActionHandler>>;

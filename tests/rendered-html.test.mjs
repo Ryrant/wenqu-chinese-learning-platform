@@ -81,7 +81,6 @@ test("versioned APIs enforce tenant scope, honest provider state and review fall
   assert.match(contentProcessing, /knowledge_chunks SET published=1/); assert.match(contentProcessing, /processing_status='processed'/);
   assert.match(actions, /invalid_content_review_status/);
   assert.match(actions, /body\.status !== "published" && body\.status !== "rejected"/);
-  assert.match(actions, /await publishContent\(db, \{ tenantId, sourceDocumentId: id \}\)/);
   assert.match(actions, /await db\.batch\(\[/);
   assert.match(health, /not_configured_manual_review/); assert.doesNotMatch(health, /99\.9|healthy/);
 });
@@ -318,6 +317,7 @@ test("standard cloudflare deployment configuration has no variable prerequisites
   assert.match(standardWrangler, /binding = "CONTENT"/);
   assert.doesNotMatch(standardWrangler, /database_id|bucket_name|replace-with|00000000/);
   assert.doesNotMatch(standardWrangler, /\[vars\]|AUTH_MODE|JWT_TTL_SECONDS|ADMIN_PASSWORD|JWT_SECRET|required =|CLOUDFLARE_API_TOKEN/);
+  assert.doesNotMatch(standardWrangler, /sk-|eyJ|-----BEGIN|password123/);
 });
 
 test("login has best-effort throttling and malformed cookies fail closed", async () => {

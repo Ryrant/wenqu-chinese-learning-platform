@@ -3,7 +3,7 @@ import { assertSubmissionReviewAccess } from "../access-control";
 import { createIntervention } from "../learning-loop-service";
 import { aiProviderSettings, loadPlatformSettings } from "../platform-settings";
 import { suggestIntervention } from "../intervention-support";
-import { text, requireText, audit, type WorkspaceActionHandler } from "./shared";
+import { text, requireText, type WorkspaceActionHandler } from "./shared";
 import type { WorkspaceActionName } from "../workspace-actions";
 
 const reviewSubmissionCommand: WorkspaceActionHandler = async (body, context, action) => {
@@ -22,7 +22,7 @@ export const assessmentCommands = {
   },
 
   create_intervention: async (body, context) => {
-    const { db, tenantId, userId } = context;
+    const { db } = context;
     const result = await createIntervention(db, context, {
       studentUserId: requireText(body.studentUserId, "student_user_id", 120),
       objectiveId: requireText(body.objectiveId, "objective_id", 120),
@@ -31,12 +31,11 @@ export const assessmentCommands = {
       dueAt: text(body.dueAt, 40) || null,
       evidenceKey: body.evidenceKey === undefined ? undefined : requireText(body.evidenceKey, "evidence_key", 64),
     });
-    await audit(db, tenantId, userId, "intervention.created", "learning_recommendation", result.id);
     return Response.json(result, { status: 201 });
   },
 
   suggest_text_review: async (body, context) => {
-    const { db, tenantId, userId } = context;
+    const { db } = context;
     const id = requireText(body.id, "submission_id");
     let result;
     try {
@@ -45,7 +44,6 @@ export const assessmentCommands = {
       if (error instanceof Error && error.message === "no_reviewed_sources") return Response.json({ error: "no_reviewed_sources" }, { status: 422 });
       throw error;
     }
-    await audit(db, tenantId, userId, "submission.ai_review_suggested", "submission", id);
     return Response.json(result);
   },
 

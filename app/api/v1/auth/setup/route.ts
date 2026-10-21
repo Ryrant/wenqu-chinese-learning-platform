@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     const now = Math.floor(Date.now() / 1000);
     const settings = await loadPlatformSettings(db);
     const maxAge = settings.jwtTtlSeconds;
-    const token = await createSessionToken({ email: account.email, displayName: account.displayName, iat: now, exp: now + maxAge }, await ensureSiteJwtSecret(db));
+    const token = await createSessionToken({ email: account.email, displayName: account.displayName, iat: now, exp: now + maxAge, sessionVersion: account.sessionVersion }, await ensureSiteJwtSecret(db));
     return Response.json({ user: { email: account.email, displayName: account.displayName, roles: ["admin"], mustChangePassword: false } }, {
       status: 200,
       headers: { "cache-control": "no-store", "set-cookie": cookieValue(token, maxAge) },

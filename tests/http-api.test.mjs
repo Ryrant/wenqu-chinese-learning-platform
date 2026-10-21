@@ -53,7 +53,11 @@ async function fixture(t, setup = true) {
     const session = await login(email);
     return { ...session, id: data.id };
   };
-  const changePassword = (cookie) => json("/api/v1/auth/change-password", { method: "POST", cookie, json: { currentPassword: password, newPassword } });
+  const changePassword = async (member) => {
+    const result = await json("/api/v1/auth/change-password", { method: "POST", cookie: member.cookie, json: { currentPassword: password, newPassword } });
+    member.cookie = result.response.headers.get("set-cookie").split(";")[0];
+    return result;
+  };
   return { db, storage, request, json, createSetup, admin, act, login, member, changePassword };
 }
 
@@ -178,7 +182,7 @@ test("Hono workspace partitions preserve password, account-role and object autho
   assert.equal(student.data.user.mustChangePassword, true);
   const blocked = await f.json("/api/v1/workspace?include=bootstrap", { cookie: student.cookie }, 403);
   assert.deepEqual(blocked.data, { error: "password_change_required" });
-  await f.changePassword(student.cookie);
+  await f.changePassword(student);
   const { data } = await f.json("/api/v1/workspace?include=teaching,notifications", { cookie: student.cookie });
   assert.deepEqual(data.user.roles, ["student"]);
   assert.deepEqual(data.classes, []);
@@ -189,15 +193,15 @@ test("Hono workspace partitions preserve password, account-role and object autho
   await f.act(student.cookie, "create_class", { name: "越权班级", level: "A2" }, 403);
   await f.json("/api/v1/workspace?include=unknown", { cookie: f.admin.cookie }, 400);
   await f.db.prepare("UPDATE role_memberships SET status='disabled' WHERE user_id=?").bind(student.id).run();
-  assert.deepEqual((await f.json("/api/v1/workspace?include=bootstrap", { cookie: student.cookie }, 403)).data, { error: "forbidden" });
+  assert.deepEqual((await f.json("/api/v1/workspace?include=bootstrap", { cookie: student.cookie }, 403)).data, { error: "account_access_denied" });
 });
 
 test("Hono dynamic id routes pass parameters and retain owner, tenant and media-range restrictions", async (t) => {
   const f = await fixture(t);
   const student = await f.member("student");
   const other = await f.member("student", "other-student@http.example");
-  await f.changePassword(student.cookie);
-  await f.changePassword(other.cookie);
+  await f.changePassword(student);
+  await f.changePassword(other);
   const tenantId = (await f.db.prepare("SELECT tenant_id AS id FROM role_memberships WHERE user_id=?").bind(student.id).first()).id;
   const adminId = (await f.db.prepare("SELECT id FROM users WHERE email='admin@http.example'").first()).id;
   const assetKey = `${tenantId}/submissions/recording/audio.webm`;

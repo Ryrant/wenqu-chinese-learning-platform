@@ -19,7 +19,7 @@ export const workspaceActionRoles = {
   create_reminder: "guardian",
   create_trial_record: "teacher",
   generate_lesson: "teacher",
-  mark_notification: "student",
+  mark_notification: undefined,
   publish_assignment: "teacher",
   publish_teaching_next_step: "teacher",
   reprocess_content: "admin",

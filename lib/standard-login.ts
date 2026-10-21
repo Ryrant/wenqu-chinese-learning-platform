@@ -8,6 +8,7 @@ export type StandardLoginAccount = {
   passwordHash: string | null;
   mustChangePassword: number;
   status: string;
+  sessionVersion: number;
 };
 
 export type StandardLoginInput = {
@@ -35,7 +36,7 @@ function idPart(value: string) {
 async function findAccount(db: PlatformDatabase, email: string) {
   return db.prepare(`
     SELECT u.id,u.email,u.display_name AS displayName,u.password_hash AS passwordHash,
-           u.must_change_password AS mustChangePassword,u.status AS status
+           u.must_change_password AS mustChangePassword,u.status AS status,u.session_version AS sessionVersion
     FROM users u
     WHERE lower(u.email)=?
     LIMIT 1
@@ -60,11 +61,16 @@ export async function createInitialAdminAccount({ db, email, password, displayNa
   const displayName = configuredDisplayName?.trim() || normalizedEmail.split("@")[0];
   const workspaceName = configuredWorkspaceName?.trim() || DEFAULT_WORKSPACE_NAME;
   const passwordHash = await hashPassword(password);
+  const claim = crypto.randomUUID();
+  // 数据库中的唯一声明与账号写入同事务，不能靠散落在异步哈希两侧的空库检查抢首管。
   await db.batch([
-    db.prepare("INSERT OR IGNORE INTO tenants (id,name,region,status) VALUES (?,?,'','active')").bind(tenantId, workspaceName),
-    db.prepare("INSERT OR IGNORE INTO users (id,email,display_name,password_hash,must_change_password,status) VALUES (?,?,?,?,0,'active')").bind(userId, normalizedEmail, displayName, passwordHash),
-    db.prepare("INSERT OR IGNORE INTO role_memberships (tenant_id,user_id,role,status) VALUES (?,?,?,'active')").bind(tenantId, userId, "admin"),
+    db.prepare("INSERT OR IGNORE INTO app_settings (key,value) SELECT 'initial_admin_claim',? WHERE NOT EXISTS (SELECT 1 FROM users)").bind(claim),
+    db.prepare("INSERT INTO tenants (id,name,region,status) SELECT ?,?,'','active' WHERE EXISTS (SELECT 1 FROM app_settings WHERE key='initial_admin_claim' AND value=?)").bind(tenantId, workspaceName, claim),
+    db.prepare("INSERT INTO users (id,email,display_name,password_hash,must_change_password,status) SELECT ?,?,?,?,0,'active' WHERE EXISTS (SELECT 1 FROM app_settings WHERE key='initial_admin_claim' AND value=?)").bind(userId, normalizedEmail, displayName, passwordHash, claim),
+    db.prepare("INSERT INTO role_memberships (tenant_id,user_id,role,status) SELECT ?,?,?,'active' WHERE EXISTS (SELECT 1 FROM app_settings WHERE key='initial_admin_claim' AND value=?)").bind(tenantId, userId, "admin", claim),
   ]);
+  const winner = await db.prepare("SELECT value FROM app_settings WHERE key='initial_admin_claim'").first<{ value: string }>();
+  if (winner?.value !== claim) return null;
   const account = await findAccount(db, normalizedEmail);
   if (!account || account.status !== "active" || !(await verifyPassword(password, account.passwordHash ?? ""))) return null;
   return account;

@@ -1,4 +1,4 @@
-import { blendMastery, calculateDiagnosticScores, isRecommendationDue, matchesDiagnosticItemSet } from "./learning-loop";
+import { calculateDiagnosticScores, isRecommendationDue, matchesDiagnosticItemSet } from "./learning-loop";
 import type { PlatformDatabase } from "./platform-runtime";
 import type { PlatformContext } from "./platform-store";
 import { assertDiagnosticMedia } from "./diagnostic-media";
@@ -6,6 +6,7 @@ import type { ChoiceSnapshot } from "./diagnostic-types";
 import { suggestIntervention } from "./intervention-support";
 import { createFamilyPlan, exchangePartner, readFamilyPlan, readFamilyWorkSnapshot } from "./family-task";
 import { assertSubmissionReviewAccess } from "./access-control";
+import { auditStatement } from "./audit";
 
 type DiagnosticAnswerInput = { itemId: string; selectedOption: number; revision: number };
 type RecommendationSource = "diagnostic" | "teacher" | "family" | "system";
@@ -31,31 +32,13 @@ export async function assertTeacherStudentAccess(db: PlatformDatabase, context: 
   if (!enrollment) throw new Error("forbidden");
 }
 
-export async function updateMasteryEvidence(db: PlatformDatabase, input: {
-  tenantId: string;
-  studentUserId: string;
-  objectiveId: string;
-  score: number;
-  evidenceCount?: number;
-}) {
-  const previous = await db.prepare(`SELECT mastery,evidence_count AS evidenceCount FROM mastery_snapshots
-    WHERE tenant_id=? AND student_user_id=? AND objective_id=? ORDER BY id DESC LIMIT 1`)
-    .bind(input.tenantId, input.studentUserId, input.objectiveId)
-    .first<{ mastery: number; evidenceCount: number }>();
-  const next = blendMastery(previous ? Number(previous.mastery) : null, Number(previous?.evidenceCount ?? 0), input.score, input.evidenceCount ?? 1);
-  await db.prepare(`INSERT INTO mastery_snapshots (tenant_id,student_user_id,objective_id,mastery,evidence_count)
-    VALUES (?,?,?,?,?)`)
-    .bind(input.tenantId, input.studentUserId, input.objectiveId, next.mastery, next.evidenceCount)
-    .run();
-  return next;
-}
-
 export function prepareMasteryEvidenceInsert(db: PlatformDatabase, input: {
   tenantId: string;
   studentUserId: string;
   objectiveId: string;
   score: number;
   evidenceCount?: number;
+  onlyIfChanged?: boolean;
 }) {
   const score = Math.max(0, Math.min(1, input.score));
   const evidenceCount = Math.max(1, input.evidenceCount ?? 1);
@@ -69,7 +52,7 @@ export function prepareMasteryEvidenceInsert(db: PlatformDatabase, input: {
       SELECT id,mastery,evidence_count FROM mastery_snapshots
       WHERE tenant_id=? AND student_user_id=? AND objective_id=?
       ORDER BY id DESC LIMIT 1
-    ) latest ON 1=1`)
+    ) latest ON 1=1${input.onlyIfChanged ? " WHERE changes()>0" : ""}`)
     .bind(
       input.tenantId, input.studentUserId, input.objectiveId,
       score, score, evidenceCount,
@@ -173,40 +156,19 @@ export async function answerReviewItem(db: PlatformDatabase, context: PlatformCo
   if (!Number.isInteger(input.revision) || input.revision !== row.revision || row.objectiveId !== row.itemObjectiveId) throw new Error("review_item_changed");
   const correct = input.selectedOption === Number(row.correctOption);
   const nextDueAt = correct ? null : tomorrowIso();
-  const updated = await db.prepare(`UPDATE learning_recommendations
+  const [updated] = await db.batch([
+    db.prepare(`UPDATE learning_recommendations
     SET status=?,due_at=?,completed_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE NULL END
     WHERE id=? AND tenant_id=? AND student_user_id=? AND status='pending' AND due_at IS ?
       AND EXISTS (SELECT 1 FROM diagnostic_items di WHERE di.id=? AND di.tenant_id=learning_recommendations.tenant_id
         AND di.revision=? AND di.objective_id=learning_recommendations.objective_id)`)
-    .bind(correct ? "completed" : "pending", nextDueAt, correct ? 1 : 0, row.id, context.tenantId, context.userId, row.dueAt, row.itemId, row.revision)
-    .run();
+      .bind(correct ? "completed" : "pending", nextDueAt, correct ? 1 : 0, row.id, context.tenantId, context.userId, row.dueAt, row.itemId, row.revision),
+    // 必须紧邻条件更新；未成功答题时不能产生掌握度证据或成功审计。
+    prepareMasteryEvidenceInsert(db, { tenantId: context.tenantId, studentUserId: context.userId, objectiveId: row.objectiveId, score: correct ? 1 : 0, onlyIfChanged: true }),
+    auditStatement(db, context.tenantId, context.userId, "review_item.answered", "learning_recommendation", row.id, { correct }, true),
+  ]);
   if (!updated.meta.changes) throw new Error("review_item_changed");
-  await updateMasteryEvidence(db, {
-    tenantId: context.tenantId,
-    studentUserId: context.userId,
-    objectiveId: row.objectiveId,
-    score: correct ? 1 : 0,
-  });
   return { id: row.id, correct, status: correct ? "completed" : "pending", dueAt: nextDueAt };
-}
-
-async function createRecommendation(db: PlatformDatabase, input: {
-  tenantId: string;
-  studentUserId: string;
-  objectiveId?: string | null;
-  sourceType: RecommendationSource;
-  title: string;
-  detail: string;
-  dueAt?: string | null;
-  createdBy: string;
-}) {
-  const id = crypto.randomUUID();
-  await db.prepare(`INSERT INTO learning_recommendations
-    (id,tenant_id,student_user_id,objective_id,source_type,source_id,title,detail,due_at,status,created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,'pending',?)`)
-    .bind(id, input.tenantId, input.studentUserId, input.objectiveId ?? null, input.sourceType, id, input.title, input.detail, input.dueAt ?? null, input.createdBy)
-    .run();
-  return id;
 }
 
 export async function createIntervention(db: PlatformDatabase, context: PlatformContext, input: {
@@ -226,19 +188,30 @@ export async function createIntervention(db: PlatformDatabase, context: Platform
     const suggestion = await suggestIntervention(context, input.studentUserId, input.objectiveId);
     if (!suggestion.ready || input.evidenceKey !== suggestion.evidenceKey) throw new Error("support_evidence_changed");
     const sourceId = `support:${context.userId}:${suggestion.evidenceKey}`;
-    const result = await db.prepare(`INSERT INTO learning_recommendations
+    const id = crypto.randomUUID();
+    const [result] = await db.batch([
+      db.prepare(`INSERT INTO learning_recommendations
       (id,tenant_id,student_user_id,objective_id,source_type,source_id,title,detail,due_at,status,created_by)
       VALUES (?,?,?,?,'teacher',?,?,?,?,'pending',?)
       ON CONFLICT(tenant_id,student_user_id,source_type,source_id) DO NOTHING`)
-      .bind(crypto.randomUUID(), context.tenantId, input.studentUserId, input.objectiveId, sourceId, input.title,
-        `${input.detail}\n\n【教师确认的选择依据】\n${suggestion.rationale}`, input.dueAt ?? null, context.userId).run();
+        .bind(id, context.tenantId, input.studentUserId, input.objectiveId, sourceId, input.title,
+          `${input.detail}\n\n【教师确认的选择依据】\n${suggestion.rationale}`, input.dueAt ?? null, context.userId),
+      auditStatement(db, context.tenantId, context.userId, "intervention.created", "learning_recommendation", id, {}, true),
+    ]);
     const saved = await db.prepare(`SELECT id,status FROM learning_recommendations
       WHERE tenant_id=? AND student_user_id=? AND source_type='teacher' AND source_id=?`)
       .bind(context.tenantId, input.studentUserId, sourceId).first<{ id: string; status: string }>();
     if (!saved) throw new Error("intervention_save_failed");
     return { ...saved, created: !!result.meta.changes };
   }
-  const id = await createRecommendation(db, { tenantId: context.tenantId, studentUserId: input.studentUserId, objectiveId: input.objectiveId, sourceType: "teacher", title: input.title, detail: input.detail, dueAt: input.dueAt, createdBy: context.userId });
+  const id = crypto.randomUUID();
+  await db.batch([
+    db.prepare(`INSERT INTO learning_recommendations
+      (id,tenant_id,student_user_id,objective_id,source_type,source_id,title,detail,due_at,status,created_by)
+      VALUES (?,?,?,?,'teacher',?,?,?,?,'pending',?)`)
+      .bind(id, context.tenantId, input.studentUserId, input.objectiveId, id, input.title, input.detail, input.dueAt ?? null, context.userId),
+    auditStatement(db, context.tenantId, context.userId, "intervention.created", "learning_recommendation", id),
+  ]);
   return { id, status: "pending" };
 }
 
@@ -264,6 +237,7 @@ export async function createFamilyTask(db: PlatformDatabase, context: PlatformCo
     db.prepare(`INSERT INTO notifications (id,tenant_id,user_id,title,detail,kind,scheduled_for)
       VALUES (?,?,?,?,?,'family_task',?)`)
       .bind(crypto.randomUUID(), context.tenantId, input.studentUserId, input.title, input.detail, input.dueAt ?? null),
+    auditStatement(db, context.tenantId, context.userId, "family_task.created", "learning_recommendation", id),
   ]);
   return { id, status: "pending" };
 }
@@ -308,14 +282,16 @@ export async function updateFamilyTask(db: PlatformDatabase, context: PlatformCo
   if (input.revision !== undefined && input.revision !== (previous?.revision ?? 0)) throw new Error("family_task_changed");
   const basePlan = input.templateId === undefined ? previous ?? createFamilyPlan() : createFamilyPlan(input.templateId, input.partner ?? previous?.partner);
   const plan = { ...basePlan, partner: exchangePartner(input.partner ?? basePlan.partner), revision: (previous?.revision ?? 0) + 1 };
-  const result = await db.prepare(`UPDATE learning_recommendations
+  const [result] = await db.batch([
+    db.prepare(`UPDATE learning_recommendations
     SET title=?,detail=?,due_at=?,assignment_id=?,objective_id=?,family_plan_json=?,updated_at=CURRENT_TIMESTAMP
     WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL AND family_plan_json=?
       AND ((assignment_id IS ? AND objective_id IS ?)
         OR NOT EXISTS (SELECT 1 FROM submissions s WHERE s.tenant_id=? AND s.family_task_id=?))`)
-    .bind(input.title, input.detail, input.dueAt ?? null, input.assignmentId, input.objectiveId, JSON.stringify(plan), input.id, context.tenantId, task.familyPlanJson,
-      input.assignmentId, input.objectiveId, context.tenantId, input.id)
-    .run();
+      .bind(input.title, input.detail, input.dueAt ?? null, input.assignmentId, input.objectiveId, JSON.stringify(plan), input.id, context.tenantId, task.familyPlanJson,
+        input.assignmentId, input.objectiveId, context.tenantId, input.id),
+    auditStatement(db, context.tenantId, context.userId, "family_task.updated", "learning_recommendation", input.id, {}, true),
+  ]);
   if (!result.meta.changes) {
     const latest = await ownedFamilyTask(db, context, input.id);
     throw new Error(latest.familyPlanJson !== task.familyPlanJson ? "family_task_changed" : "family_task_has_submissions");
@@ -335,9 +311,12 @@ export async function confirmFamilySubmission(db: PlatformDatabase, context: Pla
     const snapshot = readFamilyWorkSnapshot(submission.familySnapshotJson);
     if (!snapshot || snapshot.partner === "family") throw new Error("family_confirmation_required");
   } else await assertGuardianStudentAccess(db, context, submission.studentUserId);
-  const result = await db.prepare(`UPDATE submissions SET family_help_level=?,family_confirmed_at=CURRENT_TIMESTAMP,family_confirmed_by=?,family_confirmation_role=?
+  const [result] = await db.batch([
+    db.prepare(`UPDATE submissions SET family_help_level=?,family_confirmed_at=CURRENT_TIMESTAMP,family_confirmed_by=?,family_confirmation_role=?
     WHERE id=? AND tenant_id=? AND review_status!='reviewed'`)
-    .bind(input.helpLevel, context.userId, teacherWitness ? "teacher" : "guardian", input.submissionId, context.tenantId).run();
+      .bind(input.helpLevel, context.userId, teacherWitness ? "teacher" : "guardian", input.submissionId, context.tenantId),
+    auditStatement(db, context.tenantId, context.userId, teacherWitness ? "family_submission.witnessed" : "family_submission.confirmed", "submission", input.submissionId, { helpLevel: input.helpLevel }, true),
+  ]);
   if (!result.meta.changes) throw new Error("submission_already_reviewed");
   return { submissionId: input.submissionId, helpLevel: input.helpLevel };
 }
@@ -345,12 +324,14 @@ export async function confirmFamilySubmission(db: PlatformDatabase, context: Pla
 export async function archiveFamilyTask(db: PlatformDatabase, context: PlatformContext, id: string) {
   await ownedFamilyTask(db, context, id);
   // 与提交时的活动任务条件共同保证：并发归档不会留下无法确认或评分的作品。
-  const result = await db.prepare(`UPDATE learning_recommendations
+  const [result] = await db.batch([
+    db.prepare(`UPDATE learning_recommendations
     SET status='archived',archived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
     WHERE id=? AND tenant_id=? AND source_type='family' AND archived_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM submissions s WHERE s.tenant_id=? AND s.family_task_id=? AND s.review_status!='reviewed')`)
-    .bind(id, context.tenantId, context.tenantId, id)
-    .run();
+      .bind(id, context.tenantId, context.tenantId, id),
+    auditStatement(db, context.tenantId, context.userId, "family_task.archived", "learning_recommendation", id, {}, true),
+  ]);
   if (!result.meta.changes) throw new Error("family_submission_pending");
   return { id, status: "archived" };
 }
@@ -374,14 +355,18 @@ export async function updateRecommendationStatus(db: PlatformDatabase, context: 
       throw new Error("forbidden");
     }
   }
-  await db.prepare(`UPDATE learning_recommendations SET status=?,updated_at=CURRENT_TIMESTAMP,
+  const [result] = await db.batch([
+    db.prepare(`UPDATE learning_recommendations SET status=?,updated_at=CURRENT_TIMESTAMP,
     completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE NULL END
-    WHERE id=? AND tenant_id=?`)
-    .bind(input.status, input.status, input.id, context.tenantId).run();
+    WHERE id=? AND tenant_id=? AND archived_at IS NULL`)
+      .bind(input.status, input.status, input.id, context.tenantId),
+    auditStatement(db, context.tenantId, context.userId, "recommendation.status_updated", "learning_recommendation", input.id, { status: input.status }, true),
+  ]);
+  if (!result.meta.changes) throw new Error("recommendation_not_found");
   return { id: input.id, status: input.status };
 }
 
-export async function setClassEnrollments(db: PlatformDatabase, context: PlatformContext, input: { classId: string; studentUserIds: string[] }) {
+export async function setClassEnrollments(db: PlatformDatabase, context: PlatformContext, input: { classId: string; studentUserIds: string[]; expectedStudentUserIds?: string[] }) {
   const uniqueStudents = [...new Set(input.studentUserIds)].filter(Boolean);
   const classRow = await db.prepare("SELECT id FROM classes WHERE id=? AND tenant_id=?").bind(input.classId, context.tenantId).first();
   if (!classRow) throw new Error("class_not_found");
@@ -393,12 +378,26 @@ export async function setClassEnrollments(db: PlatformDatabase, context: Platfor
       .bind(context.tenantId, ...uniqueStudents).all<{ userId: string }>();
     if (students.results.length !== uniqueStudents.length) throw new Error("invalid_student_ids");
   }
-  await db.batch([
-    db.prepare("UPDATE enrollments SET status='disabled' WHERE tenant_id=? AND class_id=?").bind(context.tenantId, input.classId),
+  const expectedStudents = input.expectedStudentUserIds === undefined ? undefined : [...new Set(input.expectedStudentUserIds)].filter(Boolean);
+  const auditId = crypto.randomUUID();
+  const expectedFilter = expectedStudents === undefined ? "" : ` AND
+    (SELECT COUNT(*) FROM enrollments e WHERE e.tenant_id=? AND e.class_id=? AND e.status='active')=?
+    AND NOT EXISTS (SELECT 1 FROM enrollments e WHERE e.tenant_id=? AND e.class_id=? AND e.status='active'
+      AND e.student_user_id NOT IN (SELECT value FROM json_each(?)))`;
+  const expectedArgs = expectedStudents === undefined ? [] : [context.tenantId, input.classId, expectedStudents.length, context.tenantId, input.classId, JSON.stringify(expectedStudents)];
+  // 审计与名单比较在同一事务中；后续语句只在本次条件审计行存在时执行，避免旧页面覆盖并发编班。
+  const [accepted] = await db.batch([
+    db.prepare(`INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json)
+      SELECT ?,?,?,'class.enrollments_updated','class',?,?
+      WHERE EXISTS (SELECT 1 FROM classes WHERE tenant_id=? AND id=?)${expectedFilter}`)
+      .bind(auditId, context.tenantId, context.userId, input.classId, JSON.stringify({ studentUserIds: uniqueStudents }), context.tenantId, input.classId, ...expectedArgs),
+    db.prepare("UPDATE enrollments SET status='disabled' WHERE tenant_id=? AND class_id=? AND EXISTS (SELECT 1 FROM audit_logs WHERE id=? AND tenant_id=?)").bind(context.tenantId, input.classId, auditId, context.tenantId),
     ...uniqueStudents.map((studentUserId) => db.prepare(`INSERT INTO enrollments (tenant_id,class_id,student_user_id,status)
-      VALUES (?,?,?,'active') ON CONFLICT(tenant_id,class_id,student_user_id) DO UPDATE SET status='active'`)
-      .bind(context.tenantId, input.classId, studentUserId)),
+      SELECT ?,?,?,'active' WHERE EXISTS (SELECT 1 FROM audit_logs WHERE id=? AND tenant_id=?)
+      ON CONFLICT(tenant_id,class_id,student_user_id) DO UPDATE SET status='active'`)
+      .bind(context.tenantId, input.classId, studentUserId, auditId, context.tenantId)),
   ]);
+  if (!accepted.meta.changes) throw new Error("enrollment_conflict");
   return { classId: input.classId, studentUserIds: uniqueStudents };
 }
 
@@ -415,12 +414,14 @@ export async function upsertLearningObjective(db: PlatformDatabase, context: Pla
     if (!existing) throw new Error("objective_not_found");
   }
   const id = input.id || crypto.randomUUID();
-  await db.prepare(`INSERT INTO learning_objectives (id,tenant_id,code,title,skill,level,status)
+  await db.batch([
+    db.prepare(`INSERT INTO learning_objectives (id,tenant_id,code,title,skill,level,status)
     VALUES (?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET code=excluded.code,title=excluded.title,skill=excluded.skill,
       level=excluded.level,status=excluded.status WHERE tenant_id=excluded.tenant_id`)
-    .bind(id, context.tenantId, input.code, input.title, input.skill, input.level, input.status)
-    .run();
+      .bind(id, context.tenantId, input.code, input.title, input.skill, input.level, input.status),
+    auditStatement(db, context.tenantId, context.userId, "learning_objective.saved", "learning_objective", id, { status: input.status }, true),
+  ]);
   return { ...input, id };
 }
 
@@ -450,13 +451,15 @@ export async function upsertDiagnosticItem(db: PlatformDatabase, context: Platfo
     if (!existing) throw new Error("diagnostic_item_not_found");
   }
   const id = input.id || crypto.randomUUID();
-  await db.prepare(`INSERT INTO diagnostic_items
+  await db.batch([
+    db.prepare(`INSERT INTO diagnostic_items
     (id,tenant_id,objective_id,level,prompt,options_json,correct_option,explanation,status,created_by,ability,media_id)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET objective_id=excluded.objective_id,level=excluded.level,prompt=excluded.prompt,
       options_json=excluded.options_json,correct_option=excluded.correct_option,explanation=excluded.explanation,
       status=excluded.status,ability=excluded.ability,media_id=excluded.media_id,revision=diagnostic_items.revision+1 WHERE tenant_id=excluded.tenant_id`)
-    .bind(id, context.tenantId, input.objectiveId, input.level, input.prompt, JSON.stringify(input.options.map((option) => option.trim())), input.correctOption, input.explanation, input.status, context.userId, ability, ability === "listening" ? input.mediaId : null)
-    .run();
+      .bind(id, context.tenantId, input.objectiveId, input.level, input.prompt, JSON.stringify(input.options.map((option) => option.trim())), input.correctOption, input.explanation, input.status, context.userId, ability, ability === "listening" ? input.mediaId : null),
+    auditStatement(db, context.tenantId, context.userId, "diagnostic_item.saved", "diagnostic_item", id, { status: input.status }, true),
+  ]);
   return { ...input, id };
 }

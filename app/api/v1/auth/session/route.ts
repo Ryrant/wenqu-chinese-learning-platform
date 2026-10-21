@@ -14,7 +14,7 @@ export async function GET(request: Request) {
         }
       }
     }
-    const context = await platformContext(request);
+    const context = await platformContext(request, undefined, { allowPasswordChange: true });
     return Response.json({
       authenticated: true,
       authMode,
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unexpected_error";
-    const status = message === "authentication_required" ? 200 : message === "forbidden" ? 403 : 500;
+    const status = message === "authentication_required" ? 200 : message === "account_access_denied" || message === "forbidden" ? 403 : 500;
     return Response.json({ authenticated: false, authMode, error: message }, { status, headers: { "cache-control": "no-store" } });
   }
 }

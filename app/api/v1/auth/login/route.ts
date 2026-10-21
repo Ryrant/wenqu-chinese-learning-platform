@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     JOIN tenants t ON t.id=rm.tenant_id AND t.status='active'
     WHERE rm.user_id=? AND rm.status='active' AND rm.role IN ('student','teacher','guardian','admin') LIMIT 1`)
     .bind(account.id).first();
-  if (!membership) return json("forbidden", 403);
+  if (!membership) return json("account_access_denied", 403);
   loginAttempts.delete(key);
   await db.prepare("UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?").bind(account.id).run();
   const now = Math.floor(Date.now() / 1000);
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
   const displayName = account.displayName;
   const mustChangePassword = account.mustChangePassword === 1;
   const jwtSecret = await ensureSiteJwtSecret(db);
-  const token = await createSessionToken({ email: account.email, displayName, iat: now, exp: now + maxAge }, jwtSecret);
+  const token = await createSessionToken({ email: account.email, displayName, iat: now, exp: now + maxAge, sessionVersion: account.sessionVersion }, jwtSecret);
   return Response.json({ user: { email: account.email, displayName, mustChangePassword } }, {
     status: 200,
     headers: { "cache-control": "no-store", "set-cookie": cookieValue(token, maxAge) },
