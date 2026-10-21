@@ -269,15 +269,21 @@ test("docker self-hosting files use SQLite and local upload volume", async () =>
 });
 
 test("README documents Docker deployment and role boundaries", async () => {
-  const readme = await read("README.md");
+  const [readme, compose] = await Promise.all([read("README.md"), read("compose.yaml")]);
   assert.match(readme, /Docker 自部署/);
   assert.match(readme, /SQLite/);
   assert.match(readme, /\/data\/huawen-zhixing\.db/);
   assert.match(readme, /\/data\/uploads/);
-  assert.match(readme, /docker compose up -d --build/);
+  assert.match(readme, /docker compose up -d/);
+  assert.match(readme, /docker compose pull/);
+  const image = compose.match(/image:\s*(\S+)/)?.[1];
+  assert.ok(image, "Compose 应指定应用镜像");
+  assert.ok(readme.includes(`docker build -t ${image} .`), "文档构建的镜像应与 Compose 使用的镜像一致");
+  assert.match(readme, /docker compose up -d --pull never/);
   assert.match(readme, /Cloudflare Workers \+ D1 \+ R2/);
   for (const role of ["管理员", "教师", "学生", "家长"]) assert.match(readme, new RegExp(role));
-  assert.match(readme, /不把 `reviewer` 暴露为独立可选角色/);
+  assert.match(readme, /账号只能进入已授权的工作台/);
+  assert.match(readme, /教师按班级、家长按监护绑定访问学生记录/);
 });
 
 test("standard build launcher delegates through the active npm CLI", async () => {
@@ -435,8 +441,10 @@ test("admin UI exposes post-deploy platform settings stored in D1", async () => 
   assert.match(staff, /OpenAI/);
   assert.match(staff, /内容审核/);
   assert.match(types, /platformSettings/);
-  assert.match(readme, /部署前.*零变量/s);
-  assert.match(readme, /平台设置.*OpenAI.*语音评测.*内容审核/s);
+  assert.match(readme, /外部 AI 服务可在部署后配置/);
+  assert.match(readme, /平台设置.*OpenAI Key.*模型名称/);
+  assert.match(readme, /语音评测与内容审核 Key.*仅保存凭据.*录音由教师人工评价.*内容审核使用基础规则/);
+  assert.match(readme, /公开部署.*HTTPS.*登录接口设置限流/);
   assert.doesNotMatch(readme, /Variables and Secrets|ADMIN_PASSWORD|JWT_SECRET|OPENAI_API_KEY|AI_API_KEY|SPEECH_API_KEY|MODERATION_API_KEY/);
 });
 
@@ -473,16 +481,16 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   assert.match(readme, /Deploy to Cloudflare Workers/);
   assert.match(readme, /Cloudflare Workers 连接 GitHub 仓库/);
   assert.match(readme, /一键部署/);
-  assert.match(readme, /本地 Wrangler 部署/);
-  assert.match(readme, /npm run build:standard/);
+  assert.match(readme, /Wrangler 部署/);
+  assert.match(readme, /npm run cf:deploy/);
   assert.match(readme, /npm run build/);
   assert.match(readme, /npx wrangler deploy/);
   assert.doesNotMatch(readme, /--keep-vars/);
   assert.doesNotMatch(readme, /GitHub Actions 自动部署/);
   assert.doesNotMatch(bug, /ChatGPT Sites|Platform Sites/i);
-  assert.match(readme, /tests\/auth-token\.test\.mjs/);
+  assert.match(readme, /npm test/);
   const quickStartIndex = readme.indexOf("## ⚡ 快速开始");
-  const deployIndex = readme.indexOf("### 方式一：Cloudflare Workers 连接 GitHub 仓库（推荐）");
+  const deployIndex = readme.indexOf("### ☁️ Cloudflare 部署");
   const usageIndex = readme.indexOf("## 📖 使用说明");
   const localDevIndex = readme.indexOf("## 👨‍💻 本地开发");
   assert.ok(quickStartIndex >= 0 && deployIndex > quickStartIndex && usageIndex > deployIndex);
@@ -492,7 +500,8 @@ test("repository infrastructure includes issue forms and self-hosted Cloudflare 
   assert.match(readme.slice(localDevIndex), /git clone https:\/\/github\.com\/Ryrant\/wenqu-chinese-learning-platform\.git/);
   assert.match(readme.slice(localDevIndex), /npm ci/);
   assert.match(readme.slice(localDevIndex), /npm run dev/);
-  assert.match(readme.slice(localDevIndex), /x-huawen-zhixing-dev-user/);
+  assert.match(readme.slice(localDevIndex), /开发模式使用本地 D1\/R2.*空库自动创建开发管理员/);
+  assert.match(readme.slice(localDevIndex), /正式登录流程.*npm run build.*npm start/);
   assert.doesNotMatch(readme.slice(localDevIndex), /AUTH_MODE|DEV_USER_EMAIL/);
 });
 

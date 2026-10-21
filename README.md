@@ -1,11 +1,10 @@
 <div align="center">
-  <!-- <img src="./public/og.png" alt="华文知行协同教学平台 Logo" width="120" /> -->
+  <img src="./public/icon.svg" alt="华文知行 Logo" width="120" />
   <h1>华文知行协同教学平台</h1>
-  <p>支持 Cloudflare Workers + D1/R2 与 Docker + SQLite/本地文件存储的海外华文学校多租户教学平台</p>
+  <p>连接课堂学习、教师反馈与家庭交流的华文教学平台</p>
 </div>
 
 <p align="center">
-  <a href="https://github.com/Ryrant/wenqu-chinese-learning-platform/releases"><img src="https://img.shields.io/github/v/release/Ryrant/wenqu-chinese-learning-platform?label=Release&color=3b82f6" alt="Release" /></a>
   <a href="https://github.com/Ryrant/wenqu-chinese-learning-platform/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Ryrant/wenqu-chinese-learning-platform?color=10b981" alt="License" /></a>
   <a href="https://github.com/Ryrant/wenqu-chinese-learning-platform/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Ryrant/wenqu-chinese-learning-platform/ci.yml?branch=main&label=CI" alt="CI" /></a>
 </p>
@@ -14,87 +13,71 @@
 
 ## ✨ 为什么做这个项目
 
-华文知行协同教学平台面向海外华文学校和华裔青少年，提供学生、教师、家长和机构管理员四端工作台。项目围绕“诊断—学习—反馈—学情分析”闭环设计。Cloudflare 部署使用用户自己的 D1/R2；Docker 自部署使用容器数据卷中的 SQLite 和本地上传目录。
+华文教学需要连接课堂练习、教师评价和家庭交流。华文知行为海外华文学校提供学生、教师、家长和机构管理员四端工作台，将课程、作业、学习记录与家校反馈放在同一个平台，支持学校自行部署和管理数据。
 
 ## 🚀 核心能力
 
-- 学生端：阅读与听力选择题、图片口述和短文表达诊断、听说读写证据画像，以及今日学习计划、错题复习和来源化知识问答。
-- 教师端：关联目标与三维评分量规的任务、诊断草稿审核发布、班级学情热力图和学生证据画像，以及分层干预、来源化备课和人工批阅。
-- 家长端：多孩子切换、最近 7 天真实成长报告、亲子家庭任务，以及原有学习分析授权管理。
-- 机构端：课程目标与诊断题库、幂等班级编班、教学质量看板，以及原有内容权属审核、成员管理和审计日志。
-- 数据持久化：Cloudflare 部署使用 D1 保存结构化数据、R2 保存教材和音频；Docker 自部署使用 SQLite 和本地文件目录。
-- 安全降级：未配置模型或语音服务时，明确使用来源化模板或教师复核，不展示虚假 AI 状态。
-- 自托管部署：支持本地开发、标准 Cloudflare Workers 部署和 Docker 自部署。
+### 🎓 学习与教学
 
-### v1.2.0 UI 与工作流优化
+- 阅读、听力、图片口述与短文表达诊断，记录听说读写表现
+- 今日学习计划、错题复习、分层练习与延后复测
+- 教师备课、任务发布、文字与录音作业批阅，以及班级学情查看
+- 基于已审核教材的知识问答和 AI 辅助批阅，由教师确认最终评价
 
-- 四端统一正文、表单、按钮、辅助信息的字号与行高；桌面端提高信息密度，390px 手机端改为纵向布局，不靠缩小文字容纳内容。
-- 学生 AI 课堂按“问题标题 → 回答 → 可参考内容 → 引用来源”展示；本地来源化模式直接提取已审核片段，找不到依据时明确拒答。
-- 教师端采用 4:6 班级任务布局，教案草稿支持查看、编辑和归档，作业批阅拆分为待办列表与独立批阅面板。
-- 家长端统一当前孩子切换入口；家庭任务关联课程作业与目标，经学生提交、家长确认帮助程度、教师评价后完成，支持编辑、重新打开和归档。成长报告只展示真实近七天记录。
-- 机构端将服务状态、内容状态和审计操作中文化，提供内容重新处理与归档、审计筛选、班级编班和可钻取质量指标。
-- 所有“删除”操作均为可追溯归档，不删除 D1 历史记录或 R2 原文件。
+### 🏠 家校协作
+
+- 家长切换已绑定的孩子，查看近期学习报告与作品
+- 发布家庭交流任务，记录实际交流对象和帮助程度
+- 家长反馈参与困难，教师追加处理办法并跟进
+- 汇总练习、迁移任务与复测作品，生成可打印的单元证据报告
+
+### 🏫 机构管理
+
+- 管理成员账号、角色授权、班级编班和监护绑定
+- 维护课程目标、诊断题库，上传并审核 PDF/DOCX/TXT 教材
+- 查看教学质量、班级试用记录与操作审计
+- 支持 Cloudflare Workers + D1 + R2 或 Docker + SQLite 自部署
 
 ## ⚡ 快速开始
 
 ### 📋 前置要求
 
-- [Cloudflare 账号](https://dash.cloudflare.com/)
-- [GitHub 账号](https://github.com/)
-- Docker 与 Docker Compose（仅 Docker 自部署需要）
+- Docker 方式：Docker Engine 与 Docker Compose V2
+- Cloudflare 方式：Cloudflare 账号与 GitHub 账号
+- 外部 AI 服务可在部署后配置，不影响基础教学功能
 
-### 方式一：Cloudflare Workers 连接 GitHub 仓库（推荐）
+### 📦 Docker 自部署
 
-这种方式适合长期自托管，后续同步 Fork 后可以在 Cloudflare 中重新部署。
+获取源码并构建仓库 Compose 配置使用的镜像：
 
-1. 在 GitHub 点击右上角 **Fork**，把仓库复制到你自己的账号。
-2. 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)。
-3. 进入 **Workers & Pages**，点击 **Create application**。
-4. 选择 **Import a repository** 或 **Continue with GitHub**，授权并选择你 Fork 的仓库。
-5. Project Name 可填写 `huawen-zhixing-platform`。
-6. Build command 填写：
+```bash
+git clone https://github.com/Ryrant/wenqu-chinese-learning-platform.git
+cd wenqu-chinese-learning-platform
+docker build -t ghcr.io/ryrant/huawen-zhixing:latest .
+docker compose up -d --pull never
+docker compose logs -f
+```
 
-   ```bash
-   npm run build
-   ```
+本机访问 [http://localhost:3000](http://localhost:3000)。远程使用时通过 HTTPS 域名访问；同机反向代理可将 `compose.yaml` 的端口映射改为 `127.0.0.1:3000:3000`。
 
-7. Deploy command 填写：
+仓库的 `compose.yaml` 也可拉取预构建镜像。具备 `ghcr.io/ryrant/huawen-zhixing:latest` 的访问权限时，可用 `docker compose pull` 和 `docker compose up -d` 替代本地构建；需要认证时先执行 `docker login ghcr.io`。
 
-   ```bash
-   npx wrangler deploy
-   ```
+### ☁️ Cloudflare 部署
 
-8. Cloudflare 会根据 `wrangler.toml` 自动创建并绑定 D1/R2。部署前是零变量、零密钥配置，不需要手动填写 D1 database ID、R2 bucket 名称或任何运行参数。部署后在项目绑定中确认：
+Fork 本仓库，在 Cloudflare Workers 连接 GitHub 仓库，并填写：
 
-   - D1 binding：`DB`
-   - R2 binding：`CONTENT`
+| 配置项 | 内容 |
+| --- | --- |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
 
-部署成功后，访问 Cloudflare 分配的 `workers.dev` 域名，页面会提示初始化华文知行工作区。按提示创建首个管理员邮箱和密码后即可进入后台。
+D1/R2 由部署流程自动创建，绑定名分别为 `DB` 和 `CONTENT`。部署后打开分配的 Worker URL。
 
-如需接入外部模型、语音评测或内容审核，进入后台 **平台设置** 添加 OpenAI Key、通用 AI Key、模型名、语音评测 Key 和内容审核 Key。配置会保存到你自己的 D1，不配置时系统会使用来源化模板或教师复核降级，不影响基础部署。
-
-语音评测与内容审核目前保存接入凭据；录音仍由教师人工评价，内容审核仍使用现有基础规则。平台设置和健康状态会区分凭据保存与当前实际处理方式。
-
-### 方式二：一键部署
-
-点击按钮进入 Cloudflare 部署向导：
+也可以使用一键部署：
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Ryrant/wenqu-chinese-learning-platform)
 
-一键部署适合快速试用。部署过程中只需确认：
-
-- Build command：`npm run build`
-- Deploy command：`npx wrangler deploy`
-- D1 binding：`DB`
-- R2 binding：`CONTENT`
-
-D1/R2 会在一键部署流程中自动创建，不需要手动填写变量、D1 database ID、R2 bucket 名称、管理员密码或登录签名密钥。部署完成后打开站点，按页面提示完成首次初始化。
-
-一键部署后续同步更新不如 GitHub 仓库连接方式方便；长期使用建议迁移到方式一。
-
-### 方式三：本地 Wrangler 部署
-
-本地部署会发布到当前 `wrangler login` 登录的 Cloudflare 账号。
+已有本地源码时，可用 Wrangler 部署：
 
 ```bash
 npm ci
@@ -102,330 +85,92 @@ npx wrangler login
 npm run cf:deploy
 ```
 
-本地 Wrangler 部署同样使用 `wrangler.toml` 中的 `DB` / `CONTENT` 绑定。首次部署时 Wrangler 会为缺少资源 ID 或 bucket 名的绑定自动创建 D1/R2；不要提交密码、登录签名密钥或 Cloudflare Token。
+### 🔧 首次初始化
 
-### 方式四：Docker 自部署
+1. Docker 或 Cloudflare 部署后，打开站点首页，填写机构名称、管理员邮箱和密码，显示名称可选。
+2. 初始化完成后进入管理员工作台，创建教师、学生和家长的成员账号，配置角色、班级与监护关系。
+3. 需要 AI 功能时，在「平台设置」中填写 OpenAI Key 和模型名称。
 
-Docker 自部署适合希望在自有服务器、NAS 或学校内网运行的场景。该方式不依赖 Cloudflare D1/R2，镜像以 root 用户运行，默认使用容器数据卷中的 SQLite 与本地文件目录：
-
-- 结构化数据：`/data/huawen-zhixing.db`
-- 上传教材、图片和音频：`/data/uploads`
-
-在仓库目录构建并启动：
-
-```bash
-docker compose up -d --build
-```
-
-Compose 会构建本地镜像 `huawen-zhixing:local`，配置自动重启，并继承镜像内的健康检查。运行镜像仅包含生产依赖、前端资源、Node.js 服务和启动脚本。
-
-查看状态和日志：
-
-```bash
-docker compose ps
-docker compose logs -f huawen-zhixing
-```
-
-访问：
-
-```text
-http://localhost:3000/
-```
-
-首次访问会进入管理员初始化流程。Docker 版与 Cloudflare 版使用同一套数据模型和角色模型；第一阶段不提供 D1 与 SQLite 的自动迁移工具，也不面向多容器横向扩展。
-
-#### 📦 预构建镜像
-
-`.github/workflows/docker.yml` 在推送 `v*` 版本标签时构建并发布 GHCR 镜像，支持 `linux/amd64` 与 `linux/arm64`。PR 和手动运行只验证构建。稳定版本生成完整版本、主次版本、主版本和 `latest` 标签；预发布版本只生成完整预发布标签。
-
-首次成功发布镜像后，可将 `docker-compose.yml` 中的 `image: huawen-zhixing:local` 改为 `image: ghcr.io/ryrant/wenqu-chinese-learning-platform:latest`，移除 `build: .`，然后运行：
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-首次发布后需将 GHCR 包可见性设为 Public，或先使用有权访问该包的账号执行 `docker login ghcr.io`。正式部署建议将 `latest` 换为已发布的完整版本号。Fork 仓库发布时，镜像地址使用实际仓库路径的小写形式。
-
-#### 🔄 升级与数据保留
-
-源码构建方式在拉取新代码后重新执行 `docker compose up -d --build`；预构建镜像方式重新执行 `docker compose pull` 和 `docker compose up -d`。沿用原来的 Compose 项目名和 `huawen-zhixing-data` 数据卷，数据库及上传文件会继续保留。
-
-备份时先停止服务，再备份整个 `/data` 目录，完成后启动服务。不要使用 `docker compose down -v`，该命令会删除数据卷。容器端口默认映射到宿主机 `3000`；同机 HTTPS 反向代理可将端口映射改为 `127.0.0.1:3000:3000`。
-
-### 访问后台
-
-标准 Cloudflare Workers 部署完成后，打开 Worker URL：
-
-```text
-https://你的项目名.你的子域.workers.dev/
-```
-
-首次打开时会显示初始化表单。填写管理员邮箱、显示名称和密码后，系统会创建租户和仅拥有管理员角色的首个账号，并在 D1 中生成站点级登录签名密钥。其他人员由管理员按账号授权；初始化完成后再次访问会显示登录页。
-
-登录后会进入已授权角色的工作台。页面使用独立 URL，可刷新、收藏，并支持浏览器前进和后退：
-
-| 角色 | 页面路径 |
-| --- | --- |
-| 学生 | `/student/overview`、`/student/tasks`、`/student/tutor`、`/student/portfolio` |
-| 教师 | `/teacher/overview`、`/teacher/lessons`、`/teacher/classes`、`/teacher/reviews` |
-| 家长 | `/guardian/overview`、`/guardian/reports`、`/guardian/tasks`、`/guardian/consents` |
-| 管理员 | `/admin/overview`、`/admin/settings`、`/admin/content`、`/admin/knowledge`、`/admin/members`、`/admin/audits` |
-
-直接打开页面同样需要登录和相应角色授权，服务端继续按租户、班级和监护关系校验数据访问。
-
-### 升级 Cloudflare Workers
-
-- Cloudflare Workers 连接 GitHub 仓库：在你的 Fork 页面点击 **Sync fork** → **Update branch**，Cloudflare 会检测代码变化并重新部署。
-- 一键部署：建议重新部署，或迁移到 Cloudflare 连接 GitHub 仓库方式。
-- 本地 Wrangler 部署：拉取最新代码后重新执行 `npm ci` 和 `npm run cf:deploy`。
-
-升级后首次访问会自动清理一次可识别的旧演示账号默认附带的学生、教师和家长授权，保留管理员角色及有明确授权记录的角色。其他账号已有的明确角色授权继续保留；需要兼任其他角色时，由管理员在成员管理中为对应账号授权。
-
-当前前端已迁移到纯 Vite + React，HTTP API 由 Hono 统一提供。升级时重新安装依赖并构建即可，部署命令、D1/R2 绑定和 Docker 数据卷路径保持不变；Cloudflare 部署前仍无需填写变量或密钥。机构信息从当前租户读取，服务状态按配置和实际处理方式返回。
-
-### v1.2.0 升级提示
-
-`v1.2.0` 的数据库升级增加 `drizzle/0004_learning_loop.sql` 与 `drizzle/0005_ui_workflow.sql`。迁移只新增学习闭环表、工作流时间与归档字段，不删除或重命名已有结构。旧记录会使用创建时间回填更新时间；`wrangler.toml` 已将迁移目录指定为 `drizzle/`，运行时仍会幂等校验基础表和增量字段。
-
-本次基础流程修复另增 `drizzle/0006_learning_workflow_evidence.sql`，为评分维度、家庭作品及帮助程度增加字段和待评作品唯一索引，不回填或重算历史成绩。
-
-能力差异诊断增加 `drizzle/0007_ability_evidence.sql`，保存诊断类型、素材关联、题目版本和提交时的证据快照。旧诊断答案未保留题面时不会补造快照或计入新画像；旧记录与掌握度继续保留。
-
-家庭真实交流增加 `drizzle/0008_family_exchange.sql`，保存双语模板与任务版本、学生提交时的交流要求和实际交流对象，以及确认人的身份与角色。迁移仅新增字段，旧作品不补造历史要求，也不重算成绩。
-
-迁移任务与学习证据对照增加 `drizzle/0009_learning_sequences.sql`，关联初次作品、针对性练习与迁移任务，保存阶段作品快照和教师评价时的量规、帮助与情境确认。只新增结构，不补造旧作品量规或重算成绩。
-
-延后复测增加 `drizzle/0010_delayed_retest.sql`。教师可在已评价的迁移作品后安排一次复测，固定参照作品、北京时间开放时间和新情境要求；到时开放文字或录音提交，沿用目标与量规，并保留实际帮助和情境核对。迁移仅新增字段，旧任务组不自动生成复测，历史成绩保持原样。
-
-教师后续安排增加 `drizzle/0011_teaching_next_steps.sql`。教师可基于已批阅的迁移或复测作品，记录继续练习、减少提示、进阶挑战或补充证据的理由及仍待观察之处，并发布同一目标与量规下的下一轮任务组。安排、依据快照与新任务原子保存，每份依据作品对应一份已发布安排；教学判断不生成成绩或自动认定能力提升。旧任务不补造历史判断。
-
-真实试用记录增加 `drizzle/0012_trial_records.sql`。教师在任务组中记录备课、AI 草稿修改、批阅实际用时及工作范围，另行保留无法完成、退出和未改善的观察；记录可撤销并保留原因。个人耗时仅本人及本机构管理员可读，本班观察仅本班教师及管理员可读，不对学生或家长开放。批阅时可选填经核对的提示次数，空白与历史缺失保持未记录，明确填写 0 才表示没有提示；提示次数随作品评价和后续依据保存，不自动生成成绩或效果结论。
-
-家庭可用性反馈增加 `drizzle/0013_family_usability_feedback.sql`。有效绑定的家长按家庭任务版本记录参与情况、说明理解、操作帮助、替代交流与无法完成原因；无需先提交学生作品。反馈保存原任务快照和原班级，可带原因撤销并保留历史。教师仅查看原班记录，管理员查看本机构；学生不能读取。反馈与交流确认、任务状态、语言提示和成绩分别保存，不补造旧反馈或推断学习效果。
-
-班级试用批次增加 `drizzle/0014_trial_batches.sql`。教师或管理员固定单元目标、参与名单快照、北京时间观察周期和工作范围，显式关联或追加同班同目标的任务组及家庭任务版本。汇总复用实际用时、家庭反馈、迁移与复测证据，保留缺失、退出、未改善及撤销记录。教师仅看本班且仅本人耗时，管理员看本机构；学生和家长不能读取内部批次。批次可带原因撤销，不修改原作品、语言成绩或任务状态。
-
-家庭困难处理增加 `drizzle/0015_family_feedback_followups.sql`。教师在原班反馈下追加具体处理办法，家长选择对应记录再反馈已解决、部分改善、仍有困难或尚未尝试；后续反馈单独保存当时任务版本。原反馈、处理记录及撤销原因均保留，任务换班后不能将新反馈关联旧班处理。处理与反馈不改变任务状态、交流确认或语言成绩。
-
-已有 Cloudflare 环境升级时，先备份 D1，再执行安全基线脚本。基线脚本仅在对应结构完整存在时登记迁移；旧环境会登记已经完整存在的基线结构，再执行尚未应用的 `0004`、`0005`、`0006`、`0007`、`0008`、`0009`、`0010`、`0011`、`0012`、`0013`、`0014`、`0015`，空库不会被误标记。随后查看并执行远端增量迁移：
-
-```bash
-npx wrangler d1 export huawen-zhixing-db --remote --output=huawen-zhixing-db-before-v1.2.sql
-npx wrangler d1 execute huawen-zhixing-db --remote --file=scripts/baseline-d1-migrations.sql
-npx wrangler d1 migrations list huawen-zhixing-db --remote
-npx wrangler d1 migrations apply huawen-zhixing-db --remote
-```
-
-随后执行发布验证：
-
-```bash
-npm ci
-npm run lint
-npm test
-npm audit --omit=dev
-npx wrangler deploy --dry-run --outdir .wrangler-dry-run
-```
-
-如需回滚，恢复 `v1.1.0` 应用代码并重新部署，保留 `0004_learning_loop.sql` 和 `0005_ui_workflow.sql` 新增的表与列，避免破坏已产生的诊断、推荐、量规、编班和归档数据。回滚旧代码不会读取这些新增结构。
+首个账号只拥有管理员角色；其他角色需单独授权。新成员首次登录修改临时密码后，才能使用业务功能。
 
 ## 📖 使用说明
 
-推荐按 **机构配置 → 教师发布 → 学生学习 → 家长查看** 的顺序完成一次学习闭环。
+按 **机构配置 → 教师发布 → 学生学习 → 家长查看** 完成一次教学流程：
 
-### 机构管理员
+| 角色 | 主要操作 |
+| --- | --- |
+| 机构管理员 | 创建成员、编班和绑定监护人，维护课程目标、诊断题库与教材内容权属 |
+| 教师 | 发布诊断和作业，批阅作品，安排分层练习、迁移任务和复测 |
+| 学生 | 完成今日任务，提交文字或录音，复习错题并查看反馈 |
+| 家长 | 查看孩子报告，参与家庭交流任务，确认帮助程度并反馈困难 |
 
-1. 使用管理员账号登录。
-2. 在成员管理中创建教师、学生和家长成员账号，并设置临时密码。
-3. 维护学生与监护人绑定关系，并使用班级编班为班级配置学生。
-4. 在内容中心维护课程目标，选择能力与级别配置阅读或听力选择题；听力题需上传音频。
-5. 上传 PDF/DOCX/TXT 教材，确认内容权属、文本抽取和切片结果后发布。
-6. 在机构总览查看目标覆盖、待批阅、低掌握度、内容审核、授权覆盖和 AI 使用情况。
+账号只能进入已授权的工作台，教师按班级、家长按监护绑定访问学生记录。
 
-### 教师
+### 💾 数据与备份
 
-1. 创建班级，以及关联至少一个学习目标和三维评分量规的任务。
-2. 审核并发布任务。
-3. 查看班级学情热力图，并按学生和目标创建分层干预。
-4. 查看学生文字和语音提交。
-5. 对文字作业生成 AI 辅助批阅建议，填写总分并按实际观察评价目标和量规维度，确认后发布最终评分；家庭作品须先确认交流与帮助程度，同伴或教师替代交流可由本班教师见证确认。
-6. 在班级管理选择“图片口述诊断”或“短文表达诊断”，填写要求并保存草稿；图片口述须上传图片。在“本班任务与发布”核对后发布。批阅后，可在教学总览选择学生查看听说读写证据与原始作品。
-7. 在作业批阅的“学生分层干预”选择学生与目标，点击“依据诊断生成草稿”，查看证据并修改练习后确认发布。同一目标至少两个分项各有两次有效评价才生成建议；证据不足时补充诊断或由教师手动安排。
-8. 在作业批阅的“关联初次、练习与迁移”选择学生和已评价目标的初次作品，填写练习、新情境任务及情境变化后发布。后续沿用同一目标、量规与提交方式；批阅时记录实际帮助，迁移作品另需核对对象或情境确有改变。三阶段原始作品与评价可在同一对照中查看。
-9. 迁移或复测批阅后，可在任务组的“教师后续安排”选择依据作品、教学方向，填写理由、仍待观察之处和下一轮练习与迁移要求。发布后，学生从今日计划或任务组进入下一轮；师生家长均可追溯原判断与依据作品。
-10. 教师在任务组的“真实试用记录”新增用时或观察记录，并在批阅时选填提示次数；错误记录可填写原因撤销。管理员从“机构总览”查看机构范围的汇总与明细。共用备课只记一次；两种工作方式的任务范围、难度需另外核对，汇总不直接证明节省时间。
-11. 师生、家长在任务组打开“查看单元报告 / 打印”，可逐份查看初次、练习、迁移、复测作品及教师安排，再用打印窗口保存为 PDF。管理员从机构总览选择任务组报告。内部试用报告另行提供给教师和管理员，不进入学生或家长报告；每次打开均重新鉴权，不生成公开分享链接。
-12. 学生在成长档案、家长在成长报告、教师在教学总览、管理员在机构总览查看“家庭交流作品集”。按学习目标筛选并展开作品，可查看提交时的双语要求、实际交流对象、帮助与确认记录、原始文字或录音及教师评价，再打开相关练习、迁移和后续教学安排的单元报告。作品集读取完整历史，分批展开显示；交流确认和语言成绩分别保留，旧要求缺失时明确标注。
-13. 教师在教学总览的“班级证据待办”按班级、学生、目标及状态筛选待批阅、待交流确认、待安排迁移、开放阶段与到期复测，以及独立迁移证据缺口。展开依据后进入对应作品、任务组或本班目标任务，处理后返回保留筛选并重新读取状态。待办使用完整授权历史，不受最近 50 份提交限制；缺少证据与能力不足分开，明确 0 分仍保留为已评价，不自动生成成绩或教学安排。
-14. 教师在教学总览、管理员在机构总览查看“家庭可用性反馈”，按班级、学生和任务筛选完整历史，查看没有收到反馈的任务版本、家长填写的使用困难及原说明。汇总按有效反馈记录计数，撤销记录另行保留；多次反馈不等于多个家庭或完成多项任务。
-    展开原反馈可“记录处理办法”，选择解释说明、操作指引、替代交流或任务调整建议，并填写家长可见的具体安排；误记可带原因撤销。按处理状态筛选尚未处理、待再反馈及仍需跟进的原反馈，保留全部处理和后续反馈历史。批次报告仅展示期内反馈及其期内处理，不将缺少记录判断为问题解决。
-15. 教师在教学总览、管理员在机构总览新建“班级试用批次”，选择目标、固定名单与首尾日期，填写工作范围和两种工作方式的可比条件；后续可明确追加任务组或家庭任务版本。查看批次时按创建时名单逐人核对初次参照、期内练习、迁移和复测，另看教师耗时、家庭困难及退出等原记录，并打开内部批次报告打印。阶段作品按提交时间、其他记录按创建时间进入观察周期；评价截至期末或读取时间，期外初次作品只作参照。明确的 0 分、0 次提示和 0 分钟保留，缺失仍为未知；并列记录不自动证明时间节省或学习效果。
+- Docker 数据卷挂载到 `/data`，保存数据库 `/data/huawen-zhixing.db` 和上传目录 `/data/uploads`。
+- 备份 Docker 数据时先停止服务，备份整个数据卷后再启动；更新容器时保留原数据卷，不要执行 `docker compose down -v`。
+- Cloudflare 的结构化数据保存在 D1，教材、图片和录音保存在 R2，需分别备份。
 
-16. 学生从成长档案、家长从成长报告、教师从教学总览、管理员从机构总览查看“学生案例时间线”。按学生、目标、记录类型和时间顺序回看完整诊断作答、作品提交、教师评价、练习迁移安排、延后复测及后续教学判断，并展开原始文字、录音或单元报告。家庭使用反馈、处理及撤销记录仅在家长或教师授权范围展示；内部试用用时不进入案例。当前支持任务与历史快照分别显示，旧作品原目标未留存时单独列出；缺少证据不推断能力低，也不自动认定提升。时间线只读，无新增依赖或数据库迁移。
+源码构建方式更新：
 
-### 学生
-
-1. 首次登录修改临时密码，在学习任务中按级别完成阅读、听力选择题，并进入教师发布的口述或短文诊断。题目在作答期间更新时需按新题面重新作答。
-2. 在今日学习计划查看任务和选择理由，展开“为什么安排这一项”核对目标、参考作品与评价时间，再进入复习或作业。教师安排和到期复习优先，匹配已有支持需求的任务会优先于一般自主任务；待确认或待评价事项排在可操作任务之后。
-3. 选择普通作业或家庭任务并提交文字或录音；家庭任务先查看双语步骤、提问卡和可选句式，提交自己的提问、追问及总结，并记录实际交流对象。录音停止后可试听、重录，再确认上传。在 AI 课堂中基于已发布资料提问。
-4. 在错题复习中心重新作答；答对后完成，答错则安排次日复习。
-5. 在成长档案查看能力差异与证据画像，展开原始选择、题面、文字或录音，查看教师确认的目标分数与反馈。
-6. 从今日计划或学习任务选择“针对性练习”，提交后等待教师评价，再进入迁移任务。成长档案可查看三阶段作品及评价；再次提交保留先前记录。
-
-### 家长
-
-1. 登录后在顶部账号区切换已绑定学生。
-2. 查看最近 7 天的本周成长报告，以及当前孩子的听说读写证据画像、原始作品和初次—练习—迁移对照。
-3. 选择孩子已发布的课程作业与目标，使用“采访一道家常菜”“采访一段节日记忆”“交流一次日常选择”模板，或编写自定义任务。模板带双语步骤、提问与追问卡、句式和作品要求，可在发送前核对并修改任务说明。没有合适家人时可选择同伴或教师替代。
-4. 查看孩子的文字或录音作品，确认独立完成、提供提示或共同完成，等待教师评价；替代交流也可由本班实际见证的教师确认。可编辑、重新打开或归档本人创建的任务。
-5. 按孩子维护学习分析授权。
-6. 在家庭任务页的“家庭可用性反馈”选择任务版本，记录是否看懂说明、操作帮助和替代交流情况。尚未开始、无法完成、中途停止或任务已归档都可反馈；有困难时填写原因。保存后可回看原说明，误记可带原因撤销；这项反馈不确认交流，也不完成任务或生成语言成绩。
-   收到教师处理办法后，在同一表单选择对应任务和处理记录，明确填写尝试后的结果；部分改善或仍有困难时补充说明。新版本任务与原反馈版本分别保留；“已解决”只指本项使用困难。
-
-### 用户、角色与管理边界
-
-- 管理员：管理成员、课程目标、诊断题、班级编排、内容审核、平台设置和审计日志。
-- 教师：管理自己的班级、作业、批阅、干预和教案。
-- 学生：完成诊断、查看学习计划、提交作业和复习错题。
-- 家长：查看已绑定孩子的成长报告，维护家庭任务和学习分析授权。
-
-账号身份保存在 `users`，租户内角色保存在 `role_memberships`，家长与学生关系保存在 `guardian_student_links`。角色入口只展示当前账号已获授权的角色，兼任角色需要管理员明确授权。账号不存在、已停用或没有有效角色时直接拒绝访问；待处理邀请不会在访问工作区时自动变成授权。当前版本不把 `reviewer` 暴露为独立可选角色。
-
-## 🔁 自适应学习闭环
-
-1. **诊断**：学生完成机构配置的四选一题目，系统按“目标正确题数 ÷ 已答题数”计算目标分数，不依赖外部模型。
-2. **掌握度**：首次证据直接作为掌握度；后续使用“旧掌握度 × 0.7 + 新证据 × 0.3”更新。诊断结果与教师确认评分使用同一服务。
-3. **推荐**：今日计划最多显示 3 项，先处理可操作的教师干预与练习／迁移、到期错题，再安排与已有诊断支持需求匹配的任务、家庭任务、临近截止作业和普通作业。待确认或待评价作品不挤占可操作任务；未开放复测、未发布或已归档作业、已离班的提交目标不进入计划。每项保留选择理由和目标依据，未配置 AI 时仍完整运行。
-4. **人工复核**：开放性作业和 AI 批阅建议必须由教师确认后，才形成成绩与掌握度证据；质量看板和家长周报不生成虚构指标。
-
-AI 未配置、返回内容无法解析或评分不合法时，建议分数为空，由教师填写，不使用默认分数。作业总分、目标分数与量规维度分数分别保存；只有教师明确评价的目标才更新掌握度，留空表示未评价。量规维度名称须唯一。
-
-录音支持停止后试听、重录及上传失败后重试；同次录音重试不重复创建作品。保存后的录音通过鉴权接口播放，仅本人、绑定家长、本班教师与本租户管理员可访问。
-
-家庭任务按“学生提交作品 → 确认交流与本次帮助程度 → 教师评分与反馈”完成，交流确认不会生成成绩。每次重做均需重新确认；有待评作品时不能归档，已有作品后不能更换关联作业或目标。旧家庭任务可先编辑补充作业与目标关联，再提交作品。
-
-家庭真实交流允许学生在每次提交时记录家人、同伴或教师作为实际对象；同伴或教师交流可由作品所属班级的教师见证确认，家庭交流仍由家长确认。确认人的身份、角色与实际帮助程度单独保存，不直接更新成绩或掌握度。模板作品按“提问切题、追问与倾听、复述与表达”评价，未观察到的项目仍留空。学生在成长档案、家长在家庭任务、教师在批阅面板查看同一份作品和反馈；提交时的要求、目标与量规保持原样。新界面将文字和录音绑定任务版本，要求更新后须重新核对文字或重录。
-
-能力画像按诊断方式区分听力、口语、阅读与书面表达，不把选择题总分推断为口语或写作能力。客观题展示目标正确率，开放题只使用教师明确评价的目标分数；待批阅、仅有作品总分而无目标评价时保持待评估。证据数量和任务次数分别展示，不将少量记录换算为正式语言等级。
-
-分层任务使用同一目标下各分项最近两次有效记录，显示参考作品、评价时间和目标表现。与较高分项相差至少 20 分时提示对应支持，差值不足时提供综合巩固；这是供教师核对的固定练习规则，不是能力等级或标准化比较。已记录有提示或共同完成的作品不参与该比较，未记录帮助程度不代表独立完成。草稿确认前不写入学生计划，发布时重新核对证据并保存选择依据；同一教师针对相同证据重复提交不会重复发送。学生可在今日计划展开查看练习与依据，标记完成不生成新成绩。本次复用现有数据结构，无新增数据库迁移。
-
-今日计划复用同一诊断支持门槛，至少两个分项各有两次目标评分时才比较；任务需明确标注相应分项才按支持需求提前，不从名称或总分推断。参考记录来自完整授权历史，缺少或尚待教师评价的目标显示待评估。练习、迁移和复测使用教师已发布的阶段关系与参照作品，可打开单元报告核对原作。复合角色账号从家长端切回学生端时重新读取本人工作区，较早的孩子查询不会覆盖新结果。计划本身只读，不自动生成任务、成绩或进阶判断，不新增依赖或数据库迁移。
-
-新诊断保存提交时的题面、选项、素材、任务要求和量规，后续改题不会覆盖历史作品。学生答案绑定所见题目版本，过期题卷会拒绝计分。素材、原始录音和画像均通过鉴权读取；教师只读取自己的班级作品，家长只读取已绑定孩子。
-
-迁移任务从教师已评价目标的初次作品出发，固定后续任务的目标、量规与提交方式，练习经教师评价后开放迁移。报告保留各次文字、录音、分项评价、反馈和帮助程度；只有量规一致且相应维度均已评价时才显示分数差。旧量规缺失、未确认新情境、需要帮助或目标未评价时明确标记仍待验证，不用完成率或同题重做成绩宣称能力提升。
-
-可打印单元证据报告复用上述记录，完整列出各次作品，分项对照采用最近一次提交，待批阅时不回退到旧成绩；复测使用已固定的参照作品，后续安排使用发布时的依据快照。PDF 不嵌入录音，原始录音和图片素材链接仍需登录及有效授权。内部试用报告区分教师个人耗时与本班观察，机构管理员可查看本机构记录；保留撤销原因，缺失值不补为零，不自动认定改善或节省时间。报告只读生成，不增加数据库迁移。
-
-家庭交流作品集不依赖最近 50 份提交；目标候选来自所选学生的完整可读作品。学生看本人作品，家长看有效绑定孩子的作品，教师按原作业班级读取，机构管理员看本机构作品；离班学生有历史作品时仍可在原班教师的候选中找到。归档任务不删除作品，当前任务改名不覆盖提交时的要求；历史缺少快照时不补造原目标、实际对象或确认信息。作品数不等于实际交流次数，确认交流不会生成语言成绩。此功能只读，不新增依赖或数据库迁移。
+```bash
+git pull --ff-only
+docker build -t ghcr.io/ryrant/huawen-zhixing:latest .
+docker compose up -d --pull never
+```
 
 ## 🧠 功能细节
 
-### 认证模式
+### 📚 教材与 AI
 
-项目支持两种认证模式：
+教材经过内容权属与发布审核后，才参与知识问答和备课检索。未配置外部模型时，平台使用已审核片段提供基础回答；没有依据时提示资料不足。
 
-| 模式 | 适用场景 | 身份来源 |
-| --- | --- | --- |
-| `local` | 本地开发 | 默认测试身份，或请求头 `x-huawen-zhixing-dev-user` |
-| `standard` | Cloudflare Workers、Node.js 与 Docker 自托管 | 部署后首次初始化管理员 + HttpOnly JWT Cookie |
+语音评测与内容审核 Key 目前仅保存凭据，录音由教师人工评价，内容审核使用基础规则。
 
-默认 `npm run build` 使用 Vite 与 Cloudflare 插件读取 `wrangler.toml`，生成 `dist/client/` 前端静态资源和 `dist/server/` Worker 构建，再由 `scripts/build-node.mjs` 生成 `dist/node/index.mjs`。Cloudflare 与 Node.js 共用前端资源和 TypeScript API。`npm run build:standard` 保留为同一构建流程的兼容入口。
+### 📝 学习与评价
 
-### 🧭 页面与 API
+自适应学习闭环围绕诊断数据、目标与实际作品安排后续练习。家庭任务保留交流要求和帮助记录；迁移与复测用于对照新情境中的表现，成绩由教师确认。
 
-前端使用 React Router 管理角色页面，按路由加载角色模块及较重的业务组件。`components/ui/` 保存 shadcn/ui 基础组件，`components/student/`、`components/teacher/`、`components/guardian/` 和 `components/admin/` 承载各角色页面，跨角色的业务组件按工作区、家庭、学习和试用领域组织；页面通过同域 `/api/v1` HTTP API 读取和提交数据。
+### 🔐 账号与数据
 
-组件、工具和 Hook 路径与 `components.json` 的别名保持一致：基础组件从 `@/components/ui/...` 导入，业务组件放在 `components/`，共享工具与业务逻辑放在 `lib/`，自定义 Hook 放在 `hooks/`。组件专用的 CSS Modules 与组件同目录维护；`app/` 保留客户端入口、全局样式和 API 处理器。
-
-工作区支持 `include` 参数按页面读取教学、课程、学习进度、教案、内容、成员等数据分组。写入后仅刷新受影响的分组；未请求的分组不会覆盖已读取数据。未传 `include` 的 `/api/v1/workspace` 仍返回完整工作区，保持原 API 兼容。认证和业务写入继续在服务端校验，页面导航不代替权限检查。
-
-后端由 `server/` 的 Hono 入口挂载标准 `Request` / `Response` 处理器，工作区命令按领域拆分到 `lib/commands/`，业务服务复用现有数据库与文件存储接口。Worker 使用 D1/R2，Node.js 使用 SQLite 与本地文件。
-
-### 数据与绑定
-
-Cloudflare Workers + D1 + R2 部署需要以下绑定：
-
-- `DB`：D1 数据库 binding，一键部署或首次 Wrangler 部署会自动创建默认数据库
-- `CONTENT`：R2 Bucket binding，一键部署或首次 Wrangler 部署会自动创建默认 Bucket
-
-基础表与 v1.2 增量字段会在运行时进行幂等校验，正式数据库变更仍应通过 `drizzle/` 中的迁移文件管理。`lesson_plans`、`learning_recommendations` 和 `source_documents` 使用 `updated_at` 与 `archived_at` 保留更新时间和归档状态；归档内容会立即停止发布其知识片段。
-
-Docker 自部署不需要 Cloudflare 绑定，默认使用 `DATABASE_URL=file:/data/huawen-zhixing.db` 和 `UPLOAD_DIR=/data/uploads`。首次启动会创建 SQLite 数据库文件和上传目录，并沿用同一套运行时幂等建表逻辑。
-
-`v1.2.0` 的诊断数据包括题目、选择结果、正误、目标得分和完成时间；推荐数据记录来源、截止时间和状态。家长读取或操作孩子数据前，服务端会验证有效监护绑定；教师只能干预自己班级的学生；全部查询和写操作均限制在当前租户。
-
-### 安全注意事项
-
-- 不要提交 `.env.local`、真实 API Key、学生信息、Cloudflare Token、管理员密码或 JWT 密钥。
-- `/api/v1/auth/login` 内置的是 Worker isolate 内的尽力限流。公开访问前，建议在 Cloudflare WAF 中对登录接口配置 Rate Limiting，或使用 Cloudflare Access 保护应用。
-- 学生数据、作业、音频和教材文件会存入你自己的 D1/R2 或 Docker 数据卷，请按当地未成年人数据保护要求管理访问权限。
-- 采集诊断数据和学习分析前，应取得适用地区要求的未成年人授权，并保持监护绑定准确；撤回授权会写入审计日志。
-- 上传教材、图片和音频前，应确认内容权属为机构自有或已获授权；只有通过权属与发布审核的知识片段会进入检索。
+正式部署使用邮箱、密码登录，按机构、角色和关系校验访问权限。改密会撤销旧会话。公开部署请使用 HTTPS，并在反向代理或 Cloudflare 侧为登录接口设置限流。
 
 ## 🧱 技术栈
 
-- TypeScript：应用与 Worker 代码
-- React 19：前端交互
-- shadcn/ui + Radix UI + Tailwind CSS：四端工作台、表单与弹窗组件
-- Vite：前端开发、静态资源与 Cloudflare Worker 构建
-- React Router：页面 URL、角色路由与按需加载
-- Hono：Cloudflare Workers 与 Node.js 共用的 HTTP API 入口
-- Cloudflare Workers：边缘运行环境
-- Cloudflare D1 / SQLite：结构化数据存储
-- Cloudflare R2 / 本地文件目录：教材与音频对象存储
-- Docker Compose：单机自部署运行方式
-- Drizzle ORM / Drizzle Kit：数据模型与迁移
-- ESLint、Node.js Test Runner：代码检查与回归测试
+- 前端：React、TypeScript、Vite、React Router、shadcn/ui、Tailwind CSS
+- 后端：Hono、Drizzle ORM，共用 Cloudflare Workers 与 Node.js API
+- 存储：D1 / SQLite、R2 / 本地文件
+- 部署：Cloudflare Workers、Docker Compose
 
 ## 🗂️ 项目结构
 
 ```text
-huawen-zhixing-platform/
-├── index.html                 # Vite 单页应用入口
-├── app/main.tsx               # React 客户端入口
-├── app/globals.css            # 全局样式与主题变量
-├── app/api/v1/                # 标准 HTTP API 处理器
-├── components/                # 业务组件与同目录 CSS Modules
-│   ├── ui/                    # 可维护的 shadcn/ui 基础组件
-│   ├── workspace/             # 应用壳、导航容器与共享工作区组件
-│   ├── student/               # 学生端页面与组件
-│   ├── teacher/               # 教师端页面与组件
-│   ├── guardian/              # 家长端页面与组件
-│   ├── admin/                 # 机构端页面与组件
-│   ├── family/                # 跨角色家庭任务、反馈与作品集组件
-│   ├── learning/              # 学习序列、证据时间线与单元报告组件
-│   └── trial/                 # 试用批次与记录组件
-├── hooks/                     # 工作区数据与会话控制 Hook
-├── lib/                       # 共享工具、类型及身份、租户与业务服务
-│   ├── utils.ts               # shadcn/ui 使用的 cn 工具
-│   ├── workspace/             # 工作区 API、路由、缓存与刷新逻辑
-│   └── commands/              # 按领域拆分的工作区写命令
-├── components.json            # shadcn/ui 配置与组件、工具、Hook 别名
-├── server/                    # Hono API 注册与 Node.js 服务入口
-├── db/                        # Drizzle 数据模型
-├── drizzle/                   # 数据库迁移
-├── worker/                    # Cloudflare Worker 入口
-├── Dockerfile                 # Docker 镜像构建
-├── docker-compose.yml         # Docker 自部署编排
-├── public/                    # 静态资源
-├── scripts/                   # 构建、Node/Docker 启动与迁移辅助脚本
-├── tests/                     # 自动化回归测试
-├── .github/ISSUE_TEMPLATE/    # GitHub Issue 表单
-├── vite.config.ts             # React 与 Cloudflare 构建配置
-└── wrangler.toml              # 标准 Cloudflare Workers 自托管配置
+wenqu-chinese-learning-platform/
+├── app/                 # 前端入口、全局样式与 API 处理器
+├── components/          # 四端页面、业务组件与 UI 基础组件
+├── hooks/               # 工作区状态与数据读取
+├── lib/                 # 认证、权限及教学业务
+├── db/                  # 数据模型
+├── server/              # Hono 与 Node.js 服务入口
+├── worker/              # Cloudflare Worker 入口
+├── public/              # 图标与静态资源
+├── scripts/             # 构建与 Docker 启动脚本
+├── tests/               # 自动化测试
+├── .github/             # CI、镜像发布与 Issue 表单
+├── Dockerfile           # 多阶段镜像构建
+├── compose.yaml         # Docker 编排
+└── wrangler.toml        # Cloudflare 绑定与部署配置
 ```
 
 ## 👨‍💻 本地开发
 
-### 环境
+### 🧰 环境
 
-- Node.js `22.13.0` 或更高版本
-- npm
-- Git
+- Node.js 22.13.0 或更高版本
+- npm、Git
 
-### 本地启动
+### ⚙️ 命令
 
 ```bash
 git clone https://github.com/Ryrant/wenqu-chinese-learning-platform.git
@@ -434,50 +179,13 @@ npm ci
 npm run dev
 ```
 
-浏览器打开 [http://127.0.0.1:3000](http://127.0.0.1:3000)。Vite 开发服务器仅监听本机回环地址，Cloudflare 插件提供本地 D1/R2 绑定。空库首次访问会自动创建本地 D1 表，并为默认开发身份创建仅拥有管理员角色的账号。
-
-### 本地测试身份
-
-本地开发默认使用 `dev@huawen-zhixing.local` 作为测试身份。需要模拟其他账号时，先由管理员为对应邮箱授权，再在请求中带上 `x-huawen-zhixing-dev-user` 请求头；无有效角色的测试身份同样会被拒绝访问。不需要为本地启动配置认证环境变量。
-
-### 命令
+访问 [http://127.0.0.1:3000](http://127.0.0.1:3000)。开发模式使用本地 D1/R2，空库自动创建开发管理员；正式登录流程可通过 `npm run build` 后执行 `npm start` 验证。
 
 ```bash
-npm run dev
 npm run lint
 npm test
 npm run build
-npm run build:standard
-npm start
-npm run start:docker
 ```
-
-常用命令说明：
-
-| 命令 | 用途 |
-| --- | --- |
-| `npm run dev` | 在 `127.0.0.1:3000` 启动 Vite、React 和 Cloudflare 本地绑定 |
-| `npm run lint` | 运行代码规范检查 |
-| `npm test` | 默认构建并运行 `tests/` 下的回归测试 |
-| `npm run build` | 生成 `dist/client`、`dist/server` 与 `dist/node/index.mjs` |
-| `npm run build:standard` | 同一构建流程的兼容入口 |
-| `npm start` | 启动已构建的 Node.js 服务，默认使用 `data/` 中的 SQLite 与上传目录 |
-| `npm run start:docker` | 准备 `/data` 目录后启动 Node.js 服务，可通过 `DATABASE_URL` / `UPLOAD_DIR` 覆盖路径 |
-| `npm run cf:preview` | 使用标准 Cloudflare 配置启动 Wrangler 预览 |
-| `npm run cf:deploy` | 使用标准 Cloudflare 配置部署到当前账号 |
-| `npm run db:generate` | 根据 `db/schema.ts` 生成 Drizzle 迁移 |
-
-本地 D1/R2 模拟状态保存在 `.wrangler/`。如需重新体验“全新机构首次进入”，停止开发服务器后删除本项目的 `.wrangler/`，再执行 `npm run dev`。
-
-当前自动化测试目录是 `tests/`：
-
-- `tests/rendered-html.test.mjs`：检查页面、API、部署配置和安全约束。
-- `tests/auth-token.test.mjs`：执行 JWT 创建、校验、过期、篡改和畸形输入行为测试。
-- `tests/learning-loop.test.mjs`：执行诊断完整题卷、次日复习门禁、重复评分保护，并检查掌握度、推荐排序、评分量规和增量迁移。
-- `tests/learning-workflows.test.mjs`：使用真实 SQLite、存储、认证及 API 验证评分、录音、家庭任务、听说读写证据、题面版本与历史快照、听力复习素材权限、证据驱动的分层任务与增量迁移；仅外部模型响应使用测试替身。
-- `tests/learning-loop-actions.test.mjs`：检查四端写操作、角色权限、租户范围和最新快照查询。
-- `tests/learning-loop-ui.test.mjs`：检查十二项页面入口、空状态、移动端布局和 v1.2 文档约束。
-- `tests/ui-polish.test.mjs`：检查来源化回答、工作流迁移、教案/家庭任务/内容归档、审计筛选、结构化质量指标、字体规范和家长数据去重。
 
 ## 🔐 安全报告
 
@@ -486,3 +194,7 @@ npm run start:docker
 ## 📄 许可证
 
 本项目基于 [GPL-3.0](./LICENSE) 开源。
+
+<div align="center">
+  <sub>Built with ❤️ by Sunny</sub>
+</div>
