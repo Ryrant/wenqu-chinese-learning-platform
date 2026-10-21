@@ -1,6 +1,6 @@
 import { answerReviewItem, submitDiagnostic, updateRecommendationStatus } from "../learning-loop-service";
 import { createStudentSubmission } from "../submission-service";
-import { text, requireText, number, audit, type WorkspaceActionHandler } from "./shared";
+import { text, requireText, number, type WorkspaceActionHandler } from "./shared";
 import type { WorkspaceActionName } from "../workspace-actions";
 
 export const learningCommands = {
@@ -26,22 +26,20 @@ export const learningCommands = {
   },
 
   answer_review_item: async (body, context) => {
-    const { db, tenantId, userId } = context;
+    const { db } = context;
     const result = await answerReviewItem(db, context, {
       recommendationId: requireText(body.id, "recommendation_id", 120),
       selectedOption: number(body.selectedOption, -1),
       revision: number(body.revision, -1),
     });
-    await audit(db, tenantId, userId, "review_item.answered", "learning_recommendation", result.id, { correct: result.correct });
     return Response.json(result);
   },
 
   update_recommendation_status: async (body, context) => {
-    const { db, tenantId, userId } = context;
+    const { db } = context;
     const status = body.status === "completed" ? "completed" : body.status === "pending" ? "pending" : null;
     if (!status) throw new Error("invalid_recommendation_status");
     const result = await updateRecommendationStatus(db, context, { id: requireText(body.id, "recommendation_id", 120), status });
-    await audit(db, tenantId, userId, "recommendation.status_updated", "learning_recommendation", result.id, { status });
     return Response.json(result);
   },
 } satisfies Partial<Record<WorkspaceActionName, WorkspaceActionHandler>>;

@@ -136,3 +136,18 @@ WHERE (SELECT COUNT(*) FROM pragma_table_info('family_usability_feedback') WHERE
 AND (SELECT COUNT(*) FROM pragma_table_info('family_feedback_responses') WHERE name IN ('id','tenant_id','feedback_id','kind','detail','created_by','created_at','voided_at','voided_by','void_reason'))=10
 AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='family_feedback_response_idx')
 AND EXISTS (SELECT 1 FROM sqlite_master WHERE type='index' AND name='feedback_responses_source_idx');
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0016_account_sessions.sql'
+WHERE EXISTS (
+  SELECT 1 FROM pragma_table_info('users')
+  WHERE name='session_version' AND lower(type)='integer' AND "notnull"=1 AND dflt_value='0'
+);
+
+INSERT OR IGNORE INTO d1_migrations (name)
+SELECT '0017_tenant_region_default.sql'
+WHERE (SELECT COUNT(*) FROM pragma_table_info('tenants') WHERE name IN ('id','name','region','status','created_at'))=5
+AND EXISTS (
+  SELECT 1 FROM pragma_table_info('tenants')
+  WHERE name='region' AND "notnull"=1 AND dflt_value=''''''
+);

@@ -1,5 +1,6 @@
 import { strFromU8, unzipSync } from "fflate";
 import type { PlatformDatabase } from "./platform-runtime";
+import { auditStatement } from "./audit";
 
 export type ExtractedText = { text: string; kind: "txt" | "docx" | "pdf" };
 export type KnowledgeChunkInput = { id: string; tenantId: string; sourceDocumentId: string; content: string; metadataJson: string };
@@ -74,9 +75,22 @@ export function chunkText(input: { tenantId: string; sourceDocumentId: string; t
   return chunks.filter((content) => content.length <= 1000).map((content, chunkIndex) => ({ id: crypto.randomUUID(), tenantId: input.tenantId, sourceDocumentId: input.sourceDocumentId, content, metadataJson: JSON.stringify({ chunkIndex, length: content.length }) }));
 }
 
-export async function publishContent(db: PlatformDatabase, input: { tenantId: string; sourceDocumentId: string }): Promise<void> {
-  await db.batch([
-    db.prepare("UPDATE source_documents SET processing_status='published',rights_status='approved' WHERE id=? AND tenant_id=? AND processing_status='processed'").bind(input.sourceDocumentId, input.tenantId),
-    db.prepare("UPDATE knowledge_chunks SET published=1 WHERE tenant_id=? AND source_document_id=?").bind(input.tenantId, input.sourceDocumentId),
+export async function publishContent(db: PlatformDatabase, input: { tenantId: string; sourceDocumentId: string; expectedVersion?: number }, review?: { userId: string }): Promise<void> {
+  const document = input.expectedVersion === undefined
+    ? await db.prepare("SELECT version FROM source_documents WHERE id=? AND tenant_id=? AND processing_status='processed' AND archived_at IS NULL")
+      .bind(input.sourceDocumentId, input.tenantId).first<{ version: number }>()
+    : { version: input.expectedVersion };
+  if (!document) throw new Error("document_version_conflict");
+  const auditId = crypto.randomUUID();
+  // 带审计时用本次回执守护分块；兼容两参数调用时，分块语句紧随文档 UPDATE，读取 changes()。
+  const [accepted] = await db.batch([
+    db.prepare("UPDATE source_documents SET processing_status='published',rights_status='approved',version=version+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND processing_status='processed' AND archived_at IS NULL AND version=?")
+      .bind(input.sourceDocumentId, input.tenantId, document.version),
+    ...(review ? [auditStatement(db, input.tenantId, review.userId, "source.reviewed", "source_document", input.sourceDocumentId, { status: "published" }, true, auditId)] : []),
+    db.prepare(`UPDATE knowledge_chunks SET published=1 WHERE tenant_id=? AND source_document_id=? AND ${review
+      ? "EXISTS (SELECT 1 FROM audit_logs WHERE id=? AND tenant_id=?)"
+      : "changes()>0"}`)
+      .bind(input.tenantId, input.sourceDocumentId, ...(review ? [auditId, input.tenantId] : [])),
   ]);
+  if (!accepted.meta.changes) throw new Error("document_version_conflict");
 }

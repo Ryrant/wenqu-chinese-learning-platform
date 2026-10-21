@@ -27,6 +27,10 @@ export function printReport(title: string, body: string, generatedAt = new Date(
 }
 
 export function reportError(error: unknown) {
+  if (error instanceof Error && error.message === "password_change_required") {
+    const gate = reportPasswordChangeGate({ mustChangePassword: true });
+    if (gate) return gate;
+  }
   const response = platformApiError(error);
   const message = response.status === 401 ? "登录已失效，请返回工作区重新登录后打开报告。"
     : response.status === 403 || response.status === 404 ? "当前无法访问这份报告，请返回工作区核对账号及授权范围。"
@@ -34,7 +38,7 @@ export function reportError(error: unknown) {
   return printReport("报告暂不可用", `<h1>报告暂不可用</h1><p>${message}</p>`, undefined, response.status);
 }
 
-export function reportPasswordChangeGate(context: PlatformContext) {
+export function reportPasswordChangeGate(context: Pick<PlatformContext, "mustChangePassword">) {
   const gate = workspacePasswordChangeGate(getAuthMode(), context);
   return gate ? printReport("请先修改初始密码", "<h1>请先修改初始密码</h1><p>此账号需要先修改初始密码。请返回工作区完成修改，重新登录后再打开报告。</p>", undefined, gate.status) : null;
 }

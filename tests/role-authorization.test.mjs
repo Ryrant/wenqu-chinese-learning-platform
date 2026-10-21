@@ -102,13 +102,13 @@ test("unknown, disabled and unauthorized accounts are forbidden without provisio
       if (scenario === "disabled-tenant") await db.prepare("UPDATE tenants SET status='disabled' WHERE id='tenant-school'").run();
       if (scenario === "pending-invitation") await db.prepare("INSERT INTO invitations (id,tenant_id,email,role,token,invited_by,expires_at) VALUES ('pending','tenant-school',?,'teacher','pending-token','existing-admin',datetime('now','+1 day'))").bind(email).run();
       const before = await authorizationState(db);
-      await assert.rejects(api.platformContext(await request(email)), /forbidden/);
+      await assert.rejects(api.platformContext(await request(email)), /account_access_denied/);
       const session = await api.session(await request(email));
       assert.equal(session.status, 403);
-      assert.equal((await session.json()).error, "forbidden");
+      assert.equal((await session.json()).error, "account_access_denied");
       const workspace = await api.workspace(await request(email));
       assert.equal(workspace.status, 403);
-      assert.deepEqual(await workspace.json(), { error: "forbidden" });
+      assert.deepEqual(await workspace.json(), { error: "account_access_denied" });
       assert.deepEqual(await authorizationState(db), before);
     });
   }
@@ -131,7 +131,7 @@ test("password login issues a cookie only for an account with a valid role", asy
       if (scenario === "authorized") assert.match(response.headers.get("set-cookie"), /huawen_zhixing_session=/);
       else {
         assert.equal(response.headers.get("set-cookie"), null);
-        assert.deepEqual(await response.json(), { error: "forbidden" });
+        assert.deepEqual(await response.json(), { error: "account_access_denied" });
         assert.equal((await db.prepare("SELECT last_login_at FROM users WHERE id=?").bind(account.id).first()).last_login_at, null);
       }
     });
@@ -259,12 +259,12 @@ test("local development bootstraps only the default account in an empty database
   process.env.NODE_ENV = "development";
   t.after(() => { if (originalNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = originalNodeEnv; });
   const { db } = await fixture(t, { empty: true });
-  await assert.rejects(api.platformContext(new Request("http://127.0.0.1/api/v1/workspace", { headers: { "x-huawen-zhixing-dev-user": "unknown@school.example" } })), /forbidden/);
+  await assert.rejects(api.platformContext(new Request("http://127.0.0.1/api/v1/workspace", { headers: { "x-huawen-zhixing-dev-user": "unknown@school.example" } })), /account_access_denied/);
   assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM users").first()).count, 0);
   const context = await api.platformContext(new Request("http://127.0.0.1/api/v1/workspace"));
   assert.equal(context.userEmail, "dev@huawen-zhixing.local");
   assert.deepEqual(context.roles, ["admin"]);
   assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM guardian_student_links").first()).count, 0);
-  await assert.rejects(api.platformContext(new Request("http://127.0.0.1/api/v1/workspace", { headers: { "x-huawen-zhixing-dev-user": "unknown@school.example" } })), /forbidden/);
+  await assert.rejects(api.platformContext(new Request("http://127.0.0.1/api/v1/workspace", { headers: { "x-huawen-zhixing-dev-user": "unknown@school.example" } })), /account_access_denied/);
   assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM users").first()).count, 1);
 });

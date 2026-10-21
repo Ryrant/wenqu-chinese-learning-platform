@@ -3,6 +3,7 @@ export type StandardSession = {
   displayName: string;
   iat: number;
   exp: number;
+  sessionVersion?: number;
 };
 
 export const sessionCookieName = "huawen_zhixing_session";
@@ -51,6 +52,7 @@ export async function verifySessionToken(token: string, secret: string, nowSecon
   if (decodedHeader?.alg !== "HS256" || decodedHeader.typ !== "JWT") return null;
   const session = decodeJson<StandardSession>(payload);
   if (!session || !session.email || !session.displayName || !Number.isFinite(session.iat) || !Number.isFinite(session.exp)) return null;
+  if (session.sessionVersion !== undefined && (!Number.isSafeInteger(session.sessionVersion) || session.sessionVersion < 0)) return null;
   if (session.exp <= nowSeconds) return null;
   const key = await importSigningKey(secret);
   try {

@@ -4,8 +4,6 @@ export type RubricDimension = { name: string; weight: number };
 export type LearningPlanKind = "teacher" | "review" | "family" | "assignment" | "sequence";
 export type LearningPlanItem = { id: string; kind: LearningPlanKind; dueAt?: string | null; waitingReview?: boolean; supportMatch?: boolean };
 
-const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
-
 export function calculateDiagnosticScores(evidence: DiagnosticEvidence[]) {
   const totals: Record<string, { correct: number; count: number }> = {};
   for (const item of evidence) {
@@ -30,17 +28,6 @@ export function matchesDiagnosticItemSet(expectedIds: string[], submittedIds: st
     && submitted.size === submittedIds.length
     && expected.size === submitted.size
     && [...expected].every((id) => submitted.has(id));
-}
-
-export function blendMastery(previousMastery: number | null, previousEvidenceCount: number, score: number, evidenceCount = 1) {
-  const nextScore = clamp01(score);
-  const mastery = previousMastery === null
-    ? nextScore
-    : clamp01(previousMastery * 0.7 + nextScore * 0.3);
-  return {
-    mastery: Number(mastery.toFixed(4)),
-    evidenceCount: Math.max(0, previousEvidenceCount) + Math.max(1, evidenceCount),
-  };
 }
 
 function planPriority(item: LearningPlanItem, now: Date) {

@@ -5,22 +5,15 @@ import { ApiError, postJson, requestJson } from "../lib/workspace/api";
 import { sectionsChangedByAction } from "../lib/workspace/invalidation";
 import { defaultWorkspaceRole, matchWorkspaceRoute, pageSections, workspacePath, type WorkspaceRoute } from "../lib/workspace/navigation";
 import { observePageResume } from "../lib/workspace/observe-page-resume";
+import { errorMessage, workspaceAccessFailure } from "../lib/workspace/access-error";
 import { useWorkspace } from "./use-workspace";
+
+export { errorMessage } from "../lib/workspace/access-error";
 
 type Session = {
   authenticated: boolean; authMode: "standard" | "local"; setupRequired?: boolean;
   user?: { mustChangePassword?: boolean }; error?: string;
 };
-
-export function errorMessage(reason: unknown) {
-  if (reason instanceof ApiError) {
-    if (reason.code === "session_changed") return "登录账号或所属机构已改变，请重新登录后进入工作区。";
-    if (reason.status === 401) return "请先登录";
-    if (reason.code === "forbidden") return "当前账号未获授权，请联系管理员分配角色。";
-    if (reason.code === "password_change_required") return "请先修改临时密码";
-  }
-  return reason instanceof Error ? reason.message : "请求失败，请稍后重试。";
-}
 
 /** 路由提交与数据提交分开：下一页读取期间，当前页面及其草稿继续存在。 */
 export function useWorkspaceController() {
@@ -43,11 +36,11 @@ export function useWorkspaceController() {
   const desiredRoute = useMemo(() => matchWorkspaceRoute(location.pathname), [location.pathname]);
 
   const handleAccessError = useCallback((reason: unknown) => {
-    if (!(reason instanceof ApiError)) return;
-    if (reason.status === 401 || reason.code === "forbidden" || reason.code === "password_change_required") {
+    const failure = workspaceAccessFailure(reason);
+    if (failure) {
       epoch.current++; store.reset(); setCommittedRoute(null);
-      setAccessDenied(reason.code === "forbidden");
-      setSession((value) => value ? { ...value, authenticated: reason.code === "password_change_required", user: { mustChangePassword: reason.code === "password_change_required" } } : value);
+      setAccessDenied(failure === "account-denied");
+      setSession((value) => value ? { ...value, authenticated: failure === "password-change", user: { mustChangePassword: failure === "password-change" } } : value);
       setError(errorMessage(reason));
     }
   }, [store]);
@@ -63,7 +56,7 @@ export function useWorkspaceController() {
       if (next.authenticated && !next.user?.mustChangePassword) await store.load();
     } catch (reason) {
       if (ticket !== epoch.current) return;
-      if (reason instanceof ApiError && reason.code === "forbidden") {
+      if (workspaceAccessFailure(reason) === "account-denied") {
         setSession({ authenticated: false, authMode: "standard" }); setAccessDenied(true);
       }
       setError(errorMessage(reason));

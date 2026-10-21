@@ -1,15 +1,16 @@
 import { validateRubric } from "../learning-loop";
 import { setClassEnrollments } from "../learning-loop-service";
 import { assertDiagnosticMedia } from "../diagnostic-media";
-import { text, requireText, audit, type WorkspaceActionHandler } from "./shared";
+import { text, requireText, auditStatement, type WorkspaceActionHandler } from "./shared";
 import type { WorkspaceActionName } from "../workspace-actions";
 
 export const teachingCommands = {
   set_class_enrollments: async (body, context) => {
-    const { db, tenantId, userId } = context;
+    const { db } = context;
     const studentUserIds = Array.isArray(body.studentUserIds) ? body.studentUserIds.map((value) => text(value, 120)).filter(Boolean) : [];
-    const result = await setClassEnrollments(db, context, { classId: requireText(body.classId, "class_id", 120), studentUserIds });
-    await audit(db, tenantId, userId, "class.enrollments_updated", "class", result.classId, { studentUserIds: result.studentUserIds });
+    if (body.expectedStudentUserIds !== undefined && !Array.isArray(body.expectedStudentUserIds)) throw new Error("invalid_expected_student_ids");
+    const expectedStudentUserIds = Array.isArray(body.expectedStudentUserIds) ? body.expectedStudentUserIds.map((value) => text(value, 120)).filter(Boolean) : undefined;
+    const result = await setClassEnrollments(db, context, { classId: requireText(body.classId, "class_id", 120), studentUserIds, expectedStudentUserIds });
     return Response.json(result);
   },
 
@@ -18,8 +19,10 @@ export const teachingCommands = {
     const id = crypto.randomUUID();
     const name = requireText(body.name, "class_name");
     const level = requireText(body.level, "level", 20);
-    await db.prepare("INSERT INTO classes (id,tenant_id,name,level,teacher_user_id,academic_year) VALUES (?,?,?,?,?,?)").bind(id, tenantId, name, level, userId, String(new Date().getFullYear())).run();
-    await audit(db, tenantId, userId, "class.created", "class", id, { name, level });
+    await db.batch([
+      db.prepare("INSERT INTO classes (id,tenant_id,name,level,teacher_user_id,academic_year) VALUES (?,?,?,?,?,?)").bind(id, tenantId, name, level, userId, String(new Date().getFullYear())),
+      auditStatement(db, tenantId, userId, "class.created", "class", id, { name, level }),
+    ]);
     return Response.json({ id, name, level }, { status: 201 });
   },
 
@@ -48,8 +51,8 @@ export const teachingCommands = {
     await db.batch([
       db.prepare("INSERT INTO assignments (id,tenant_id,class_id,title,activity_type,status,due_at,rubric_json,created_by,diagnostic_mode,diagnostic_prompt,diagnostic_media_id) VALUES (?,?,?,?,?,'draft',?,?,?,?,?,?)").bind(id, tenantId, classId, title, activityType, dueAt, JSON.stringify(rubric), userId, diagnosticMode, diagnosticPrompt, diagnosticMediaId),
       ...objectiveIds.map((objectiveId) => db.prepare("INSERT INTO assignment_objectives (tenant_id,assignment_id,objective_id,weight) VALUES (?,?,?,?)").bind(tenantId, id, objectiveId, 1 / objectiveIds.length)),
+      auditStatement(db, tenantId, userId, "assignment.created", "assignment", id, { title, objectiveIds, rubric }),
     ]);
-    await audit(db, tenantId, userId, "assignment.created", "assignment", id, { title, objectiveIds, rubric });
     return Response.json({ id, status: "draft" }, { status: 201 });
   },
 
@@ -74,9 +77,11 @@ export const teachingCommands = {
     } catch {
       return Response.json({ error: "assignment_requires_valid_rubric" }, { status: 409 });
     }
-    const result = await db.prepare("UPDATE assignments SET status='published',published_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status IN ('draft','review') AND (?=1 OR class_id IN (SELECT id FROM classes WHERE tenant_id=? AND teacher_user_id=?))").bind(id, tenantId, isAdmin ? 1 : 0, tenantId, userId).run();
+    const [result] = await db.batch([
+      db.prepare("UPDATE assignments SET status='published',published_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status IN ('draft','review') AND (?=1 OR class_id IN (SELECT id FROM classes WHERE tenant_id=? AND teacher_user_id=?))").bind(id, tenantId, isAdmin ? 1 : 0, tenantId, userId),
+      db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) SELECT ?,?,?,'assignment.published','assignment',?,'{}' WHERE changes()>0").bind(crypto.randomUUID(), tenantId, userId, id),
+    ]);
     if (!result.meta.changes) return Response.json({ error: "assignment_not_publishable" }, { status: 409 });
-    await audit(db, tenantId, userId, "assignment.published", "assignment", id);
     return Response.json({ id, status: "published" });
   },
 } satisfies Partial<Record<WorkspaceActionName, WorkspaceActionHandler>>;

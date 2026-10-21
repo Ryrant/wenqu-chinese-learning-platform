@@ -1,134 +1,90 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
-import ts from "typescript";
+import { build } from "esbuild";
 
-const root = new URL("../", import.meta.url);
+const bundle = await build({
+  stdin: { contents: `
+    export { NodeSqliteDatabase } from './lib/platform-runtime-node';
+    export { ensurePlatformSchema } from './lib/platform-store';
+    export * from './lib/standard-login';
+    export { changeAccountPassword } from './lib/password-change';
+    export * from './lib/password-change-state';
+    export { hashPassword, verifyPassword } from './lib/auth-password';
+  `, resolveDir: fileURLToPath(new URL("../", import.meta.url)) },
+  bundle: true, platform: "node", format: "esm", target: "node22", write: false,
+});
+const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 
-async function loadAuthModules() {
-  const directory = await mkdtemp(join(tmpdir(), "huawen-zhixing-standard-login-"));
-  const compile = async (input, output) => {
-    const source = await readFile(new URL(input, root), "utf8");
-    const transpiled = ts.transpileModule(source.replace('from "./auth-password"', 'from "./auth-password.js"'), {
-      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-      fileName: input,
-      reportDiagnostics: true,
-    });
-    const errors = (transpiled.diagnostics ?? []).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
-    assert.deepEqual(errors, []);
-    await writeFile(join(directory, output), transpiled.outputText, "utf8");
+async function fixture(t) {
+  const db = new api.NodeSqliteDatabase("file::memory:");
+  t.after(() => db.close());
+  await api.ensurePlatformSchema(db);
+  const addAccount = async (status = "active", mustChange = 0) => {
+    await db.prepare("INSERT INTO users(id,email,display_name,password_hash,status,must_change_password) VALUES ('account','member@example.test','成员',?,?,?)")
+      .bind(await api.hashPassword("CurrentPass123"), status, mustChange).run();
   };
-  await compile("lib/auth-password.ts", "auth-password.js");
-  await compile("lib/standard-login.ts", "standard-login.js");
-  await compile("lib/password-change.ts", "password-change.js");
-  await compile("lib/password-change-state.ts", "password-change-state.js");
-  return {
-    modules: {
-      ...await import(`${pathToFileURL(join(directory, "standard-login.js")).href}?${Date.now()}`),
-      ...await import(`${pathToFileURL(join(directory, "password-change.js")).href}?${Date.now()}`),
-      ...await import(`${pathToFileURL(join(directory, "password-change-state.js")).href}?${Date.now()}`),
-      ...await import(`${pathToFileURL(join(directory, "auth-password.js")).href}?${Date.now()}`),
-    },
-    cleanup: () => rm(directory, { recursive: true, force: true }),
-  };
+  return { db, addAccount };
 }
 
-function fakeDb(account) {
-  const state = { account, batchCalls: 0, createdRoles: [] };
-  return {
-    state,
-    prepare(query) {
-      return {
-        query,
-        values: [],
-        bind(...values) { this.values = values; return this; },
-        async first() {
-          if (/COUNT\(\*\) AS count FROM users/.test(query)) return { count: state.account ? 1 : 0 };
-          return /FROM users/.test(query) ? state.account : null;
-        },
-        async run() {
-          if (/UPDATE users SET password_hash/.test(query)) {
-            state.account.passwordHash = this.values[0];
-            state.account.mustChangePassword = 0;
-          }
-          return { success: true, results: [], meta: { changes: 1 } };
-        },
-      };
-    },
-    async batch(statements) {
-      state.batchCalls += 1;
-      state.createdRoles = statements.filter((statement) => /INSERT OR IGNORE INTO role_memberships/.test(statement.query)).map((statement) => statement.values[2]);
-      const user = statements[1];
-      state.account = { id: user.values[0], email: user.values[1], displayName: user.values[2], passwordHash: user.values[3], mustChangePassword: 0, status: "active" };
-    },
-  };
-}
-
-test("standard login rejects an inactive account even with bootstrap credentials", async () => {
-  const { modules, cleanup } = await loadAuthModules();
-  try {
-    const db = fakeDb({ id: "usr_admin", email: "admin@huawen-zhixing.test", displayName: "管理员", passwordHash: await modules.hashPassword("TempPass-1234"), mustChangePassword: 0, status: "inactive" });
-    const account = await modules.authenticateStandardAccount({ db, email: "admin@huawen-zhixing.test", password: "Bootstrap-1234", adminEmail: "admin@huawen-zhixing.test", adminPassword: "Bootstrap-1234" });
-    assert.equal(account, null);
-    assert.equal(db.state.batchCalls, 0);
-  } finally { await cleanup(); }
+test("standard login rejects inactive accounts and does not provision empty databases", async (t) => {
+  const { db, addAccount } = await fixture(t);
+  assert.equal(await api.authenticateStandardAccount({ db, email: "member@example.test", password: "CurrentPass123" }), null);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users").first()).n, 0);
+  await addAccount("disabled");
+  assert.equal(await api.authenticateStandardAccount({ db, email: "member@example.test", password: "CurrentPass123" }), null);
 });
 
-test("initial admin setup creates the first account without deploy-time secrets", async () => {
-  const { modules, cleanup } = await loadAuthModules();
-  try {
-    const db = fakeDb(null);
-    const account = await modules.createInitialAdminAccount({ db, email: "admin@huawen-zhixing.test", password: "Bootstrap-1234", displayName: "管理员" });
-    assert.equal(account?.status, "active");
-    assert.equal(account?.displayName, "管理员");
-    assert.equal(db.state.batchCalls, 1);
-    assert.deepEqual(db.state.createdRoles, ["admin"]);
-  } finally { await cleanup(); }
+test("initial setup creates only one administrator and no deployment secret is required", async (t) => {
+  const { db } = await fixture(t);
+  const account = await api.createInitialAdminAccount({ db, email: "admin@example.test", password: "InitialPass123", displayName: "管理员", workspaceName: "学校" });
+  assert.equal(account.displayName, "管理员");
+  assert.equal(account.sessionVersion, 0);
+  assert.deepEqual((await db.prepare("SELECT role FROM role_memberships").all()).results, [{ role: "admin" }]);
+  assert.equal((await db.prepare("SELECT name FROM tenants").first()).name, "学校");
+  assert.equal(await api.createInitialAdminAccount({ db, email: "second@example.test", password: "InitialPass123" }), null);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users").first()).n, 1);
 });
 
-test("initial admin setup is closed once any user exists", async () => {
-  const { modules, cleanup } = await loadAuthModules();
-  try {
-    const db = fakeDb({ id: "usr_existing", email: "existing@huawen-zhixing.test", displayName: "已有用户", passwordHash: await modules.hashPassword("ExistingPass-1234"), mustChangePassword: 0, status: "active" });
-    const account = await modules.createInitialAdminAccount({ db, email: "admin@huawen-zhixing.test", password: "Bootstrap-1234", displayName: "管理员" });
-    assert.equal(account, null);
-    assert.equal(db.state.batchCalls, 0);
-  } finally { await cleanup(); }
+test("concurrent setup has a single database winner even for equal credentials", async (t) => {
+  for (const sameEmail of [false, true]) await t.test(String(sameEmail), async (t) => {
+    const { db } = await fixture(t);
+    const results = await Promise.all(["first@example.test", sameEmail ? "first@example.test" : "second@example.test"].map((email) => api.createInitialAdminAccount({ db, email, password: "InitialPass123" })));
+    assert.equal(results.filter(Boolean).length, 1);
+    for (const table of ["users", "tenants", "role_memberships"]) assert.equal((await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first()).n, 1);
+  });
 });
 
-test("standard login no longer bootstraps from deploy-time admin password", async () => {
-  const { modules, cleanup } = await loadAuthModules();
-  try {
-    const db = fakeDb(null);
-    const account = await modules.authenticateStandardAccount({ db, email: "admin@huawen-zhixing.test", password: "Bootstrap-1234", adminEmail: "admin@huawen-zhixing.test", adminPassword: "Bootstrap-1234" });
-    assert.equal(account, null);
-    assert.equal(db.state.batchCalls, 0);
-  } finally { await cleanup(); }
+test("a failed setup transaction releases its claim and leaves a retryable empty database", async (t) => {
+  const { db } = await fixture(t);
+  await db.prepare("CREATE TRIGGER reject_setup BEFORE INSERT ON role_memberships BEGIN SELECT RAISE(ABORT,'setup_failure'); END").run();
+  await assert.rejects(api.createInitialAdminAccount({ db, email: "admin@example.test", password: "InitialPass123" }), /setup_failure/);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM app_settings WHERE key='initial_admin_claim'").first()).n, 0);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM users").first()).n, 0);
+  await db.prepare("DROP TRIGGER reject_setup").run();
+  assert.ok(await api.createInitialAdminAccount({ db, email: "admin@example.test", password: "InitialPass123" }));
 });
 
-test("normal account login does not depend on bootstrap credentials", async () => {
-  const { modules, cleanup } = await loadAuthModules();
-  try {
-    const db = fakeDb({ id: "usr_student", email: "student@huawen-zhixing.test", displayName: "学生", passwordHash: await modules.hashPassword("StudentPass-1234"), mustChangePassword: 0, status: "active" });
-    const account = await modules.authenticateStandardAccount({ db, email: "student@huawen-zhixing.test", password: "StudentPass-1234" });
-    assert.equal(account?.id, "usr_student");
-    assert.equal(db.state.batchCalls, 0);
-  } finally { await cleanup(); }
+test("password change clears the temporary password gate and increments the session version atomically", async (t) => {
+  const { db, addAccount } = await fixture(t);
+  await addAccount("active", 1);
+  assert.equal(api.workspacePasswordChangeGate("standard", { mustChangePassword: true }).status, 403);
+  assert.equal(await api.changeAccountPassword({ db, tenantId: "school", userId: "account", currentPassword: "WrongPass123", newPassword: "NewPass45678" }), false);
+  const changed = await api.changeAccountPassword({ db, tenantId: "school", userId: "account", currentPassword: "CurrentPass123", newPassword: "NewPass45678" });
+  assert.deepEqual(changed, { sessionVersion: 1 });
+  const account = await api.authenticateStandardAccount({ db, email: "member@example.test", password: "NewPass45678" });
+  assert.equal(account.sessionVersion, 1);
+  assert.equal(account.mustChangePassword, 0);
+  assert.equal(api.workspacePasswordChangeGate("standard", { mustChangePassword: false }), null);
+  assert.deepEqual(api.sessionPasswordChangeState({ mustChangePassword: false }), { mustChangePassword: false });
 });
 
-test("password change clears the route-equivalent session and workspace gate flow", async () => {
-  const { modules, cleanup } = await loadAuthModules();
-  try {
-    const db = fakeDb({ id: "usr_student", email: "student@huawen-zhixing.test", displayName: "学生", passwordHash: await modules.hashPassword("CurrentPass-1234"), mustChangePassword: 1, status: "active" });
-    const blocked = modules.workspacePasswordChangeGate("standard", { mustChangePassword: db.state.account.mustChangePassword === 1 });
-    assert.equal(blocked?.status, 403);
-    assert.deepEqual(await blocked?.json(), { error: "password_change_required" });
-    assert.equal(await modules.changeAccountPassword({ db, tenantId: "tenant_school", userId: "usr_student", currentPassword: "CurrentPass-1234", newPassword: "NewPass-5678" }), true);
-    assert.equal(db.state.account.mustChangePassword, 0);
-    assert.deepEqual(modules.sessionPasswordChangeState({ mustChangePassword: db.state.account.mustChangePassword === 1 }), { mustChangePassword: false });
-    assert.equal(modules.workspacePasswordChangeGate("standard", { mustChangePassword: db.state.account.mustChangePassword === 1 }), null);
-  } finally { await cleanup(); }
+test("audit failure rolls back the password and session version", async (t) => {
+  const { db, addAccount } = await fixture(t);
+  await addAccount("active", 1);
+  await db.prepare("CREATE TRIGGER reject_password_audit BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT,'audit_failure'); END").run();
+  await assert.rejects(api.changeAccountPassword({ db, tenantId: "school", userId: "account", currentPassword: "CurrentPass123", newPassword: "NewPass45678" }), /audit_failure/);
+  const account = await api.authenticateStandardAccount({ db, email: "member@example.test", password: "CurrentPass123" });
+  assert.equal(account.sessionVersion, 0);
+  assert.equal(account.mustChangePassword, 1);
 });

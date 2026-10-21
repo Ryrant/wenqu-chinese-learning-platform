@@ -36,6 +36,97 @@
       "when": 1785466800000,
       "tag": "0004_learning_loop",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792550401991,
+      "tag": "0005_ui_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792550401992,
+      "tag": "0006_learning_workflow_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792550401993,
+      "tag": "0007_ability_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792550401994,
+      "tag": "0008_family_exchange",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792550401995,
+      "tag": "0009_learning_sequences",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792550401996,
+      "tag": "0010_delayed_retest",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792550401997,
+      "tag": "0011_teaching_next_steps",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792550401998,
+      "tag": "0012_trial_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792550401999,
+      "tag": "0013_family_usability_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792550402000,
+      "tag": "0014_trial_batches",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1792550402001,
+      "tag": "0015_family_feedback_followups",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1792550402002,
+      "tag": "0016_account_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792550447961,
+      "tag": "0017_tenant_region_default",
+      "breakpoints": true
     }
   ]
 }

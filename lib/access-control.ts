@@ -33,7 +33,7 @@ export function classAccessClause(context: PlatformContext, classAlias = "c"): A
     args.push(context.userId);
   }
   if (context.roles.includes("guardian")) {
-    clauses.push(`EXISTS (SELECT 1 FROM enrollments eg JOIN guardian_student_links gl ON gl.tenant_id=eg.tenant_id AND gl.student_user_id=eg.student_user_id AND gl.status='active' WHERE eg.tenant_id=${classAlias}.tenant_id AND eg.class_id=${classAlias}.id AND gl.guardian_user_id=?)`);
+    clauses.push(`EXISTS (SELECT 1 FROM enrollments eg JOIN guardian_student_links gl ON gl.tenant_id=eg.tenant_id AND gl.student_user_id=eg.student_user_id AND gl.status='active' WHERE eg.tenant_id=${classAlias}.tenant_id AND eg.class_id=${classAlias}.id AND eg.status='active' AND gl.guardian_user_id=?)`);
     args.push(context.userId);
   }
   return clauses.length ? { sql: `(${clauses.join(" OR ")})`, args } : { sql: "1=0", args: [] };

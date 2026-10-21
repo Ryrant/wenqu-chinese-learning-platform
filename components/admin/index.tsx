@@ -19,7 +19,7 @@ export default function AdminView(props: AdminProps) {
       <ContentPage {...props}/><ObjectiveLibrary data={data} act={act} notify={notify}/>
     </RetainedFeature>
     <RetainedFeature active={nav === "成员管理"}>
-      <MembersPage {...props}/><section className="loop-section enrollment-section"><EnrollmentEditor data={data} act={act} notify={notify}/></section>
+      <MembersPage {...props}/><section className="loop-section enrollment-section"><EnrollmentEditor data={data} act={act} notify={notify} refresh={props.refresh}/></section>
     </RetainedFeature>
     <RetainedFeature active={nav === "权限审计"}><AuditPage {...props}/></RetainedFeature>
     <RetainedFeature active={nav === "知识检索"}><KnowledgePage {...props}/></RetainedFeature>

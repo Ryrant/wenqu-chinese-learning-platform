@@ -41,7 +41,7 @@ async function standardIdentity(request: Request, db: PlatformDatabase) {
   if (!token) throw new Error("authentication_required");
   const session = await verifySessionToken(token, await ensureSiteJwtSecret(db));
   if (!session) throw new Error("authentication_required");
-  return { email: session.email.trim().toLowerCase(), displayName: session.displayName };
+  return { email: session.email.trim().toLowerCase(), displayName: session.displayName, sessionVersion: session.sessionVersion ?? 0 };
 }
 
 async function identity(request: Request, db: PlatformDatabase) {
@@ -107,6 +107,7 @@ async function ensureCoreSchema(db: PlatformDatabase) {
     "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
     "ALTER TABLE users ADD COLUMN last_login_at TEXT",
+    "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE role_memberships ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
     "ALTER TABLE guardian_student_links ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
     "ALTER TABLE source_documents ADD COLUMN processing_error TEXT",
@@ -164,6 +165,7 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, title TEXT NOT NULL, detail TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'info', read_at TEXT, scheduled_for TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (tenant_id, user_id, created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, email TEXT NOT NULL, role TEXT NOT NULL, token TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', invited_by TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS invitations_tenant_idx ON invitations (tenant_id,created_at)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS invitations_token_idx ON invitations (token)"),
   ]);
   await db.batch([
@@ -244,28 +246,33 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
   ]);
 }
 
-export async function platformContext(request: Request, requiredRole?: PlatformRole): Promise<PlatformContext> {
+export async function platformContext(request: Request, requiredRole?: PlatformRole, options: { allowPasswordChange?: boolean } = {}): Promise<PlatformContext> {
   const db = (await ensurePlatformRuntime()).database;
   if (!db) throw new Error("database_unavailable");
   await ensurePlatformSchema(db);
-  const { email, displayName } = await identity(request, db);
+  const principal = await identity(request, db);
+  const { email, displayName } = principal;
   // 仅空库的默认本地测试身份可初始化管理员，其他请求不能自动创建账号或授权。
   if (getAuthMode() === "local" && email === "dev@huawen-zhixing.local" && await isInitialSetupRequired(db)) {
     await createInitialAdminAccount({ db, email, displayName, password: randomSecret() });
   }
   const account = await db.prepare(`SELECT id,email,display_name AS displayName,
-    must_change_password AS mustChangePassword,status FROM users WHERE lower(email)=? LIMIT 1`)
-    .bind(email).first<{ id: string; email: string; displayName: string; mustChangePassword: number; status: string }>();
-  if (!account || account.status !== "active") throw new Error("forbidden");
+    must_change_password AS mustChangePassword,session_version AS sessionVersion,status FROM users WHERE lower(email)=? LIMIT 1`)
+    .bind(email).first<{ id: string; email: string; displayName: string; mustChangePassword: number; sessionVersion: number; status: string }>();
+  if (!account || account.status !== "active") throw new Error("account_access_denied");
+  // 旧令牌按版本 0 兼容；改密或重置后递增版本，撤销该账号此前签发的全部会话。
+  if ("sessionVersion" in principal && principal.sessionVersion !== account.sessionVersion) throw new Error("authentication_required");
   const memberships = await db.prepare(`SELECT rm.tenant_id AS tenantId,rm.role
     FROM role_memberships rm JOIN tenants t ON t.id=rm.tenant_id AND t.status='active'
     WHERE rm.user_id=? AND rm.status='active' AND rm.role IN ('student','teacher','guardian','admin')
     ORDER BY rm.created_at ASC,rm.id ASC`).bind(account.id).all<{ tenantId: string; role: PlatformRole }>();
   const tenantId = memberships.results[0]?.tenantId;
-  if (!tenantId) throw new Error("forbidden");
+  if (!tenantId) throw new Error("account_access_denied");
   const roles = memberships.results.filter((item) => item.tenantId === tenantId)
     .map((item) => item.role).filter((role) => ROLE_SET.has(role));
-  if (!roles.length || (requiredRole && !roles.includes(requiredRole) && !roles.includes("admin"))) throw new Error("forbidden");
+  if (!roles.length) throw new Error("account_access_denied");
+  if (getAuthMode() === "standard" && account.mustChangePassword === 1 && !options.allowPasswordChange) throw new Error("password_change_required");
+  if (requiredRole && !roles.includes(requiredRole) && !roles.includes("admin")) throw new Error("forbidden");
   return { db, tenantId, userId: account.id, userEmail: account.email, displayName: account.displayName,
     roles, mustChangePassword: account.mustChangePassword === 1 };
 }
@@ -274,11 +281,11 @@ export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
   const status = ["family_feedback_response_unavailable", "family_response_id_conflict", "family_response_source_changed", "family_response_already_voided", "trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
     ? 401
-    : message === "forbidden"
+    : message === "forbidden" || message === "account_access_denied" || message === "password_change_required"
       ? 403
       : message.endsWith("_not_found")
         ? 404
-        : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed"
+        : message === "cannot_disable_self" || message === "review_not_due" || message === "submission_already_reviewed" || message === "member_account_external" || message === "member_email_conflict" || message === "shared_account_password_reset" || message === "enrollment_conflict" || message === "document_version_conflict"
           ? 409
           : ["family_confirmation_required", "family_review_required", "family_submission_pending", "family_task_has_submissions", "family_task_changed", "submission_id_conflict", "support_evidence_changed", "sequence_practice_required", "sequence_submission_pending", "sequence_id_conflict", "sequence_retest_required", "sequence_retest_not_open", "sequence_retest_already_scheduled", "sequence_decision_id_conflict", "sequence_decision_already_published", "trial_record_id_conflict", "trial_record_already_voided"].includes(message) ? 409
           : message === "review_item_changed" || message === "diagnostic_attempt_id_conflict" ? 409

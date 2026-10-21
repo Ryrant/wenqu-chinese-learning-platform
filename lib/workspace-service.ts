@@ -147,6 +147,9 @@ async function readTeaching(context: PlatformContext, focusStudentId: string) {
   const admin = roles.includes("admin");
   const teacher = roles.includes("teacher");
   const classAccess = classAccessClause(context, "c");
+  // 草稿权限属于具体任教班级，复合角色不能借关联孩子的班级扩大草稿可见范围。
+  const assignmentStatusFilter = admin ? "" : teacher ? " AND (a.status='published' OR c.teacher_user_id=?)" : " AND a.status='published'";
+  const assignmentStatusArgs = !admin && teacher ? [userId] : [];
   const guardianSubmissionFilter = roles.includes("guardian") && !admin && !teacher && !roles.includes("student") ? " AND s.student_user_id=?" : "";
   const guardianSubmissionArgs = guardianSubmissionFilter ? [focusStudentId] : [];
   const classesQuery = db.prepare(`SELECT c.*,COUNT(e.id) AS studentCount
@@ -160,8 +163,8 @@ async function readTeaching(context: PlatformContext, focusStudentId: string) {
     FROM assignments a JOIN classes c ON c.id=a.class_id AND c.tenant_id=a.tenant_id
     LEFT JOIN submissions s ON s.assignment_id=a.id AND s.tenant_id=a.tenant_id
     LEFT JOIN assignment_objectives ao ON ao.assignment_id=a.id AND ao.tenant_id=a.tenant_id
-    WHERE a.tenant_id=? AND ${classAccess.sql}${guardianSubmissionFilter ? " AND EXISTS (SELECT 1 FROM enrollments fe WHERE fe.tenant_id=a.tenant_id AND fe.class_id=a.class_id AND fe.student_user_id=? AND fe.status='active')" : ""} GROUP BY a.id ORDER BY a.created_at DESC`)
-    .bind(focusStudentId, tenantId, ...classAccess.args, ...guardianSubmissionArgs);
+    WHERE a.tenant_id=? AND ${classAccess.sql}${assignmentStatusFilter}${guardianSubmissionFilter ? " AND EXISTS (SELECT 1 FROM enrollments fe WHERE fe.tenant_id=a.tenant_id AND fe.class_id=a.class_id AND fe.student_user_id=? AND fe.status='active')" : ""} GROUP BY a.id ORDER BY a.created_at DESC`)
+    .bind(focusStudentId, tenantId, ...classAccess.args, ...assignmentStatusArgs, ...guardianSubmissionArgs);
   const enrollmentsQuery = (admin || teacher)
     ? db.prepare(`SELECT e.class_id AS classId,e.student_user_id AS studentUserId,e.status,
         c.name AS className,u.display_name AS studentName
@@ -352,8 +355,20 @@ async function readNotifications(context: PlatformContext) {
 }
 
 async function readConsents(context: PlatformContext, focusStudentId: string) {
-  const result = await context.db.prepare("SELECT * FROM consent_records WHERE tenant_id=? AND (student_user_id=? OR guardian_user_id=?) ORDER BY created_at DESC")
-    .bind(context.tenantId, focusStudentId, context.userId).all();
+  const { db, tenantId, userId, roles } = context;
+  if (roles.includes("admin")) {
+    const result = await db.prepare("SELECT * FROM consent_records WHERE tenant_id=? AND (student_user_id=? OR guardian_user_id=?) ORDER BY created_at DESC")
+      .bind(tenantId, focusStudentId, userId).all();
+    return { consents: result.results };
+  }
+  // 授权记录的签署人是历史事实，不能作为监护关系撤销后的持续读取凭据。
+  const access = roles.includes("student") && focusStudentId === userId
+    ? { sql: "1=1", args: [] }
+    : roles.includes("guardian")
+      ? { sql: "EXISTS (SELECT 1 FROM guardian_student_links gl WHERE gl.tenant_id=cr.tenant_id AND gl.student_user_id=cr.student_user_id AND gl.guardian_user_id=? AND gl.status='active')", args: [userId] }
+      : { sql: "1=0", args: [] };
+  const result = await db.prepare(`SELECT cr.* FROM consent_records cr WHERE cr.tenant_id=? AND cr.student_user_id=? AND ${access.sql} ORDER BY cr.created_at DESC`)
+    .bind(tenantId, focusStudentId, ...access.args).all();
   return { consents: result.results };
 }
 

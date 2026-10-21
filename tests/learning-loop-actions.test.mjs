@@ -46,8 +46,6 @@ test("learning-loop service scopes guardian teacher and student operations", asy
   assert.match(service, /teacher_user_id=\?/);
   assert.match(service, /student_user_id=\?/);
   assert.match(service, /tenant_id=\?/);
-  assert.match(service, /updateMasteryEvidence/);
-  assert.match(service, /blendMastery/);
   assert.match(service, /learning_recommendations/);
   assert.match(service, /isRecommendationDue/);
   assert.match(service, /row\.sourceType !== "diagnostic"/);

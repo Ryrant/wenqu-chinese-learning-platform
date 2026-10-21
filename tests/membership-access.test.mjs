@@ -1,198 +1,193 @@
-import { readCommandSources, readWorkspaceSources } from "./helpers/source-files.mjs";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
-const root = new URL("../", import.meta.url);
-const serviceSource = await readFile(new URL("lib/membership-service.ts", root), "utf8");
-const executableSource = serviceSource
-  .replace('import { hashPassword } from "./auth-password";', 'async function hashPassword(password) { return `hash:${password}`; }')
-  .replace('import type { PlatformRole } from "./platform-store";\n', "");
-const transpiled = ts.transpileModule(executableSource, {
-  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-  fileName: "membership-service.ts",
-  reportDiagnostics: true,
+const bundle = await build({
+  stdin: { contents: `
+    export { NodeSqliteDatabase } from './lib/platform-runtime-node';
+    export { ensurePlatformSchema, platformApiError } from './lib/platform-store';
+    export * from './lib/membership-service';
+    export { hashPassword, verifyPassword } from './lib/auth-password';
+  `, resolveDir: fileURLToPath(new URL("../", import.meta.url)) },
+  bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
-assert.deepEqual((transpiled.diagnostics ?? []).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error), []);
-const membershipService = await import(`data:text/javascript;base64,${Buffer.from(transpiled.outputText).toString("base64")}`);
-const [actionsSource, workspaceSource, platformStoreSource] = await Promise.all([
-  readCommandSources(),
-  readWorkspaceSources(),
-  readFile(new URL("lib/platform-store.ts", root), "utf8"),
-]);
+const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+const password = "CurrentPassword123", temporaryPassword = "TemporaryPassword456";
+const originalHash = await api.hashPassword(password);
 
-function createDb({ users = [], memberships = [], links = [] } = {}) {
-  const state = {
-    users: new Map(users.map((user) => [user.id, { ...user }])),
-    memberships: memberships.map((membership) => ({ ...membership })),
-    links: links.map((link) => ({ ...link })),
-    batches: [],
-  };
-  const execute = (sql, args) => {
-    if (sql.startsWith("INSERT INTO users")) {
-      const [id, email, displayName, , passwordHash] = args;
-      const existing = state.users.get(id);
-      if (!existing) state.users.set(id, { id, email, displayName, passwordHash, mustChangePassword: 1, status: "active" });
-      else if (sql.includes("ON CONFLICT")) Object.assign(existing, { email, displayName, passwordHash, mustChangePassword: 1, status: "active" });
-      return { meta: { changes: 1 } };
-    }
-    if (sql.startsWith("INSERT OR IGNORE INTO role_memberships")) {
-      const [tenantId, userId, role] = args;
-      if (!state.memberships.some((membership) => membership.tenantId === tenantId && membership.userId === userId && membership.role === role)) state.memberships.push({ tenantId, userId, role, status: "active" });
-      return { meta: { changes: 1 } };
-    }
-    if (sql.startsWith("UPDATE role_memberships SET status='active'")) {
-      const [tenantId, userId, role] = args;
-      state.memberships.filter((membership) => membership.tenantId === tenantId && membership.userId === userId && membership.role === role).forEach((membership) => { membership.status = "active"; });
-      return { meta: { changes: 1 } };
-    }
-    if (sql.startsWith("UPDATE users SET password_hash=")) {
-      const [passwordHash, userId] = args;
-      const user = state.users.get(userId);
-      if (!user) return { meta: { changes: 0 } };
-      user.passwordHash = passwordHash;
-      user.mustChangePassword = 1;
-      if (sql.includes("status='active'")) user.status = "active";
-      return { meta: { changes: 1 } };
-    }
-    if (sql.startsWith("UPDATE users SET status=")) {
-      const [status, userId] = args;
-      const user = state.users.get(userId);
-      if (!user) return { meta: { changes: 0 } };
-      user.status = status;
-      return { meta: { changes: 1 } };
-    }
-    if (sql.startsWith("UPDATE role_memberships SET status=?")) {
-      const [status, tenantId, userId] = args;
-      const matches = state.memberships.filter((membership) => membership.tenantId === tenantId && membership.userId === userId);
-      matches.forEach((membership) => { membership.status = status; });
-      return { meta: { changes: matches.length } };
-    }
-    if (sql.startsWith("DELETE FROM guardian_student_links")) {
-      const [tenantId, guardianUserId] = args;
-      state.links = state.links.filter((link) => link.tenantId !== tenantId || link.guardianUserId !== guardianUserId);
-      return { meta: { changes: 1 } };
-    }
-    if (sql.startsWith("UPDATE guardian_student_links SET status='disabled'")) {
-      const [tenantId, guardianUserId] = args;
-      state.links.filter((link) => link.tenantId === tenantId && link.guardianUserId === guardianUserId).forEach((link) => { link.status = "disabled"; });
-      return { meta: { changes: 1 } };
-    }
-    if (sql.startsWith("INSERT INTO guardian_student_links")) {
-      const [tenantId, guardianUserId, studentUserId] = args;
-      state.links.push({ tenantId, guardianUserId, studentUserId, status: "active" });
-      return { meta: { changes: 1 } };
-    }
-    return { meta: { changes: 1 } };
-  };
-  const db = {
-    prepare(sql) {
-      let args = [];
-      return {
-        sql,
-        bind(...nextArgs) { args = nextArgs; return this; },
-        run: async () => execute(sql, args),
-        first: async () => {
-          if (sql.includes("FROM users")) {
-            const user = state.users.get(args[0]) ?? null;
-            if (!user || !sql.includes("JOIN role_memberships")) return user;
-            const membership = state.memberships.find((item) => item.userId === args[0] && item.tenantId === args[1]);
-            if (!membership || (sql.includes("rm.status='active'") && membership.status !== "active")) return null;
-            return user;
-          }
-          return null;
-        },
-      };
-    },
-    batch: async (statements) => {
-      state.batches.push(statements.map((statement) => statement.sql));
-      return Promise.all(statements.map((statement) => statement.run()));
-    },
-  };
-  return { db, state };
+async function fixture(t, { status = "active", membership = "active", otherMembership = false } = {}) {
+  const db = new api.NodeSqliteDatabase("file::memory:");
+  t.after(() => db.close());
+  await api.ensurePlatformSchema(db);
+  await db.batch([
+    db.prepare("INSERT INTO tenants(id,name) VALUES ('tenant-a','本机构'),('tenant-b','其他机构')"),
+    db.prepare("INSERT INTO users(id,email,display_name,password_hash,must_change_password,status,session_version) VALUES ('member-1','member@example.test','原有成员',?,0,?,3)").bind(originalHash, status),
+    ...["admin-a", "guardian-1", "student-1", "student-2", "student-old", "student-other"].map((id) => db.prepare("INSERT INTO users(id,email,display_name) VALUES (?,?,?)").bind(id, `${id}@example.test`, id)),
+    db.prepare("INSERT INTO role_memberships(tenant_id,user_id,role,status) VALUES ('tenant-a','admin-a','admin','active'),('tenant-a','guardian-1','guardian','active')"),
+    ...["student-1", "student-2", "student-old"].map((id) => db.prepare("INSERT INTO role_memberships(tenant_id,user_id,role,status) VALUES ('tenant-a',?,'student','active')").bind(id)),
+  ]);
+  if (membership) await db.prepare("INSERT INTO role_memberships(tenant_id,user_id,role,status) VALUES ('tenant-a','member-1','teacher',?)").bind(membership).run();
+  if (otherMembership) await db.prepare("INSERT INTO role_memberships(tenant_id,user_id,role,status) VALUES ('tenant-b','member-1','student','active')").run();
+  const account = () => db.prepare("SELECT * FROM users WHERE id='member-1'").first();
+  const roles = () => db.prepare("SELECT tenant_id,user_id,role,status FROM role_memberships WHERE user_id='member-1' ORDER BY tenant_id,role").all().then((result) => result.results);
+  const reset = () => api.resetMemberPassword(db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", temporaryPassword });
+  const audits = async () => (await db.prepare("SELECT COUNT(*) AS n FROM audit_logs").first()).n;
+  return { db, account, roles, reset, audits };
 }
 
-test("existing member creation preserves shared account credentials while restoring only the current tenant role", async () => {
-  const { db, state } = createDb({ users: [{ id: "usr_3ehbs1", email: "existing@example.com", displayName: "Shared Account", passwordHash: "original-hash", mustChangePassword: 0, status: "disabled" }] });
-  await membershipService.createMember(db, { tenantId: "tenant-a", actorUserId: "admin-a", email: "existing@example.com", displayName: "Tenant A Name", role: "teacher", temporaryPassword: "NewTemporary1" });
-  assert.deepEqual(state.users.get("usr_3ehbs1"), { id: "usr_3ehbs1", email: "existing@example.com", displayName: "Shared Account", passwordHash: "original-hash", mustChangePassword: 0, status: "disabled" });
-  assert.deepEqual(state.memberships, [{ tenantId: "tenant-a", userId: "usr_3ehbs1", role: "teacher", status: "active" }]);
+test("本机构已有成员加角色只恢复本机构授权，保留全局账号状态和凭据", async (t) => {
+  const f = await fixture(t, { status: "disabled", membership: "disabled", otherMembership: true });
+  const before = await f.account();
+  const input = { tenantId: "tenant-a", actorUserId: "admin-a", email: " MEMBER@example.test ", displayName: "新名称", role: "teacher", temporaryPassword };
+  const result = await api.createMember(f.db, input);
+  await api.createMember(f.db, { ...input, role: "guardian" });
+  assert.equal(result.id, "member-1"); assert.equal(result.mustChangePassword, false);
+  assert.deepEqual(await f.account(), before);
+  assert.deepEqual(await f.roles(), [
+    { tenant_id: "tenant-a", user_id: "member-1", role: "guardian", status: "active" },
+    { tenant_id: "tenant-a", user_id: "member-1", role: "teacher", status: "active" },
+    { tenant_id: "tenant-b", user_id: "member-1", role: "student", status: "active" },
+  ]);
 });
 
-test("member password reset does not reactivate a globally disabled account", async () => {
-  const { db, state } = createDb({ users: [{ id: "member-1", email: "member@example.com", displayName: "Member", passwordHash: "original-hash", mustChangePassword: 0, status: "disabled" }], memberships: [{ tenantId: "tenant-a", userId: "member-1", role: "teacher", status: "active" }] });
-  await assert.rejects(() => membershipService.resetMemberPassword(db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", temporaryPassword: "NewTemporary1" }), /member_inactive/);
-  assert.deepEqual(state.users.get("member-1"), { id: "member-1", email: "member@example.com", displayName: "Member", passwordHash: "original-hash", mustChangePassword: 0, status: "disabled" });
+test("新成员创建真实密码哈希、临时改密标记及单个指定角色", async (t) => {
+  const f = await fixture(t);
+  const result = await api.createMember(f.db, { tenantId: "tenant-a", actorUserId: "admin-a", email: "new@example.test", displayName: "新成员", role: "teacher", temporaryPassword });
+  const saved = await f.db.prepare("SELECT * FROM users WHERE id=?").bind(result.id).first();
+  assert.equal(await api.verifyPassword(temporaryPassword, saved.password_hash), true);
+  assert.equal(saved.must_change_password, 1); assert.equal(saved.session_version, 0);
+  assert.deepEqual((await f.db.prepare("SELECT tenant_id,role,status FROM role_memberships WHERE user_id=?").bind(result.id).all()).results, [{ tenant_id: "tenant-a", role: "teacher", status: "active" }]);
 });
 
-test("member password reset rejects a disabled current-tenant membership", async () => {
-  const { db, state } = createDb({ users: [{ id: "member-1", email: "member@example.com", displayName: "Member", passwordHash: "original-hash", mustChangePassword: 0, status: "active" }], memberships: [{ tenantId: "tenant-a", userId: "member-1", role: "teacher", status: "disabled" }] });
-  await assert.rejects(() => membershipService.resetMemberPassword(db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", temporaryPassword: "NewTemporary1" }), /member_not_found/);
-  assert.equal(state.users.get("member-1").passwordHash, "original-hash");
+test("拒绝关联本机构外的已有账号，账号、授权和审计不改变", async (t) => {
+  const f = await fixture(t, { membership: false, otherMembership: true });
+  const before = { account: await f.account(), roles: await f.roles(), audits: await f.audits() };
+  const error = await api.createMember(f.db, { tenantId: "tenant-a", actorUserId: "admin-a", email: "member@example.test", displayName: "不会保存", role: "teacher", temporaryPassword }).catch((error) => error);
+  assert.equal(error.message, "member_account_external");
+  const response = api.platformApiError(error);
+  assert.equal(response.status, 409); assert.deepEqual(await response.json(), { error: "member_account_external" });
+  assert.deepEqual({ account: await f.account(), roles: await f.roles(), audits: await f.audits() }, before);
 });
 
-test("member status changes stay within the current tenant membership", async () => {
-  const { db, state } = createDb({ users: [{ id: "member-1", email: "member@example.com", displayName: "Member", passwordHash: "hash", mustChangePassword: 0, status: "active" }], memberships: [{ tenantId: "tenant-a", userId: "member-1", role: "teacher", status: "active" }, { tenantId: "tenant-b", userId: "member-1", role: "student", status: "active" }] });
-  await membershipService.setMemberStatus(db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", status: "disabled" });
-  assert.equal(state.users.get("member-1").status, "active");
-  assert.deepEqual(state.memberships, [{ tenantId: "tenant-a", userId: "member-1", role: "teacher", status: "disabled" }, { tenantId: "tenant-b", userId: "member-1", role: "student", status: "active" }]);
-});
-
-test("current administrator cannot disable their own current-tenant membership", async () => {
-  const { db, state } = createDb({
-    users: [{ id: "admin-a", email: "admin@example.com", displayName: "Admin", status: "active" }],
-    memberships: [{ tenantId: "tenant-a", userId: "admin-a", role: "admin", status: "active" }],
+test("全局停用或当前机构授权停用时拒绝重置密码且不恢复账号", async (t) => {
+  for (const [options, message] of [[{ status: "disabled" }, "member_inactive"], [{ membership: "disabled" }, "member_not_found"]]) await t.test(message, async (t) => {
+    const f = await fixture(t, options), before = await f.account();
+    await assert.rejects(f.reset(), new RegExp(message));
+    assert.deepEqual(await f.account(), before); assert.equal(await f.audits(), 0);
   });
-
-  await assert.rejects(
-    () => membershipService.setMemberStatus(db, {
-      tenantId: "tenant-a",
-      actorUserId: "admin-a",
-      userId: "admin-a",
-      status: "disabled",
-    }),
-    /cannot_disable_self/,
-  );
-  assert.equal(state.memberships[0].status, "active");
 });
 
-test("self-disable conflict is exposed as an HTTP 409 domain error", () => {
-  assert.match(platformStoreSource, /message === "cannot_disable_self"/);
-  assert.match(platformStoreSource, /cannot_disable_self[\s\S]{0,180}\? 409/);
+test("共享多机构账号拒绝机构级全局密码重置，其他机构授权停用也不能绕过保护", async (t) => {
+  for (const status of ["active", "disabled"]) await t.test(status, async (t) => {
+    const f = await fixture(t, { otherMembership: true });
+    await f.db.prepare("UPDATE role_memberships SET status=? WHERE tenant_id='tenant-b' AND user_id='member-1'").bind(status).run();
+    const before = await f.account(), error = await f.reset().catch((error) => error);
+    assert.equal(error.message, "shared_account_password_reset"); assert.equal(api.platformApiError(error).status, 409);
+    assert.deepEqual(await f.account(), before); assert.equal(await f.audits(), 0);
+  });
 });
 
-test("member status change rejects a user without a current tenant membership", async () => {
-  const { db } = createDb({ users: [{ id: "member-1", email: "member@example.com", displayName: "Member", passwordHash: "hash", mustChangePassword: 0, status: "active" }] });
-  await assert.rejects(() => membershipService.setMemberStatus(db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", status: "disabled" }), /member_not_found/);
+test("单机构密码重置递增会话版本，审计失败时账号与凭据整笔回滚", async (t) => {
+  const f = await fixture(t), before = await f.account();
+  await f.db.prepare("CREATE TRIGGER reject_reset_audit BEFORE INSERT ON audit_logs WHEN NEW.action='member.password_reset' BEGIN SELECT RAISE(ABORT,'fixture_reset_audit_failure'); END").run();
+  await assert.rejects(f.reset(), /fixture_reset_audit_failure/);
+  assert.deepEqual(await f.account(), before); assert.equal(await f.audits(), 0);
+  await f.db.prepare("DROP TRIGGER reject_reset_audit").run(); await f.reset();
+  const updated = await f.account();
+  assert.equal(await api.verifyPassword(temporaryPassword, updated.password_hash), true);
+  assert.equal(updated.must_change_password, 1); assert.equal(updated.session_version, 4);
+  assert.equal(updated.status, "active"); assert.equal(await f.audits(), 1);
 });
 
-test("replacing guardian links is idempotent within the current tenant", async () => {
-  const { db, state } = createDb({ links: [{ tenantId: "tenant-a", guardianUserId: "guardian-1", studentUserId: "student-old", status: "active" }, { tenantId: "tenant-b", guardianUserId: "guardian-1", studentUserId: "student-other", status: "active" }] });
+test("成员停用仅影响当前机构授权，保留其他机构和全局账号状态", async (t) => {
+  const f = await fixture(t, { otherMembership: true });
+  await api.setMemberStatus(f.db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", status: "disabled" });
+  assert.equal((await f.account()).status, "active");
+  assert.deepEqual(await f.roles(), [
+    { tenant_id: "tenant-a", user_id: "member-1", role: "teacher", status: "disabled" },
+    { tenant_id: "tenant-b", user_id: "member-1", role: "student", status: "active" },
+  ]);
+});
+
+test("管理员不能停用自己，也不能修改无当前机构授权的成员", async (t) => {
+  const f = await fixture(t, { membership: false });
+  const error = await api.setMemberStatus(f.db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "admin-a", status: "disabled" }).catch((error) => error);
+  assert.equal(error.message, "cannot_disable_self"); assert.equal(api.platformApiError(error).status, 409);
+  assert.equal((await f.db.prepare("SELECT status FROM role_memberships WHERE user_id='admin-a'").first()).status, "active");
+  await assert.rejects(api.setMemberStatus(f.db, { tenantId: "tenant-a", actorUserId: "admin-a", userId: "member-1", status: "disabled" }), /member_not_found/);
+  assert.equal(await f.audits(), 0);
+});
+
+test("监护关联替换在当前机构幂等且不影响其他机构，审计失败保留原关联", async (t) => {
+  const f = await fixture(t);
+  await f.db.prepare("INSERT INTO guardian_student_links(tenant_id,guardian_user_id,student_user_id,status) VALUES ('tenant-a','guardian-1','student-old','active'),('tenant-b','guardian-1','student-other','active')").run();
+  const links = () => f.db.prepare("SELECT tenant_id,guardian_user_id,student_user_id,status FROM guardian_student_links ORDER BY tenant_id,student_user_id").all().then((result) => result.results);
   const input = { tenantId: "tenant-a", actorUserId: "admin-a", guardianUserId: "guardian-1", studentUserIds: ["student-1", "student-2", "student-1"] };
-  await membershipService.setGuardianLinks(db, input);
-  await membershipService.setGuardianLinks(db, input);
-  assert.ok(state.batches.every((batch) => batch.some((sql) => sql.startsWith("DELETE FROM guardian_student_links")) && batch.filter((sql) => sql.startsWith("INSERT INTO guardian_student_links")).length === 2));
-  assert.deepEqual(state.links, [{ tenantId: "tenant-b", guardianUserId: "guardian-1", studentUserId: "student-other", status: "active" }, { tenantId: "tenant-a", guardianUserId: "guardian-1", studentUserId: "student-1", status: "active" }, { tenantId: "tenant-a", guardianUserId: "guardian-1", studentUserId: "student-2", status: "active" }]);
+  await api.setGuardianLinks(f.db, input); await api.setGuardianLinks(f.db, input);
+  const expected = [
+    { tenant_id: "tenant-a", guardian_user_id: "guardian-1", student_user_id: "student-1", status: "active" },
+    { tenant_id: "tenant-a", guardian_user_id: "guardian-1", student_user_id: "student-2", status: "active" },
+    { tenant_id: "tenant-b", guardian_user_id: "guardian-1", student_user_id: "student-other", status: "active" },
+  ];
+  assert.deepEqual(await links(), expected);
+  await f.db.prepare("CREATE TRIGGER reject_link_audit BEFORE INSERT ON audit_logs WHEN NEW.action='guardian_links.updated' BEGIN SELECT RAISE(ABORT,'fixture_link_audit_failure'); END").run();
+  await assert.rejects(api.setGuardianLinks(f.db, { ...input, studentUserIds: ["student-old"] }), /fixture_link_audit_failure/);
+  assert.deepEqual(await links(), expected);
 });
 
-test("workspace routes expose member and guardian management operations", () => {
-  for (const action of ["create_member", "reset_member_password", "set_member_status", "set_guardian_links"]) assert.match(actionsSource, new RegExp(action));
-  assert.match(workspaceSource, /members:/);
-  assert.match(workspaceSource, /guardianLinks:/);
-  assert.match(workspaceSource, /CASE WHEN u\.status='active' AND SUM\(CASE WHEN rm\.status='active' THEN 1 ELSE 0 END\) > 0 THEN 'active' ELSE 'disabled' END AS status/);
+test("监护绑定拒绝外机构、缺失角色或停用账号，任何非法输入均不改变原关联和审计", async (t) => {
+  const cases = [
+    { name: "其他机构家长", guardian: "foreign-guardian", error: "invalid_guardian_id" },
+    { name: "不存在的家长", guardian: "missing-guardian", error: "invalid_guardian_id" },
+    { name: "学生不能作为家长", guardian: "student-1", error: "invalid_guardian_id" },
+    { name: "全局停用家长", setup: "UPDATE users SET status='disabled' WHERE id='guardian-1'", error: "invalid_guardian_id" },
+    { name: "停用的家长授权", setup: "UPDATE role_memberships SET status='disabled' WHERE user_id='guardian-1'", error: "invalid_guardian_id" },
+    { name: "混入其他机构学生", students: ["student-1", "student-other"], error: "invalid_student_ids" },
+    { name: "不存在的学生", students: ["student-1", "missing-student"], error: "invalid_student_ids" },
+    { name: "家长不能作为学生", students: ["guardian-1"], error: "invalid_student_ids" },
+    { name: "全局停用学生", setup: "UPDATE users SET status='disabled' WHERE id='student-1'", error: "invalid_student_ids" },
+    { name: "停用的学生授权", setup: "UPDATE role_memberships SET status='disabled' WHERE user_id='student-1'", error: "invalid_student_ids" },
+  ];
+  for (const item of cases) await t.test(item.name, async (t) => {
+    const f = await fixture(t);
+    await f.db.batch([
+      f.db.prepare("INSERT INTO users(id,email,display_name) VALUES ('foreign-guardian','foreign-guardian@example.test','其他机构家长')"),
+      f.db.prepare("INSERT INTO role_memberships(tenant_id,user_id,role) VALUES ('tenant-b','foreign-guardian','guardian'),('tenant-b','student-other','student')"),
+      f.db.prepare("INSERT INTO guardian_student_links(tenant_id,guardian_user_id,student_user_id) VALUES ('tenant-a','guardian-1','student-old'),('tenant-b','foreign-guardian','student-other')"),
+    ]);
+    if (item.setup) await f.db.prepare(item.setup).run();
+    const state = async () => ({
+      links: (await f.db.prepare("SELECT * FROM guardian_student_links ORDER BY id").all()).results,
+      audits: (await f.db.prepare("SELECT * FROM audit_logs ORDER BY id").all()).results,
+    });
+    const before = await state();
+    const error = await api.setGuardianLinks(f.db, {
+      tenantId: "tenant-a", actorUserId: "admin-a", guardianUserId: item.guardian ?? "guardian-1", studentUserIds: item.students ?? ["student-1"],
+    }).catch((error) => error);
+    assert.equal(error.message, item.error);
+    assert.equal(api.platformApiError(error).status, 400);
+    assert.deepEqual(await state(), before);
+  });
 });
 
-test("access control helpers centralize teacher student and guardian filters", async () => {
-  const access = await readFile(new URL("lib/access-control.ts", root), "utf8");
-  const workspace = await readWorkspaceSources();
-  const actions = await readCommandSources();
-  assert.match(access, /export type AccessClause/);
-  assert.match(access, /export function classAccessClause/);
-  assert.match(access, /export function submissionAccessClause/);
-  assert.match(access, /guardian_student_links gl/);
-  assert.match(access, /gl.status='active'/);
-  assert.match(workspace, /classAccessClause/);
-  assert.match(workspace, /submissionAccessClause/);
-  assert.match(actions, /assertSubmissionReviewAccess/);
+test("清空名单允许解绑停用的本机构家长，但不能清理外机构或无家长角色的账号", async (t) => {
+  const f = await fixture(t);
+  await f.db.batch([
+    f.db.prepare("UPDATE users SET status='disabled' WHERE id='guardian-1'"),
+    f.db.prepare("UPDATE role_memberships SET status='disabled' WHERE tenant_id='tenant-a' AND user_id='guardian-1'"),
+    f.db.prepare("INSERT INTO role_memberships(tenant_id,user_id,role) VALUES ('tenant-b','student-other','guardian')"),
+    f.db.prepare("INSERT INTO guardian_student_links(tenant_id,guardian_user_id,student_user_id) VALUES ('tenant-a','guardian-1','student-old'),('tenant-b','guardian-1','student-other'),('tenant-b','student-other','student-other')"),
+  ]);
+  await api.setGuardianLinks(f.db, { tenantId: "tenant-a", actorUserId: "admin-a", guardianUserId: "guardian-1", studentUserIds: [] });
+  const remaining = (await f.db.prepare("SELECT tenant_id,guardian_user_id,student_user_id FROM guardian_student_links ORDER BY guardian_user_id").all()).results;
+  assert.deepEqual(remaining, [
+    { tenant_id: "tenant-b", guardian_user_id: "guardian-1", student_user_id: "student-other" },
+    { tenant_id: "tenant-b", guardian_user_id: "student-other", student_user_id: "student-other" },
+  ]);
+  for (const guardianUserId of ["student-other", "student-1", "missing"]) {
+    await assert.rejects(api.setGuardianLinks(f.db, { tenantId: "tenant-a", actorUserId: "admin-a", guardianUserId, studentUserIds: [] }), /invalid_guardian_id/);
+  }
+  assert.equal(await f.audits(), 1);
+  assert.deepEqual((await f.db.prepare("SELECT tenant_id,guardian_user_id,student_user_id FROM guardian_student_links ORDER BY guardian_user_id").all()).results, remaining);
 });
