@@ -132,10 +132,10 @@ export function MemberManagementView({ data, act, notify }: Props) {
   }
 
   return <section className="space-y-6">
-    <PageHeader title="成员管理" description="管理机构成员、账号权限与家庭关系。" actions={<div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={(event) => { dialogTrigger.current = event.currentTarget; setEditor("guardian"); }}>绑定监护人</Button><Button ref={createMemberTrigger} type="button" onClick={(event) => { dialogTrigger.current = event.currentTarget; setEditor("create"); }}>创建成员</Button></div>}/>
+    <PageHeader title="成员管理" description="管理机构成员、账号权限与家庭关系。"/>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="全部成员" value={data.members.length}/><StatCard label="教师" value={data.members.filter((member) => stringValue(member.roles, "").split(",").includes("teacher")).length}/><StatCard label="学生" value={students.length}/><StatCard label="监护关系" value={uniqueGuardianLinks.length}/></div>
     <Card className="gap-0 overflow-hidden py-0">
-      <div className="flex flex-col gap-4 border-b px-6 py-5 sm:flex-row sm:items-center sm:justify-between"><SectionHeading title="成员目录"/><Input aria-label="搜索成员" placeholder="搜索姓名或邮箱…" value={query} onChange={(event) => setQuery(event.target.value)} className="sm:max-w-xs"/></div>
+      <div className="space-y-4 border-b px-6 py-5"><SectionHeading title="成员目录" action={<Button ref={createMemberTrigger} type="button" variant="outline" size="sm" onClick={(event) => { dialogTrigger.current = event.currentTarget; setEditor("create"); }}>创建成员</Button>}/><Input aria-label="搜索成员" placeholder="搜索姓名或邮箱…" value={query} onChange={(event) => setQuery(event.target.value)} className="sm:max-w-xs"/></div>
       {filteredMembers.length ? <Table>
         <TableHeader><TableRow><TableHead className="pl-6">成员</TableHead><TableHead>角色</TableHead><TableHead>账号状态</TableHead><TableHead>密码</TableHead><TableHead className="pr-6 text-right">操作</TableHead></TableRow></TableHeader>
         <TableBody>{filteredMembers.map((member) => {

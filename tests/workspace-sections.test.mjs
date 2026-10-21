@@ -182,7 +182,7 @@ test("guardian selection is authorized before any requested group is loaded", as
 test("non-admin partition requests retain empty restricted collections", async (t) => {
   const f = await fixture(t);
   const data = await f.read("student", "members,audits,content,lessons,quality,trials");
-  for (const field of ["members", "guardianLinks", "invitations", "audits", "documents", "lessonPlans", "trialEntries"]) assert.deepEqual(data[field], []);
+  for (const field of ["members", "guardianLinks", "audits", "documents", "lessonPlans", "trialEntries"]) assert.deepEqual(data[field], []);
   assert.equal(data.qualityMetrics, null);
   assert.equal(f.executed.length, 1);
 });
@@ -190,7 +190,7 @@ test("non-admin partition requests retain empty restricted collections", async (
 test("full reads remain compatible and shared curriculum objectives execute once", async (t) => {
   const f = await fixture(t);
   const data = await f.read("admin", null);
-  for (const field of ["classes", "assignments", "submissions", "submissionReviews", "mastery", "masteryMatrix", "learningObjectives", "diagnosticItems", "diagnosticSummary", "recommendations", "learningPlan", "learningSequences", "sequenceSources", "weeklyReport", "documents", "lessonPlans", "notifications", "consents", "audits", "members", "guardianLinks", "invitations", "qualityMetrics", "trialEntries", "platformSettings", "services"]) assert.ok(field in data, field);
+  for (const field of ["classes", "assignments", "submissions", "submissionReviews", "mastery", "masteryMatrix", "learningObjectives", "diagnosticItems", "diagnosticSummary", "recommendations", "learningPlan", "learningSequences", "sequenceSources", "weeklyReport", "documents", "lessonPlans", "notifications", "consents", "audits", "members", "guardianLinks", "qualityMetrics", "trialEntries", "platformSettings", "services"]) assert.ok(field in data, field);
   assert.equal(f.executed.filter((sql) => /^SELECT \* FROM learning_objectives WHERE/.test(sql)).length, 1);
   assert.equal(data.services.database.label, "SQLite 业务数据库");
   assert.equal(data.services.storage.status, "configured_unverified");

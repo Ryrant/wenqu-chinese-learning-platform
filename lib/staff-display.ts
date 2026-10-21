@@ -7,12 +7,12 @@ export type GuardianProps = BaseProps & { selectStudent: (studentId: string) => 
 
 export type AdminProps = BaseProps & { refresh: () => Promise<void> };
 
-export function localDate(value: unknown) {
+export function localDate(value: unknown, includeSeconds = false) {
   const raw = stringValue(value, "");
   if (!raw) return "时间未记录";
   const date = new Date(raw.includes("T") || raw.endsWith("Z") ? raw : `${raw.replace(" ", "T")}Z`);
   if (Number.isNaN(date.getTime())) return raw;
-  return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", second: includeSeconds ? "2-digit" : undefined, hourCycle: "h23" }).format(date);
 }
 
 export function jsonArray<T>(value: unknown): T[] {

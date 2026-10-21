@@ -13,7 +13,6 @@ export const workspaceActionRoles = {
   create_class: "teacher",
   create_family_task: "guardian",
   create_intervention: "teacher",
-  create_invitation: "admin",
   create_learning_sequence: "teacher",
   create_member: "admin",
   create_reminder: "guardian",

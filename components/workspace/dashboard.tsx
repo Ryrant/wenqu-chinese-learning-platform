@@ -2,12 +2,10 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Bell, BookOpen, CalendarCheck, ChartNoAxesCombined, Check, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, ClipboardList, FileText, FolderOpen, GraduationCap, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, Search, Settings, ShieldCheck, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { Notify, Role } from "../../lib/platform-types";
@@ -58,13 +56,9 @@ export function Dashboard() {
   const [newPassword, setNewPassword] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [noticesOpen, setNoticesOpen] = useState(false);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [feedback, setFeedback] = useState("");
-  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobileNavTrigger = useRef<HTMLButtonElement>(null);
   const noticeTrigger = useRef<HTMLButtonElement>(null);
-  const feedbackReturnFocus = useRef<HTMLButtonElement | null>(null);
   const notify: Notify = (title, detail, tone = "success") => {
     setToast({ title, detail, tone });
     window.setTimeout(() => setToast(null), 3600);
@@ -99,18 +93,6 @@ export function Dashboard() {
   }
   function navigatePage(label: string) { workspace.goTo(label); setMobileNavOpen(false); }
 
-  async function sendFeedback(event: React.FormEvent) {
-    event.preventDefault();
-    if (!feedback.trim() || !data || feedbackBusy) return;
-    setFeedbackBusy(true);
-    try {
-      const response = await fetch("/api/v1/feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ targetType: "platform", targetId: data.workspace.tenantId, rating: 1, correction: feedback }) });
-      if (!response.ok) throw new Error("暂时无法提交，请稍后重试。");
-      setFeedback(""); setFeedbackOpen(false); notify("反馈已提交", "感谢你的建议。");
-    } catch (reason) { notify("反馈未提交", reason instanceof Error ? reason.message : "请稍后重试。", "error"); }
-    finally { setFeedbackBusy(false); }
-  }
-
   if (loading) return <main className="center-state"><div className="loading-mark"><LoaderCircle size={24}/></div><h1>正在加载工作区</h1></main>;
   if (accessDenied) return <AuthScreen title="当前账号无权访问" description={error || "请联系管理员为账号分配角色后重新登录。"}>{authMode === "standard" && <Button className="w-full" onClick={logout}>退出并切换账号</Button>}</AuthScreen>;
   if (authMode === "standard" && setupRequired) return <AuthScreen title="创建你的工作区" description="设置首个管理员账号，开始使用华文知行。"><form className="auth-fields" onSubmit={setup}><div className="auth-field"><Label htmlFor="setup-workspace">工作区名称</Label><Input id="setup-workspace" value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} maxLength={120} placeholder="学校或机构名称" required/></div><div className="auth-field"><Label htmlFor="setup-email">管理员邮箱</Label><Input id="setup-email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="username" placeholder="name@school.com" required/></div><div className="auth-field"><Label htmlFor="setup-name">姓名</Label><Input id="setup-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" placeholder="如何称呼你"/></div><div className="auth-field"><Label htmlFor="setup-password">密码</Label><Input id="setup-password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="new-password" minLength={8} placeholder="至少 8 个字符" required/></div>{error && <p className="form-error" role="alert">{error}</p>}<Button className="w-full" type="submit" disabled={loginBusy}>{loginBusy ? <><LoaderCircle className="animate-spin"/>正在创建</> : "创建管理员并进入工作区"}</Button></form></AuthScreen>;
@@ -129,16 +111,15 @@ export function Dashboard() {
   })}</nav>;
 
   return <main className="app-shell">
-    <aside className="app-sidebar"><Brand/><p className="nav-caption">{roleLabel}工作台</p>{workspaceNavigation}<div className="sidebar-bottom"><Button variant="ghost" onClick={(event) => { feedbackReturnFocus.current = event.currentTarget; setFeedbackOpen(true); }}><MessageCircle/>意见反馈</Button><div className="sidebar-account"><GraduationCap size={22}/><div><strong>{data.workspace.name}</strong><small>{roleLabel}工作台</small></div></div></div></aside>
+    <aside className="app-sidebar"><Brand/><p className="nav-caption">{roleLabel}工作台</p>{workspaceNavigation}<div className="sidebar-bottom"><div className="sidebar-account"><GraduationCap size={22}/><div><strong>{data.workspace.name}</strong><small>{roleLabel}工作台</small></div></div></div></aside>
     <section className="workspace-main">
       <header className="workspace-topbar"><div className="workspace-location"><Button variant="ghost" size="icon" ref={mobileNavTrigger} className="mobile-menu-trigger" aria-label="打开导航" onClick={() => setMobileNavOpen(true)}><Menu/></Button><span className="breadcrumb-role">{roleLabel}工作台</span><ChevronRight/><strong>{activeNav}</strong></div><div className="workspace-tools"><Button variant="ghost" size="icon" ref={noticeTrigger} className="notice-trigger" aria-label={unread ? `通知，${unread} 条未读` : "通知"} onClick={() => setNoticesOpen(true)}><Bell/>{unread > 0 && <span className="notice-count">{unread > 99 ? "99+" : unread}</span>}</Button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="account-trigger" aria-label="账号菜单"><Avatar className="size-8"><AvatarFallback className="bg-secondary text-primary text-xs">{data.user.displayName[0]?.toUpperCase()}</AvatarFallback></Avatar><span className="account-trigger-name">{data.user.displayName}</span><ChevronDown/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-60"><DropdownMenuLabel><div className="font-medium">{data.user.displayName}</div><div className="mt-1 break-all text-xs font-normal text-muted-foreground">{data.user.email}</div></DropdownMenuLabel>{visibleRoles.length > 1 && <><DropdownMenuSeparator/><DropdownMenuLabel className="text-xs text-muted-foreground">切换角色</DropdownMenuLabel><div aria-label="已授权角色">{visibleRoles.map((item) => <DropdownMenuItem key={item.id} onSelect={() => { void switchRole(item.id); }}><span className="flex-1">{item.label}工作台</span>{role === item.id && <Check/>}</DropdownMenuItem>)}</div></>}{authMode === "standard" && <><DropdownMenuSeparator/><DropdownMenuItem onSelect={() => { void logout(); }}><LogOut/>退出登录</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu></div></header>
       <div className="workspace-content" aria-busy={pageLoading}>{pageLoading && <p className="text-sm text-muted-foreground" role="status">正在读取页面…</p>}{pageError && <Alert variant="destructive"><CircleAlert/><AlertTitle>页面未切换</AlertTitle><AlertDescription>{pageError}<Button variant="outline" size="sm" onClick={workspace.retryPage}>重新读取页面</Button></AlertDescription></Alert>}{refreshError && <Alert className="refresh-warning"><CircleAlert/><AlertTitle>工作区未刷新</AlertTitle><AlertDescription><p>{refreshError}</p><Button variant="outline" size="sm" disabled={retryRefreshing} onClick={async () => { setRetryRefreshing(true); try { await refresh(); } catch (reason) { setRefreshError(`工作区仍未刷新：${reason instanceof Error ? reason.message : "请稍后重试"}。之前成功保存的操作无需重复提交。`); } finally { setRetryRefreshing(false); } }}>{retryRefreshing ? "正在刷新…" : "重新读取工作区"}</Button></AlertDescription></Alert>}
         {visibleRoles.map((item) => <RetainedRole key={item.id} role={item.id} active={role === item.id} nav={activeNav} data={data} receivedAt={workspaceReceivedAt} act={act} refresh={refresh} notify={notify} navigate={navigatePage} selectStudent={async (studentId) => { try { await selectStudent(studentId); } catch (reason) { notify("切换失败", errorMessage(reason), "error"); } }}/>)}
       </div>
     </section>
-    <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}><SheetContent side="left" className="mobile-navigation" onCloseAutoFocus={(event) => { event.preventDefault(); if (!feedbackOpen) mobileNavTrigger.current?.focus(); }}><SheetHeader className="px-3 pb-6"><SheetTitle>华文知行</SheetTitle><SheetDescription className="text-sidebar-foreground/60">{roleLabel}工作台</SheetDescription></SheetHeader>{workspaceNavigation}<div className="mt-auto grid gap-4 px-3"><Button variant="ghost" className="justify-start px-0 text-sidebar-foreground" onClick={() => { feedbackReturnFocus.current = mobileNavTrigger.current; setMobileNavOpen(false); setFeedbackOpen(true); }}><MessageCircle/>意见反馈</Button><p className="text-sm text-sidebar-foreground/60">{data.workspace.name}</p></div></SheetContent></Sheet>
+    <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}><SheetContent side="left" className="mobile-navigation" onCloseAutoFocus={(event) => { event.preventDefault(); mobileNavTrigger.current?.focus(); }}><SheetHeader className="px-3 pb-6"><SheetTitle>华文知行</SheetTitle><SheetDescription className="text-sidebar-foreground/60">{roleLabel}工作台</SheetDescription></SheetHeader>{workspaceNavigation}<p className="mt-auto px-3 text-sm text-sidebar-foreground/60">{data.workspace.name}</p></SheetContent></Sheet>
     <Sheet open={noticesOpen} onOpenChange={setNoticesOpen}><SheetContent onCloseAutoFocus={(event) => { event.preventDefault(); noticeTrigger.current?.focus(); }}><SheetHeader><SheetTitle>通知</SheetTitle><SheetDescription>{unread ? `${unread} 条未读通知` : "暂无未读通知"}</SheetDescription></SheetHeader><div className="notification-list">{data.notifications.length ? data.notifications.map((item) => <button type="button" className={`notification-item ${item.read_at ? "" : "unread"}`} key={String(item.id)} onClick={async () => { try { await act("mark_notification", { id: item.id }); } catch (reason) { notify("无法更新通知", reason instanceof Error ? reason.message : "请稍后重试", "error"); } }}><strong>{String(item.title)}</strong><small>{String(item.detail)}</small></button>) : <p className="empty-state">还没有通知</p>}</div></SheetContent></Sheet>
-    <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}><DialogContent className="max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-lg" onCloseAutoFocus={(event) => { event.preventDefault(); feedbackReturnFocus.current?.focus(); }}><DialogHeader><DialogTitle>意见反馈</DialogTitle><DialogDescription>描述遇到的问题或你希望改进的地方。</DialogDescription></DialogHeader><form id="workspace-feedback" className="dialog-body" onSubmit={sendFeedback}><Label htmlFor="feedback-message" className="sr-only">反馈内容</Label><Textarea id="feedback-message" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="请填写反馈内容" maxLength={2000} rows={6} required/></form><DialogFooter><Button variant="outline" onClick={() => setFeedbackOpen(false)}>取消</Button><Button type="submit" form="workspace-feedback" disabled={feedbackBusy || !feedback.trim()}>{feedbackBusy ? "正在提交…" : "提交反馈"}</Button></DialogFooter></DialogContent></Dialog>
     {toast && <div className="toast-region" role="status"><Alert variant={toast.tone === "error" ? "destructive" : "default"}>{toast.tone === "error" ? <CircleAlert/> : <CheckCircle2/>}<AlertTitle>{toast.title}</AlertTitle><AlertDescription>{toast.detail}</AlertDescription></Alert></div>}
   </main>;
 }

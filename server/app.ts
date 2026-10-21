@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import * as endpoint0 from "../app/api/v1/ability-profile/route";
 import * as endpoint1 from "../app/api/v1/ai/generate/route";
 import * as endpoint2 from "../app/api/v1/auth/change-password/route";
@@ -11,7 +11,6 @@ import * as endpoint8 from "../app/api/v1/diagnostic-media/[id]/route";
 import * as endpoint9 from "../app/api/v1/diagnostic-media/route";
 import * as endpoint10 from "../app/api/v1/family-feedback/route";
 import * as endpoint11 from "../app/api/v1/family-portfolio/route";
-import * as endpoint12 from "../app/api/v1/feedback/route";
 import * as endpoint13 from "../app/api/v1/health/route";
 import * as endpoint14 from "../app/api/v1/knowledge/search/route";
 import * as endpoint15 from "../app/api/v1/learning-sequences/[id]/report/route";
@@ -30,7 +29,7 @@ import * as endpoint27 from "../app/api/v1/workspace/audits/route";
 import * as endpoint28 from "../app/api/v1/workspace/route";
 
 /** 浏览器和 Node/Workers 共用同一组标准 HTTP 处理器。 */
-export function createApiApp() {
+export function createApiApp(options: { remoteAddress?: (context: Context) => string | undefined } = {}) {
   const app = new Hono();
   app.get("/api/v1/ability-profile", (context) => endpoint0.GET(context.req.raw));
   app.all("/api/v1/ability-profile", (context) => context.json({ error: "method_not_allowed" }, 405));
@@ -38,7 +37,7 @@ export function createApiApp() {
   app.all("/api/v1/ai/generate", (context) => context.json({ error: "method_not_allowed" }, 405));
   app.post("/api/v1/auth/change-password", (context) => endpoint2.POST(context.req.raw));
   app.all("/api/v1/auth/change-password", (context) => context.json({ error: "method_not_allowed" }, 405));
-  app.post("/api/v1/auth/login", (context) => endpoint3.POST(context.req.raw));
+  app.post("/api/v1/auth/login", (context) => endpoint3.POST(context.req.raw, options.remoteAddress?.(context)));
   app.all("/api/v1/auth/login", (context) => context.json({ error: "method_not_allowed" }, 405));
   app.post("/api/v1/auth/logout", () => endpoint4.POST());
   app.all("/api/v1/auth/logout", (context) => context.json({ error: "method_not_allowed" }, 405));
@@ -57,8 +56,6 @@ export function createApiApp() {
   app.all("/api/v1/family-feedback", (context) => context.json({ error: "method_not_allowed" }, 405));
   app.get("/api/v1/family-portfolio", (context) => endpoint11.GET(context.req.raw));
   app.all("/api/v1/family-portfolio", (context) => context.json({ error: "method_not_allowed" }, 405));
-  app.post("/api/v1/feedback", (context) => endpoint12.POST(context.req.raw));
-  app.all("/api/v1/feedback", (context) => context.json({ error: "method_not_allowed" }, 405));
   app.get("/api/v1/health", () => endpoint13.GET());
   app.all("/api/v1/health", (context) => context.json({ error: "method_not_allowed" }, 405));
   app.post("/api/v1/knowledge/search", (context) => endpoint14.POST(context.req.raw));

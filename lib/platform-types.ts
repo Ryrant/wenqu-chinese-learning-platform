@@ -34,7 +34,7 @@ export type WorkspaceData = {
   workspace: { tenantId: string; name: string; region: string };
   user: { id: string; email: string; displayName: string; roles: Role[]; mustChangePassword?: boolean };
   classes: Row[]; assignments: Row[]; submissions: Row[]; submissionReviews: Row[]; mastery: Row[]; documents: Row[];
-  lessonPlans: Row[]; notifications: Row[]; consents: Row[]; audits: Row[]; invitations: Row[]; members: MemberRow[]; guardianLinks: GuardianLinkRow[];
+  lessonPlans: Row[]; notifications: Row[]; consents: Row[]; audits: Row[]; members: MemberRow[]; guardianLinks: GuardianLinkRow[];
   learningObjectives: Row[]; diagnosticItems: Row[]; diagnosticSummary: Row | null; recommendations: Row[]; learningPlan: EvidencePlanItem[];
   learningSequences: LearningSequence[]; sequenceSources: SequenceSource[];
   trialEntries: TrialEntry[];

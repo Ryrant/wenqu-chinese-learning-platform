@@ -46,7 +46,6 @@ test("all four role workspaces expose real operations instead of timer shells", 
   assert.match(student, /submit_text/);
   assert.match(staff, /generate_lesson/);
   assert.match(staff, /create_class/);
-  assert.match(staff, /create_invitation/);
   assert.match(staff, /review_content/);
   assert.doesNotMatch(`${student}\n${staff}`, /setTimeout\([^)]*92|setScore\(92|主服务商 A|全部正常/);
 });
@@ -330,7 +329,6 @@ test("login has best-effort throttling and malformed cookies fail closed", async
   ]);
   assert.match(login, /429/);
   assert.match(login, /Retry-After/i);
-  assert.match(login, /CF-Connecting-IP/i);
   assert.match(login, /loginAttempts/);
   assert.match(store, /try \{[\s\S]*decodeURIComponent[\s\S]*\} catch \{[\s\S]*return "";/);
 });

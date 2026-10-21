@@ -7,7 +7,7 @@ const changedSections: Record<WorkspaceActionName, readonly WorkspaceSection[]> 
   confirm_alternative_exchange: ["progress"], confirm_family_submission: ["progress"],
   confirm_submission_review: ["progress", "teaching", "quality"],
   create_assignment: ["teaching", "progress", "quality"], create_class: ["teaching"],
-  create_family_task: ["progress", "notifications"], create_intervention: ["progress"], create_invitation: ["members"],
+  create_family_task: ["progress", "notifications"], create_intervention: ["progress"],
   create_learning_sequence: ["progress"], create_member: ["members"], create_reminder: ["notifications"], create_trial_record: ["trials"],
   generate_lesson: ["lessons", "quality"], mark_notification: ["notifications"],
   publish_assignment: ["teaching", "progress", "quality"], publish_teaching_next_step: ["progress", "notifications"],

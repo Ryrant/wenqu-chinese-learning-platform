@@ -336,18 +336,17 @@ async function readLessons(context: PlatformContext) {
 }
 
 async function readMembers(context: PlatformContext) {
-  if (!context.roles.includes("admin")) return { members: [], guardianLinks: [], invitations: [] };
+  if (!context.roles.includes("admin")) return { members: [], guardianLinks: [] };
   const { db, tenantId } = context;
-  const [members, guardianLinks, invitations] = await Promise.all([
+  const [members, guardianLinks] = await Promise.all([
     db.prepare(`SELECT u.id,u.email,u.display_name AS displayName,
       CASE WHEN u.status='active' AND SUM(CASE WHEN rm.status='active' THEN 1 ELSE 0 END) > 0 THEN 'active' ELSE 'disabled' END AS status,
       u.must_change_password AS mustChangePassword,group_concat(rm.role) AS roles
       FROM users u JOIN role_memberships rm ON rm.user_id=u.id
       WHERE rm.tenant_id=? GROUP BY u.id ORDER BY u.created_at DESC`).bind(tenantId).all(),
     db.prepare("SELECT guardian_user_id AS guardianUserId,student_user_id AS studentUserId,status,verified_at AS verifiedAt FROM guardian_student_links WHERE tenant_id=? AND status='active' ORDER BY created_at DESC").bind(tenantId).all(),
-    db.prepare("SELECT id,email,role,status,expires_at AS expiresAt,created_at AS createdAt FROM invitations WHERE tenant_id=? ORDER BY created_at DESC LIMIT 20").bind(tenantId).all(),
   ]);
-  return { members: members.results, guardianLinks: guardianLinks.results, invitations: invitations.results };
+  return { members: members.results, guardianLinks: guardianLinks.results };
 }
 
 async function readNotifications(context: PlatformContext) {
@@ -376,7 +375,7 @@ async function readConsents(context: PlatformContext, focusStudentId: string) {
 
 async function readAudits(context: PlatformContext) {
   if (!context.roles.includes("admin")) return { audits: [] };
-  const result = await context.db.prepare(`SELECT a.*,u.display_name AS actorDisplayName
+  const result = await context.db.prepare(`SELECT a.*,u.display_name AS actorDisplayName,u.email AS actorEmail
     FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_user_id
     WHERE a.tenant_id=? ORDER BY a.created_at DESC,a.id DESC LIMIT 30`).bind(context.tenantId).all();
   return { audits: result.results };

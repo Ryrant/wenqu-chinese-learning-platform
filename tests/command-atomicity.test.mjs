@@ -81,7 +81,6 @@ for (const [action, auditAction, body] of [
 }
 
 for (const [action, auditAction, table, body] of [
-  ["create_invitation", "invitation.created", "invitations", { email: "invitee@example.test", role: "teacher" }],
   ["create_reminder", "reminder.created", "notifications", { title: "阅读提醒", scheduledFor: "2026-10-22T12:00:00Z" }],
 ]) {
   test(`${action} 的审计失败不留下记录，重试只创建一次`, async (t) => {

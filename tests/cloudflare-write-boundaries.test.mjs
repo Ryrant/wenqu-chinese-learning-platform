@@ -16,7 +16,7 @@ async function fixture(t) {
   const directory = await mkdtemp(path.join(parent, "cloudflare-boundaries-"));
   const output = path.join(directory, "worker.mjs");
   await build({ entryPoints: [path.join(root, "worker/index.ts")], outfile: output,
-    bundle: true, platform: "browser", format: "esm", target: "es2022", logLevel: "error",
+    bundle: true, platform: "browser", format: "esm", target: "es2022", logLevel: "error", external: ["node:*"],
     define: { "process.env.NODE_ENV": '"production"' } });
   const runtime = new Miniflare({ modules: [{ type: "ESModule", path: output }],
     compatibilityDate: "2026-05-15", compatibilityFlags: ["nodejs_compat"],

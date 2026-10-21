@@ -4,12 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { PageHeader } from "@/components/workspace/workspace-ui";
+import { PageHeader, StatusBadge } from "@/components/workspace/workspace-ui";
 import type { AdminProps } from "@/lib/staff-display";
 import { localDate } from "@/lib/staff-display";
 
 type AuditEvent = Record<string, unknown>;
-type AuditQuery = { action: string; actorId: string; from: string; to: string };
+type AuditQuery = { action: string; actorId: string; ip: string; from: string; to: string };
 type AuditSnapshot = { query: AuditQuery; events: AuditEvent[]; cursor: string | null };
 
 const TARGET_LABELS: Record<string, string> = {
@@ -27,6 +27,11 @@ const TARGET_LABELS: Record<string, string> = {
 };
 
 const AUDIT_LABELS: Record<string, string> = {
+  "auth.login_succeeded": "登录成功",
+  "auth.login_failed": "登录失败",
+  "password.changed": "修改登录密码",
+  "member.password_reset": "重置成员密码",
+  "guardian_links.updated": "更新监护关系",
   "class.enrollments_updated": "更新班级名单",
   "submission.reviewed": "教师确认作业",
   "submission.ai_review_suggested": "生成作业批阅建议",
@@ -54,15 +59,31 @@ const AUDIT_LABELS: Record<string, string> = {
   "consent.updated": "更新监护授权",
 };
 
-export function AuditPage({ data, act, notify }: AdminProps) {
-const [inviteEmail, setInviteEmail] = useState("");
-const [inviteRole, setInviteRole] = useState("teacher");
-const [inviteResult, setInviteResult] = useState<Record<string, unknown> | null>(null);
+const LOGIN_FAILURE_LABELS: Record<string, string> = {
+  invalid_credentials: "账号凭据无效或账号已停用",
+  account_access_denied: "没有可用的机构访问权限",
+  too_many_attempts: "登录尝试过于频繁",
+};
+
+function auditDetail(item: AuditEvent): Record<string, unknown> {
+  const raw = item.detailJson ?? item.detail_json;
+  if (typeof raw !== "string") return {};
+  try {
+    const value: unknown = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  } catch {
+    // 历史详情损坏时仍展示事件本身，缺失字段明确显示为未记录。
+    return {};
+  }
+}
+
+export function AuditPage({ data }: AdminProps) {
 const [auditSnapshot, setAuditSnapshot] = useState<AuditSnapshot | null>(null);
 const submittedQuery = useRef<AuditQuery | null>(null);
 const auditRequest = useRef(0);
 const [auditAction, setAuditAction] = useState("");
 const [auditActor, setAuditActor] = useState("");
+const [auditIp, setAuditIp] = useState("");
 const [auditFrom, setAuditFrom] = useState("");
 const [auditTo, setAuditTo] = useState("");
 const [auditBusy, setAuditBusy] = useState(false);
@@ -95,14 +116,43 @@ const loadAudits = useCallback(async (query: AuditQuery, cursor?: string) => {
   }, []);
 
 useEffect(() => {
-  // 默认列表由工作区持有；独立查询保留已提交条件，刷新时不读取仍在编辑的筛选输入。
-  if (submittedQuery.current) void loadAudits(submittedQuery.current);
+  // 独立查询取得分页游标；刷新保留已提交条件，不读取仍在编辑的筛选输入。
+  void loadAudits(submittedQuery.current ?? { action: "", actorId: "", ip: "", from: "", to: "" });
   return () => { auditRequest.current += 1; };
 }, [data.audits, loadAudits]);
 return <section key="permission-audit">
-    <PageHeader title="权限审计" description="查看成员邀请与机构操作记录。"/>
-    <section className="audit-invite-grid"><form className="panel form-card compact-form" onSubmit={async (event) => { event.preventDefault(); try { const result = await act("create_invitation", { email: inviteEmail, role: inviteRole }); setInviteResult(result); setInviteEmail(""); notify("邀请已创建", "邀请令牌将在 24 小时后失效。"); } catch (reason) { notify("邀请失败", reason instanceof Error ? reason.message : "请重试", "error"); } }}><h3>邀请成员</h3><label>邮箱<Input type="email" autoComplete="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} required/></label><label>角色<NativeSelect className="w-full" value={inviteRole} onChange={(event) => setInviteRole(event.target.value)}><option value="teacher">教师</option><option value="guardian">家长</option><option value="student">学生</option><option value="admin">管理员</option></NativeSelect></label><Button type="submit" variant="default">创建 24 小时邀请</Button>{inviteResult && <p className="token-result">邀请码：<code>{stringValue(inviteResult.token)}</code></p>}</form><Card className="panel "><h3>待处理邀请</h3>{data.invitations.length ? data.invitations.map((item) => <div className="history-row" key={String(item.id)}><div><strong>{stringValue(item.email)}</strong><small>{stringValue(item.role)} · 截止 {localDate(item.expiresAt)}</small></div><span className="status draft">待接受</span></div>) : <div className="empty-state formal-empty"><strong>暂无待处理邀请</strong><p>新建的 24 小时邀请会显示在这里。</p></div>}</Card></section>
-    <Card className="panel audit-panel"><div className="panel-heading"><div><span className="eyebrow">最近审计</span><h3>操作记录</h3></div></div><form className="audit-filters" onSubmit={(event) => { event.preventDefault(); void loadAudits({ action: auditAction, actorId: auditActor, from: auditFrom, to: auditTo }); }}><label>操作类型<NativeSelect className="w-full" value={auditAction} onChange={(event) => setAuditAction(event.target.value)}><option value="">全部操作</option>{Object.entries(AUDIT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</NativeSelect></label><label>操作者<NativeSelect className="w-full" value={auditActor} onChange={(event) => setAuditActor(event.target.value)}><option value="">全部成员</option>{data.members.map((member) => <option key={String(member.id)} value={String(member.id)}>{member.displayName}</option>)}</NativeSelect></label><label>开始日期<Input type="date" value={auditFrom} onChange={(event) => setAuditFrom(event.target.value)}/></label><label>结束日期<Input type="date" value={auditTo} onChange={(event) => setAuditTo(event.target.value)}/></label><Button type="submit" variant="default" disabled={auditBusy}>{auditBusy ? "查询中…" : "筛选记录"}</Button></form>{auditError && <div className="flex items-center gap-3 text-sm text-destructive" role="alert"><p>审计记录读取失败：{auditError}。已保留当前记录。</p><Button type="button" variant="outline" disabled={auditBusy} onClick={() => { if (submittedQuery.current) void loadAudits(submittedQuery.current); }}>重新读取</Button></div>}<div className="audit-events" aria-busy={auditBusy}>{auditEvents.length ? auditEvents.map((item) => { const targetType = stringValue(item.targetType ?? item.target_type, ""); return <div className="audit-event" key={String(item.id)}><i/><div><strong>{AUDIT_LABELS[stringValue(item.action)] ?? "系统操作"}</strong><p>{stringValue(item.actorDisplayName, "未知操作者")} · {TARGET_LABELS[targetType] ?? "业务对象"}</p><small>{localDate(item.createdAt ?? item.created_at)}</small></div></div>; }) : <div className="empty-state formal-empty"><strong>没有符合条件的审计记录</strong><p>调整筛选条件后重新查询。</p></div>}</div>{auditCursor && <Button type="button" variant="outline" className="load-more" disabled={auditBusy} onClick={() => { if (auditSnapshot && auditCursor) void loadAudits(auditSnapshot.query, auditCursor); }}>加载更多</Button>}</Card>
+    <PageHeader title="权限审计" description="查看账号登录与机构操作记录，时间均为北京时间。"/>
+    <Card className="panel audit-panel">
+      <div className="panel-heading"><h3>操作记录</h3></div>
+      <form className="audit-filters" onSubmit={(event) => { event.preventDefault(); void loadAudits({ action: auditAction, actorId: auditActor, ip: auditIp.trim(), from: auditFrom, to: auditTo }); }}>
+        <label>操作类型<NativeSelect className="w-full" value={auditAction} onChange={(event) => setAuditAction(event.target.value)}><option value="">全部操作</option>{Object.entries(AUDIT_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</NativeSelect></label>
+        <label>操作者<NativeSelect className="w-full" value={auditActor} onChange={(event) => setAuditActor(event.target.value)}><option value="">全部成员</option>{data.members.map((member) => <option key={String(member.id)} value={String(member.id)}>{member.displayName} · {member.email}</option>)}</NativeSelect></label>
+        <label>登录 IP<Input placeholder="例如：203.0.113.10" value={auditIp} onChange={(event) => setAuditIp(event.target.value)} maxLength={64}/></label>
+        <label>开始日期<Input type="date" value={auditFrom} onChange={(event) => setAuditFrom(event.target.value)}/></label>
+        <label>结束日期<Input type="date" value={auditTo} onChange={(event) => setAuditTo(event.target.value)}/></label>
+        <Button type="submit" disabled={auditBusy}>{auditBusy ? "查询中…" : "筛选记录"}</Button>
+      </form>
+      {auditError && <div className="flex items-center gap-3 text-sm text-destructive" role="alert"><p>审计记录读取失败：{auditError}。已保留当前记录。</p><Button type="button" variant="outline" disabled={auditBusy} onClick={() => { if (submittedQuery.current) void loadAudits(submittedQuery.current); }}>重新读取</Button></div>}
+      <div className="audit-events" aria-busy={auditBusy}>{auditEvents.length ? auditEvents.map((item) => {
+        const action = stringValue(item.action);
+        const detail = auditDetail(item);
+        const isLogin = action === "auth.login_succeeded" || action === "auth.login_failed";
+        const failed = action === "auth.login_failed";
+        const targetType = stringValue(item.targetType ?? item.target_type, "");
+        const email = stringValue(isLogin ? detail.email ?? item.actorEmail : item.actorEmail, "账号未记录");
+        return <div className="audit-event" key={String(item.id)}><i/><div className="min-w-0">
+          <strong>{AUDIT_LABELS[action] ?? "系统操作"}</strong>
+          <p className="break-words">{stringValue(item.actorDisplayName, "未知操作者")} · {email}</p>
+          {isLogin ? <>
+            <div className="flex flex-wrap items-center gap-3 text-sm"><span className="break-all">登录 IP：{stringValue(detail.ip, "未记录")}</span><StatusBadge tone={failed ? "danger" : "success"}>{failed ? "失败" : "成功"}</StatusBadge></div>
+            {failed && <p>{LOGIN_FAILURE_LABELS[stringValue(detail.reason)] ?? "失败原因未记录"}</p>}
+            <details className="my-2 text-sm"><summary className="cursor-pointer text-muted-foreground hover:text-foreground active:opacity-80">浏览器信息</summary><p className="break-all">{stringValue(detail.userAgent, "未记录")}</p></details>
+          </> : <p>{TARGET_LABELS[targetType] ?? "业务对象"}</p>}
+          <small>发生时间：{localDate(item.createdAt ?? item.created_at, true)}</small>
+        </div></div>;
+      }) : <div className="empty-state formal-empty"><strong>没有符合条件的审计记录</strong><p>调整筛选条件后重新查询。</p></div>}</div>
+      {auditCursor && <Button type="button" variant="outline" className="load-more" disabled={auditBusy} onClick={() => { if (auditSnapshot && auditCursor) void loadAudits(auditSnapshot.query, auditCursor); }}>加载更多</Button>}
+    </Card>
   </section>;
 }
 

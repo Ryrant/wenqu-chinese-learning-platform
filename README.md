@@ -137,6 +137,10 @@ docker compose up -d --pull never
 
 正式部署使用邮箱、密码登录，按机构、角色和关系校验访问权限。改密会撤销旧会话。公开部署请使用 HTTPS，并在反向代理或 Cloudflare 侧为登录接口设置限流。
 
+管理员可在“权限审计”查看账号登录成功、失败及机构操作，按账号、操作类型、登录 IP 和北京时间日期筛选。登录记录包含邮箱、时间、IP、结果与浏览器信息；新版本上线前未采集的信息无法补录。未知邮箱没有机构归属，不出现在机构审计中。
+
+Node.js 默认记录直接连接的 IP；经反向代理部署时，仅在应用端口只允许可信代理访问、且代理覆盖 `X-Forwarded-For` 的前提下设置 `HUAWEN_ZHIXING_TRUST_PROXY=true`，以记录访客 IP。Cloudflare Workers 使用平台提供的 `CF-Connecting-IP`。
+
 ## 🧱 技术栈
 
 - 前端：React、TypeScript、Vite、React Router、shadcn/ui、Tailwind CSS

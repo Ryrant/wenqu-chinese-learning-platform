@@ -83,6 +83,7 @@ test("临时密码统一阻止全部已注册业务API读写，只允许查看�
   const session = await f.expectJson("/api/v1/auth/session", { cookie: temporary.cookie });
   assert.equal(session.data.authenticated, true); assert.equal(session.data.user.mustChangePassword, true);
   const businessRoutes = f.app.routes.filter((route) => route.method !== "ALL" && route.path.startsWith("/api/v1/") && !route.path.startsWith("/api/v1/auth/") && route.path !== "/api/v1/health");
+  const auditCount = (await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs").first()).n;
   assert.ok(businessRoutes.length >= 25);
   for (const route of businessRoutes) {
     const path = route.path.replace(/:[^/]+/g, "11111111-1111-4111-8111-111111111111");
@@ -92,7 +93,7 @@ test("临时密码统一阻止全部已注册业务API读写，只允许查看�
   }
   assert.equal(f.storageCalls(), 0);
   assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM classes").first()).n, 0);
-  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs").first()).n, 0);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs").first()).n, auditCount);
   const changed = await f.change(temporary.cookie);
   await f.expectJson("/api/v1/workspace?include=bootstrap", { cookie: changed.cookie });
   assert.equal((await f.expectJson("/api/v1/auth/session", { cookie: changed.cookie })).data.user.mustChangePassword, false);
@@ -130,7 +131,7 @@ test("改密审计写入失败时原密码、会话版本及既有Cookie保持�
   const failed = await f.change(teacher.cookie, password, newPassword, 500);
   assert.equal(failed.cookie, undefined);
   assert.deepEqual(await f.db.prepare("SELECT password_hash,must_change_password,session_version FROM users WHERE id='teacher'").first(), before);
-  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs").first()).n, 0);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action='password.changed'").first()).n, 0);
   await f.expectJson("/api/v1/workspace?include=bootstrap", { cookie: teacher.cookie });
   assert.ok((await f.login("teacher@session.example")).cookie);
 });

@@ -102,7 +102,7 @@ test("Workerd extracts PDF text without browser graphics or a separate worker fi
         }
       }};
     `, resolveDir: root },
-    outfile: output, bundle: true, platform: "browser", format: "esm", target: "es2022", logLevel: "error",
+    outfile: output, bundle: true, platform: "browser", format: "esm", target: "es2022", logLevel: "error", external: ["node:*"],
   });
   const runtime = new Miniflare({
     modules: [{ type: "ESModule", path: output }],

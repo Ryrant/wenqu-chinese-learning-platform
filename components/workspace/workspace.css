@@ -168,10 +168,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); widt
 .content-card { min-width: 0; }
 .content-card h3 { margin: 0; font-size: 16px; font-weight: 550; }
 .content-card > p { font-size: 13px; color: var(--muted-foreground); }
-.settings-layout, .audit-invite-grid { display: grid; align-items: start; gap: 24px; margin-bottom: 24px; }
+.settings-layout { display: grid; align-items: start; gap: 24px; margin-bottom: 24px; }
 .settings-layout { grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr); }
-.audit-invite-grid { grid-template-columns: minmax(280px, .85fr) minmax(0, 1.4fr); }
-.settings-layout > *, .audit-invite-grid > * { min-width: 0; }
+.settings-layout > * { min-width: 0; }
 .service-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding-block: 16px; border-top: 1px solid var(--border); }
 .service-row > p { display: grid; gap: 6px; margin: 0; min-width: 0; }
 .service-row strong { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: var(--font-control); font-weight: 550; }
@@ -191,8 +190,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); widt
 .audit-event strong { font-size: var(--font-control); font-weight: 550; }
 .audit-event p { margin: 6px 0 4px; font-size: var(--font-control); line-height: 1.7; }
 .audit-event small { color: var(--muted-foreground); font-size: var(--font-caption); }
-.token-result { overflow-wrap: anywhere; line-height: 1.8; }
-.token-result code { font-size: var(--font-caption); }
 .query-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 16px; }
 .query-panel > label { display: grid; gap: 8px; min-width: 0; font-size: var(--font-control); font-weight: 500; }
 .search-result { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 16px; }
@@ -294,7 +291,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--primary); widt
   .page-header { gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
   .page-actions { justify-content: flex-start; }
   .dashboard-grid, .admin-grid, .teacher-grid, .teacher-class-grid, .loop-grid, .lesson-grid, .guardian-overview-grid, .form-grid, .governance-grid, .settings-grid { grid-template-columns: 1fr; }
-  .audit-invite-grid, .review-top-grid, .review-workspace { grid-template-columns: minmax(0, 1fr); }
+  .review-top-grid, .review-workspace { grid-template-columns: minmax(0, 1fr); }
   .auth-page { display: block; }
   .auth-intro { padding: 24px; background: transparent; color: var(--foreground); }
   .auth-intro-copy, .auth-intro-footer { display: none; }

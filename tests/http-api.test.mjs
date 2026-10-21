@@ -98,7 +98,7 @@ test("all protected public API paths remain registered behind authentication", a
     ["GET", "/ability-profile"], ["POST", "/ai/generate"], ["POST", "/auth/change-password"],
     ["POST", "/content/upload"], ["GET", "/diagnostic-media/fixture-id"], ["POST", "/diagnostic-media"],
     ["GET", "/family-feedback"], ["POST", "/family-feedback"], ["GET", "/family-portfolio"],
-    ["POST", "/feedback"], ["POST", "/knowledge/search"], ["GET", "/learning-sequences/fixture-id/report"],
+    ["POST", "/knowledge/search"], ["GET", "/learning-sequences/fixture-id/report"],
     ["GET", "/settings"], ["POST", "/settings"], ["POST", "/speech/submissions"],
     ["GET", "/student-cases"], ["GET", "/submissions/fixture-id/audio"], ["POST", "/submissions"],
     ["GET", "/teaching-followups"], ["GET", "/trial-batches/fixture-id/report"], ["GET", "/trial-batches/fixture-id"],

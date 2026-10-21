@@ -8,7 +8,7 @@ export type WorkspaceSnapshot = { data: WorkspaceData | null; receivedAt: number
 const sectionFields: Record<WorkspaceSection, readonly (keyof WorkspaceData)[]> = {
   teaching: ["classes", "assignments", "enrollments"], curriculum: ["learningObjectives", "diagnosticItems"],
   progress: ["submissions", "submissionReviews", "mastery", "masteryMatrix", "diagnosticSummary", "recommendations", "learningPlan", "learningSequences", "sequenceSources", "weeklyReport"],
-  lessons: ["lessonPlans"], content: ["documents"], members: ["members", "guardianLinks", "invitations"],
+  lessons: ["lessonPlans"], content: ["documents"], members: ["members", "guardianLinks"],
   notifications: ["notifications"], consents: ["consents"], audits: ["audits"], quality: ["qualityMetrics"], trials: ["trialEntries"], settings: ["platformSettings", "services"],
 };
 
@@ -16,7 +16,7 @@ function initialData(patch: WorkspacePatch): WorkspaceData {
   return {
     classes: [], assignments: [], submissions: [], submissionReviews: [], mastery: [], masteryMatrix: [], learningObjectives: [], diagnosticItems: [],
     diagnosticSummary: null, recommendations: [], learningPlan: [], learningSequences: [], sequenceSources: [], trialEntries: [], enrollments: [],
-    documents: [], lessonPlans: [], notifications: [], consents: [], audits: [], invitations: [], members: [], guardianLinks: [], qualityMetrics: null, services: {},
+    documents: [], lessonPlans: [], notifications: [], consents: [], audits: [], members: [], guardianLinks: [], qualityMetrics: null, services: {},
     weeklyReport: { available: false, consentStatus: "not_granted", submittedCount: null, reviewedCount: null, averageScore: null, masteryAverage: null, pendingRecommendations: null },
     workspace: patch.workspace, user: patch.user, availableStudents: patch.availableStudents,
     selectedStudent: patch.selectedStudent, generatedAt: patch.generatedAt,
