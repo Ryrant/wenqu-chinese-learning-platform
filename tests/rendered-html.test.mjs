@@ -21,10 +21,9 @@ test("lint ignores generated artifacts left by an in-place framework upgrade whi
   assert.equal(await eslint.isPathIgnored("app/main.tsx"), false);
 });
 
-test("pilot readiness schema includes account content and assessment state", async () => {
-  const [schema, migration, store] = await Promise.all([
+test("fresh schema includes account content and assessment state", async () => {
+  const [schema, store] = await Promise.all([
     read("db/schema.ts"),
-    read("drizzle/0002_pilot_school_readiness.sql"),
     read("lib/platform-store.ts"),
   ]);
   assert.match(schema, /passwordHash: text\("password_hash"\)/);
@@ -33,10 +32,9 @@ test("pilot readiness schema includes account content and assessment state", asy
   assert.match(schema, /assignmentObjectives/);
   assert.match(schema, /appSettings/);
   assert.match(schema, /processingError: text\("processing_error"\)/);
-  assert.match(migration, /ALTER TABLE `users` ADD `password_hash` text/);
-  assert.match(migration, /CREATE TABLE `submission_reviews`/);
-  assert.match(await read("drizzle/0003_initial_setup_settings.sql"), /CREATE TABLE `app_settings`/);
+  assert.match(store, /CREATE TABLE IF NOT EXISTS users[^`]*password_hash TEXT/);
   assert.match(store, /CREATE TABLE IF NOT EXISTS submission_reviews/);
+  assert.match(store, /CREATE TABLE IF NOT EXISTS app_settings/);
 });
 
 test("all four role workspaces expose real operations instead of timer shells", async () => {
@@ -53,15 +51,14 @@ test("all four role workspaces expose real operations instead of timer shells", 
   assert.doesNotMatch(`${student}\n${staff}`, /setTimeout\([^)]*92|setScore\(92|主服务商 A|全部正常/);
 });
 
-test("defines tenant-scoped durable data, migrations and production bindings", async () => {
-  const [schema, firstMigration, secondMigration, wrangler, store] = await Promise.all([
-    read("db/schema.ts"), read("drizzle/0000_dusty_mesmero.sql"), read("drizzle/0001_condemned_lester.sql"), read("wrangler.toml"), read("lib/platform-store.ts"),
+test("defines tenant-scoped durable data and production bindings", async () => {
+  const [schema, wrangler, store] = await Promise.all([
+    read("db/schema.ts"), read("wrangler.toml"), read("lib/platform-store.ts"),
   ]);
   assert.match(schema, /tenantId: text\("tenant_id"\)/);
   assert.match(schema, /lessonPlans/);
   assert.match(schema, /notifications/);
   assert.match(schema, /invitations/);
-  assert.equal((`${firstMigration}\n${secondMigration}`.match(/CREATE TABLE/g) ?? []).length, 21);
   assert.match(wrangler, /binding = "DB"/);
   assert.match(wrangler, /binding = "CONTENT"/);
   assert.match(store, /requiredRole/);

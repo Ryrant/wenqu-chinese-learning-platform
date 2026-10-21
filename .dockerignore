@@ -20,8 +20,6 @@
 !lib/**
 !db/
 !db/**
-!drizzle/
-!drizzle/**
 !server/
 !server/**
 !worker/

@@ -19,27 +19,16 @@ test("local template answers from reviewed excerpts without repeating the questi
   assert.equal(buildTemplateAnswer("没有答案的问题", []), "未从已审核来源中找到足够信息，暂时无法回答这个问题。");
 });
 
-test("ui workflow migration is additive and runtime initialization stays idempotent", async () => {
-  const [migration, schema, store, baseline] = await Promise.all([
-    read("drizzle/0005_ui_workflow.sql"),
+test("workflow schema and fresh initialization include edit and archive timestamps", async () => {
+  const [schema, store] = await Promise.all([
     read("db/schema.ts"),
     read("lib/platform-store.ts"),
-    read("scripts/baseline-d1-migrations.sql"),
   ]);
-  for (const table of ["lesson_plans", "learning_recommendations", "source_documents"]) {
-    assert.match(migration, new RegExp("ALTER TABLE `" + table + "` ADD COLUMN `updated_at`"));
-    assert.match(migration, new RegExp("ALTER TABLE `" + table + "` ADD COLUMN `archived_at`"));
-  }
-  assert.doesNotMatch(migration, /\bDROP\b|\bRENAME\b/i);
   assert.match(schema, /updatedAt: text\("updated_at"\)/);
   assert.match(schema, /archivedAt: text\("archived_at"\)/);
-  assert.match(store, /ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT/);
-  assert.match(store, /ALTER TABLE learning_recommendations ADD COLUMN archived_at TEXT/);
-  assert.match(store, /ALTER TABLE source_documents ADD COLUMN archived_at TEXT/);
-  assert.match(baseline, /0005_ui_workflow\.sql/);
-  for (const column of ["lesson_plans.*updated_at", "lesson_plans.*archived_at", "learning_recommendations.*updated_at", "learning_recommendations.*archived_at", "source_documents.*updated_at", "source_documents.*archived_at"]) {
-    const [table, name] = column.split(".*");
-    assert.match(baseline, new RegExp(`pragma_table_info\\('${table}'\\)[\\s\\S]*name='${name}'`));
+  for (const table of ["lesson_plans", "learning_recommendations", "source_documents"]) {
+    assert.match(store, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}[^\x60]*updated_at TEXT`));
+    assert.match(store, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}[^\x60]*archived_at TEXT`));
   }
 });
 

@@ -232,26 +232,16 @@ test("assignment rubric requires exactly three dimensions totaling 100", async (
   ]), /invalid_rubric/);
 });
 
-test("learning loop schema and additive migration include durable tenant-scoped state", async () => {
-  const [schema, runtime, migration, wrangler, baseline] = await Promise.all([
+test("learning loop schema and runtime initialization include durable tenant-scoped state", async () => {
+  const [schema, runtime] = await Promise.all([
     readFile(new URL("db/schema.ts", root), "utf8"),
     readFile(new URL("lib/platform-store.ts", root), "utf8"),
-    readFile(new URL("drizzle/0004_learning_loop.sql", root), "utf8"),
-    readFile(new URL("wrangler.toml", root), "utf8"),
-    readFile(new URL("scripts/baseline-d1-migrations.sql", root), "utf8"),
   ]);
   for (const table of ["diagnostic_items", "diagnostic_attempts", "diagnostic_answers", "learning_recommendations", "submission_review_confirmations"]) {
     assert.match(schema, new RegExp(`sqliteTable\\("${table}"`));
     assert.match(runtime, new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
-    assert.match(migration, new RegExp(`CREATE TABLE \`${table}\``));
   }
-  assert.match(migration, /ALTER TABLE `assignments` ADD `rubric_json`/);
-  assert.match(migration, /UPDATE `assignments` SET `rubric_json`/);
-  assert.match(migration, /ALTER TABLE `learning_objectives` ADD `status`/);
-  assert.doesNotMatch(migration, /DROP TABLE|DROP COLUMN/i);
-  assert.match(wrangler, /migrations_dir = "drizzle"/);
-  for (const name of ["0000_dusty_mesmero.sql", "0001_condemned_lester.sql", "0002_pilot_school_readiness.sql", "0003_initial_setup_settings.sql", "0004_learning_loop.sql"]) {
-    assert.match(baseline, new RegExp(name.replace(".", "\\.")));
-  }
-  assert.match(baseline, /sqlite_master/);
+  assert.match(schema, /rubricJson: text\("rubric_json"\)/);
+  assert.match(runtime, /CREATE TABLE IF NOT EXISTS assignments[^`]*rubric_json TEXT NOT NULL DEFAULT '\[\]'/);
+  assert.match(runtime, /CREATE TABLE IF NOT EXISTS learning_objectives[^`]*status TEXT NOT NULL DEFAULT 'active'/);
 });

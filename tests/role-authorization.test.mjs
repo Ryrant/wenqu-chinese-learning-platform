@@ -8,7 +8,7 @@ const bundle = await build({
   stdin: { contents: `
     export { NodeSqliteDatabase } from './lib/platform-runtime-node';
     export { setPlatformRuntime } from './lib/platform-runtime';
-    export { ensurePlatformSchema, ensureSiteJwtSecret, platformContext, cleanupLegacyDemoRoles } from './lib/platform-store';
+    export { ensurePlatformSchema, ensureSiteJwtSecret, platformContext } from './lib/platform-store';
     export { createSessionToken } from './lib/auth-token';
     export { hashPassword } from './lib/auth-password';
     export { POST as setup } from './app/api/v1/auth/setup/route';
@@ -172,86 +172,6 @@ test("an invalid role in an earlier tenant does not mask a later valid authoriza
   const context = await api.platformContext(await request(account.email), "teacher");
   assert.equal(context.tenantId, "tenant-school");
   assert.deepEqual(context.roles, ["teacher"]);
-});
-
-async function legacyAccount(db, suffix, explicitlyGrantedRoles = []) {
-  const tenantId = `tenant_${suffix}`;
-  const userId = `usr_${suffix}`;
-  await db.batch([
-    db.prepare("INSERT INTO tenants (id,name) VALUES (?,?)").bind(tenantId, "华文知行示范学校"),
-    db.prepare("INSERT INTO users (id,email,display_name) VALUES (?,?,?)").bind(userId, `${suffix}@school.example`, "旧演示账号"),
-    ...["student", "teacher", "guardian", "admin"].map((role) => db.prepare("INSERT INTO role_memberships (tenant_id,user_id,role) VALUES (?,?,?)").bind(tenantId, userId, role)),
-    db.prepare("INSERT INTO classes (id,tenant_id,name,level,teacher_user_id,academic_year) VALUES (?,?,?,'A2',?,'2026')").bind(`${tenantId}-class-a2`, tenantId, "四年级乙班", userId),
-    db.prepare("INSERT INTO enrollments (tenant_id,class_id,student_user_id) VALUES (?,?,?)").bind(tenantId, `${tenantId}-class-a2`, userId),
-    db.prepare("INSERT INTO guardian_student_links (tenant_id,guardian_user_id,student_user_id,verified_at) VALUES (?,?,?,CURRENT_TIMESTAMP)").bind(tenantId, userId, userId),
-    db.prepare("INSERT INTO notifications (id,tenant_id,user_id,title,detail,kind) VALUES (?,?,?,'试用工作区已就绪','这里的课程、作业、审核与上传操作都会真实保存。','success')").bind(`${tenantId}-notice-welcome`, tenantId, userId),
-    ...explicitlyGrantedRoles.map((role, index) => db.prepare("INSERT INTO audit_logs (id,tenant_id,actor_user_id,action,target_type,target_id,detail_json) VALUES (?,?,?,?,?,?,?)")
-      .bind(`${suffix}-${role}`, tenantId, index === 0 ? "existing-admin" : userId, index === 0 ? "member.created" : "invitation.accepted", index === 0 ? "user" : "invitation", index === 0 ? userId : `invitation-${suffix}`, JSON.stringify({ email: `${suffix}@school.example`, role }))),
-  ]);
-  return { tenantId, userId };
-}
-
-test("upgrade removes legacy demo grants once and preserves explicit account authorizations", async (t) => {
-  const { db, addAccount } = await fixture(t);
-  const automatic = await legacyAccount(db, "automatic");
-  const explicit = await legacyAccount(db, "explicit", ["teacher", "guardian"]);
-  const ordinary = await addAccount({ roles: ["student", "teacher", "guardian", "admin"] });
-  await db.prepare("DELETE FROM app_settings WHERE key='role_isolation_v1'").run();
-
-  await api.cleanupLegacyDemoRoles(db);
-  const rolesFor = async (userId) => (await db.prepare("SELECT role FROM role_memberships WHERE user_id=? AND status='active' ORDER BY role").bind(userId).all()).results.map((row) => row.role);
-  assert.deepEqual(await rolesFor(automatic.userId), ["admin"]);
-  assert.deepEqual(await rolesFor(explicit.userId), ["admin", "guardian", "teacher"]);
-  assert.deepEqual(await rolesFor(ordinary.id), ["admin", "guardian", "student", "teacher"]);
-  assert.ok(await db.prepare("SELECT key FROM app_settings WHERE key='role_isolation_v1'").first());
-  await db.prepare("INSERT INTO role_memberships (tenant_id,user_id,role) VALUES (?,?,'teacher')").bind(automatic.tenantId, automatic.userId).run();
-  const after = await authorizationState(db);
-  await api.cleanupLegacyDemoRoles(db);
-  assert.deepEqual(await authorizationState(db), after);
-});
-
-test("legacy demo grants are cleaned even after the original class and guardian relationships change", async (t) => {
-  const { db } = await fixture(t);
-  const account = await legacyAccount(db, "edited");
-  await db.batch([
-    db.prepare("UPDATE classes SET teacher_user_id='existing-admin' WHERE tenant_id=?").bind(account.tenantId),
-    db.prepare("DELETE FROM guardian_student_links WHERE tenant_id=?").bind(account.tenantId),
-    db.prepare("DELETE FROM app_settings WHERE key='role_isolation_v1'"),
-  ]);
-  await api.cleanupLegacyDemoRoles(db);
-  assert.deepEqual((await db.prepare("SELECT role FROM role_memberships WHERE user_id=?").bind(account.userId).all()).results, [{ role: "admin" }]);
-  assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE actor_user_id=? AND action='auth.legacy_demo_role_removed'").bind(account.userId).first()).count, 3);
-});
-
-test("legacy cleanup rolls back grants, audit and marker together on failure, then can retry", async (t) => {
-  const { db } = await fixture(t);
-  const account = await legacyAccount(db, "retry");
-  await db.prepare("DELETE FROM app_settings WHERE key='role_isolation_v1'").run();
-  const before = await authorizationState(db);
-  await db.prepare(`CREATE TRIGGER fail_role_isolation_marker BEFORE INSERT ON app_settings
-    WHEN NEW.key='role_isolation_v1'
-    BEGIN SELECT RAISE(ABORT, 'injected_migration_marker_failure'); END`).run();
-  await assert.rejects(api.cleanupLegacyDemoRoles(db), /injected_migration_marker_failure/);
-  assert.deepEqual(await authorizationState(db), before);
-  assert.equal(await db.prepare("SELECT key FROM app_settings WHERE key='role_isolation_v1'").first(), null);
-  await db.prepare("DROP TRIGGER fail_role_isolation_marker").run();
-  await api.cleanupLegacyDemoRoles(db);
-  assert.deepEqual((await db.prepare("SELECT role FROM role_memberships WHERE user_id=?").bind(account.userId).all()).results, [{ role: "admin" }]);
-  assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM audit_logs WHERE actor_user_id=? AND action='auth.legacy_demo_role_removed'").bind(account.userId).first()).count, 3);
-  assert.ok(await db.prepare("SELECT key FROM app_settings WHERE key='role_isolation_v1'").first());
-});
-
-test("runtime schema initialization automatically cleans legacy permissions before returning a context", async (t) => {
-  const { db, request } = await fixture(t);
-  const account = await legacyAccount(db, "runtime");
-  await db.prepare("DELETE FROM app_settings WHERE key='role_isolation_v1'").run();
-  // 新实例共享已有数据库，模拟升级后启动，避免命中本次 fixture 的 schema 缓存。
-  const restartedDb = { prepare: db.prepare.bind(db), batch: db.batch.bind(db) };
-  api.setPlatformRuntime({ database: restartedDb, storage: null });
-  const context = await api.platformContext(await request("runtime@school.example"));
-  assert.equal(context.userId, account.userId);
-  assert.deepEqual(context.roles, ["admin"]);
-  assert.ok(await db.prepare("SELECT key FROM app_settings WHERE key='role_isolation_v1'").first());
 });
 
 test("local development bootstraps only the default account in an empty database", async (t) => {

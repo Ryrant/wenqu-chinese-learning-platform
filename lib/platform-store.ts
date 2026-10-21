@@ -1,10 +1,7 @@
 import { sessionCookieName, verifySessionToken } from "./auth-token";
 import { ensurePlatformRuntime, type PlatformDatabase } from "./platform-runtime";
 import { createInitialAdminAccount } from "./standard-login";
-import { cleanupLegacyDemoRoles } from "./legacy-demo-roles";
-import { cleanupLegacyWorkspaceMetadata } from "./legacy-workspace-metadata";
 
-export { cleanupLegacyDemoRoles } from "./legacy-demo-roles";
 
 export type PlatformRole = "student" | "teacher" | "guardian" | "admin";
 export type AuthMode = "standard" | "local";
@@ -50,24 +47,16 @@ async function identity(request: Request, db: PlatformDatabase) {
   return localIdentity(request);
 }
 
-async function trySchema(db: PlatformDatabase, sql: string) {
-  try {
-    await db.prepare(sql).run();
-  } catch (error) {
-    if (error instanceof Error && /duplicate column name|already exists/i.test(error.message)) return;
-    throw error;
-  }
-}
-
+// 全新安装直接创建当前完整结构，不执行旧数据库补列或历史数据修正。
 async function ensureCoreSchema(db: PlatformDatabase) {
   await db.batch([
     db.prepare(`CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, region TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
-    db.prepare(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL, locale TEXT NOT NULL DEFAULT 'zh-CN', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL, locale TEXT NOT NULL DEFAULT 'zh-CN', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, password_hash TEXT, must_change_password INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', last_login_at TEXT, session_version INTEGER NOT NULL DEFAULT 0)`),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS role_memberships (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS role_memberships (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, status TEXT NOT NULL DEFAULT 'active')`),
     db.prepare("CREATE INDEX IF NOT EXISTS memberships_tenant_idx ON role_memberships (tenant_id)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS membership_unique_idx ON role_memberships (tenant_id,user_id,role)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS guardian_student_links (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, guardian_user_id TEXT NOT NULL, student_user_id TEXT NOT NULL, verified_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS guardian_student_links (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, guardian_user_id TEXT NOT NULL, student_user_id TEXT NOT NULL, verified_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, status TEXT NOT NULL DEFAULT 'active')`),
     db.prepare("CREATE INDEX IF NOT EXISTS guardian_links_tenant_idx ON guardian_student_links (tenant_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS classes (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL, level TEXT NOT NULL, teacher_user_id TEXT NOT NULL, academic_year TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS classes_tenant_idx ON classes (tenant_id)"),
@@ -76,15 +65,15 @@ async function ensureCoreSchema(db: PlatformDatabase) {
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS enrollment_unique_idx ON enrollments (tenant_id,class_id,student_user_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_objectives (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, code TEXT NOT NULL, title TEXT NOT NULL, skill TEXT NOT NULL, level TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS objectives_tenant_idx ON learning_objectives (tenant_id)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, title TEXT NOT NULL, activity_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', due_at TEXT, rubric_json TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL, published_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, title TEXT NOT NULL, activity_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', due_at TEXT, rubric_json TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL, published_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, diagnostic_mode TEXT NOT NULL DEFAULT '', diagnostic_prompt TEXT NOT NULL DEFAULT '', diagnostic_media_id TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS assignments_tenant_idx ON assignments (tenant_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS assignments_class_idx ON assignments (class_id)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS submissions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, assignment_id TEXT NOT NULL, student_user_id TEXT NOT NULL, text_answer TEXT, asset_key TEXT, score REAL, confidence REAL, review_status TEXT NOT NULL DEFAULT 'auto', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS submissions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, assignment_id TEXT NOT NULL, student_user_id TEXT NOT NULL, text_answer TEXT, asset_key TEXT, score REAL, confidence REAL, review_status TEXT NOT NULL DEFAULT 'auto', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, feedback TEXT, reviewed_at TEXT, family_task_id TEXT, family_help_level TEXT, family_confirmed_at TEXT, diagnostic_snapshot_json TEXT NOT NULL DEFAULT '{}', family_snapshot_json TEXT NOT NULL DEFAULT '{}', family_confirmed_by TEXT, family_confirmation_role TEXT, sequence_id TEXT, sequence_stage TEXT, sequence_snapshot_json TEXT NOT NULL DEFAULT '{}')`),
     db.prepare("CREATE INDEX IF NOT EXISTS submissions_tenant_idx ON submissions (tenant_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS submissions_assignment_idx ON submissions (assignment_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS mastery_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, objective_id TEXT NOT NULL, mastery REAL NOT NULL, evidence_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS mastery_student_idx ON mastery_snapshots (tenant_id,student_user_id)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS source_documents (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, object_key TEXT, media_type TEXT NOT NULL, rights_status TEXT NOT NULL DEFAULT 'pending', processing_status TEXT NOT NULL DEFAULT 'uploaded', version INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS source_documents (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, title TEXT NOT NULL, object_key TEXT, media_type TEXT NOT NULL, rights_status TEXT NOT NULL DEFAULT 'pending', processing_status TEXT NOT NULL DEFAULT 'uploaded', version INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, processing_error TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS source_documents_tenant_idx ON source_documents (tenant_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS knowledge_chunks (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, source_document_id TEXT NOT NULL, content TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', published INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS chunks_tenant_source_idx ON knowledge_chunks (tenant_id,source_document_id)"),
@@ -102,22 +91,6 @@ async function ensureCoreSchema(db: PlatformDatabase) {
     db.prepare("CREATE INDEX IF NOT EXISTS audit_tenant_created_idx ON audit_logs (tenant_id,created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
   ]);
-  for (const statement of [
-    "ALTER TABLE users ADD COLUMN password_hash TEXT",
-    "ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
-    "ALTER TABLE users ADD COLUMN last_login_at TEXT",
-    "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE role_memberships ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
-    "ALTER TABLE guardian_student_links ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
-    "ALTER TABLE source_documents ADD COLUMN processing_error TEXT",
-    "ALTER TABLE source_documents ADD COLUMN updated_at TEXT",
-    "ALTER TABLE source_documents ADD COLUMN archived_at TEXT",
-    "ALTER TABLE submissions ADD COLUMN feedback TEXT",
-    "ALTER TABLE submissions ADD COLUMN reviewed_at TEXT",
-    "ALTER TABLE learning_objectives ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
-    "ALTER TABLE assignments ADD COLUMN rubric_json TEXT NOT NULL DEFAULT '[]'",
-  ]) await trySchema(db, statement);
 }
 
 export async function ensurePlatformSchema(db: PlatformDatabase) {
@@ -129,8 +102,6 @@ export async function ensurePlatformSchema(db: PlatformDatabase) {
   const pending = (async () => {
     await ensureCoreSchema(db);
     await ensureExtendedSchema(db);
-    await cleanupLegacyDemoRoles(db);
-    await cleanupLegacyWorkspaceMetadata(db);
   })().catch((error) => {
     schemaReady.delete(db);
     throw error;
@@ -169,7 +140,7 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS invitations_token_idx ON invitations (token)"),
   ]);
   await db.batch([
-    db.prepare(`CREATE TABLE IF NOT EXISTS submission_reviews (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, submission_id TEXT NOT NULL, reviewer_user_id TEXT NOT NULL, final_score REAL, final_comment TEXT, ai_suggested_score REAL, ai_comment TEXT, weakness_tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS submission_reviews (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, submission_id TEXT NOT NULL, reviewer_user_id TEXT NOT NULL, final_score REAL, final_comment TEXT, ai_suggested_score REAL, ai_comment TEXT, weakness_tags_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, objective_scores_json TEXT NOT NULL DEFAULT '[]', dimension_scores_json TEXT NOT NULL DEFAULT '[]', evidence_json TEXT NOT NULL DEFAULT '{}')`),
     db.prepare("CREATE INDEX IF NOT EXISTS submission_reviews_tenant_idx ON submission_reviews (tenant_id)"),
     db.prepare("CREATE INDEX IF NOT EXISTS submission_reviews_submission_idx ON submission_reviews (tenant_id,submission_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS submission_review_confirmations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, submission_id TEXT NOT NULL, reviewer_user_id TEXT NOT NULL, score REAL NOT NULL, comment TEXT NOT NULL DEFAULT '', confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -177,72 +148,35 @@ async function ensureExtendedSchema(db: PlatformDatabase) {
     db.prepare(`CREATE TABLE IF NOT EXISTS assignment_objectives (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, assignment_id TEXT NOT NULL, objective_id TEXT NOT NULL, weight REAL NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS assignment_objectives_assignment_idx ON assignment_objectives (tenant_id,assignment_id)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS assignment_objective_unique_idx ON assignment_objectives (tenant_id,assignment_id,objective_id)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS diagnostic_items (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, objective_id TEXT NOT NULL, level TEXT NOT NULL, prompt TEXT NOT NULL, options_json TEXT NOT NULL, correct_option INTEGER NOT NULL, explanation TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS diagnostic_items (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, objective_id TEXT NOT NULL, level TEXT NOT NULL, prompt TEXT NOT NULL, options_json TEXT NOT NULL, correct_option INTEGER NOT NULL, explanation TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ability TEXT NOT NULL DEFAULT 'reading', media_id TEXT, revision INTEGER NOT NULL DEFAULT 1)`),
     db.prepare("CREATE INDEX IF NOT EXISTS diagnostic_items_tenant_idx ON diagnostic_items (tenant_id,level,status)"),
     db.prepare("CREATE INDEX IF NOT EXISTS diagnostic_items_objective_idx ON diagnostic_items (tenant_id,objective_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS diagnostic_attempts (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, level TEXT NOT NULL, score REAL NOT NULL, status TEXT NOT NULL DEFAULT 'completed', completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS diagnostic_attempts_student_idx ON diagnostic_attempts (tenant_id,student_user_id,completed_at)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS diagnostic_answers (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, attempt_id TEXT NOT NULL, item_id TEXT NOT NULL, selected_option INTEGER NOT NULL, is_correct INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS diagnostic_answers (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, attempt_id TEXT NOT NULL, item_id TEXT NOT NULL, selected_option INTEGER NOT NULL, is_correct INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, evidence_json TEXT NOT NULL DEFAULT '{}')`),
     db.prepare("CREATE INDEX IF NOT EXISTS diagnostic_answers_attempt_idx ON diagnostic_answers (tenant_id,attempt_id)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS diagnostic_answer_unique_idx ON diagnostic_answers (tenant_id,attempt_id,item_id)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS learning_recommendations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, objective_id TEXT, source_type TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', due_at TEXT, status TEXT NOT NULL DEFAULT 'pending', created_by TEXT NOT NULL, completed_at TEXT, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS learning_recommendations (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, objective_id TEXT, source_type TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', due_at TEXT, status TEXT NOT NULL DEFAULT 'pending', created_by TEXT NOT NULL, completed_at TEXT, updated_at TEXT, archived_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, assignment_id TEXT, family_plan_json TEXT NOT NULL DEFAULT '{}')`),
     db.prepare("CREATE INDEX IF NOT EXISTS learning_recommendations_student_idx ON learning_recommendations (tenant_id,student_user_id,status,due_at)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS learning_recommendation_source_idx ON learning_recommendations (tenant_id,student_user_id,source_type,source_id)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS learning_sequences (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, assignment_id TEXT NOT NULL, objective_id TEXT NOT NULL, objective_title TEXT NOT NULL, baseline_submission_id TEXT NOT NULL, baseline_snapshot_json TEXT NOT NULL, title TEXT NOT NULL, practice_prompt TEXT NOT NULL, transfer_prompt TEXT NOT NULL, transfer_context TEXT NOT NULL, rubric_json TEXT NOT NULL, medium TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS learning_sequences (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, student_user_id TEXT NOT NULL, assignment_id TEXT NOT NULL, objective_id TEXT NOT NULL, objective_title TEXT NOT NULL, baseline_submission_id TEXT NOT NULL, baseline_snapshot_json TEXT NOT NULL, title TEXT NOT NULL, practice_prompt TEXT NOT NULL, transfer_prompt TEXT NOT NULL, transfer_context TEXT NOT NULL, rubric_json TEXT NOT NULL, medium TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, retest_prompt TEXT NOT NULL DEFAULT '', retest_context TEXT NOT NULL DEFAULT '', retest_available_at TEXT, retest_reference_id TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS learning_sequences_student_idx ON learning_sequences (tenant_id,student_user_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_sequence_decisions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sequence_id TEXT NOT NULL, reference_submission_id TEXT NOT NULL, reference_snapshot_json TEXT NOT NULL, kind TEXT NOT NULL, rationale TEXT NOT NULL, remaining TEXT NOT NULL, next_sequence_id TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_decision_reference_idx ON learning_sequence_decisions (tenant_id,sequence_id,reference_submission_id)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_decision_next_idx ON learning_sequence_decisions (tenant_id,next_sequence_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_trial_records (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, sequence_id TEXT NOT NULL, kind TEXT NOT NULL, method TEXT, minutes INTEGER, reference_submission_id TEXT, reference_title TEXT, note TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS trial_records_sequence_idx ON learning_trial_records (tenant_id,sequence_id,created_at)"),
-    db.prepare(`CREATE TABLE IF NOT EXISTS family_usability_feedback (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, family_task_id TEXT NOT NULL, student_user_id TEXT NOT NULL, assignment_id TEXT, class_id TEXT, task_revision INTEGER NOT NULL, task_snapshot_json TEXT NOT NULL, participation TEXT NOT NULL, instructions TEXT NOT NULL, operation_help TEXT NOT NULL, alternative TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
+    db.prepare(`CREATE TABLE IF NOT EXISTS family_usability_feedback (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, family_task_id TEXT NOT NULL, student_user_id TEXT NOT NULL, assignment_id TEXT, class_id TEXT, task_revision INTEGER NOT NULL, task_snapshot_json TEXT NOT NULL, participation TEXT NOT NULL, instructions TEXT NOT NULL, operation_help TEXT NOT NULL, alternative TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT, response_id TEXT, followup_outcome TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS family_feedback_task_idx ON family_usability_feedback (tenant_id,family_task_id,created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS learning_trial_batches (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, title TEXT NOT NULL, scope_json TEXT NOT NULL, request_json TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS trial_batches_class_idx ON learning_trial_batches (tenant_id,class_id,created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS family_feedback_responses (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, feedback_id TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, voided_at TEXT, voided_by TEXT, void_reason TEXT)`),
     db.prepare("CREATE INDEX IF NOT EXISTS feedback_responses_source_idx ON family_feedback_responses (tenant_id,feedback_id,created_at)"),
   ]);
-  for (const statement of [
-    "ALTER TABLE lesson_plans ADD COLUMN updated_at TEXT",
-    "ALTER TABLE lesson_plans ADD COLUMN archived_at TEXT",
-    "ALTER TABLE learning_recommendations ADD COLUMN updated_at TEXT",
-    "ALTER TABLE learning_recommendations ADD COLUMN archived_at TEXT",
-    "ALTER TABLE submission_reviews ADD COLUMN objective_scores_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE submission_reviews ADD COLUMN dimension_scores_json TEXT NOT NULL DEFAULT '[]'",
-    "ALTER TABLE learning_recommendations ADD COLUMN assignment_id TEXT",
-    "ALTER TABLE submissions ADD COLUMN family_task_id TEXT",
-    "ALTER TABLE submissions ADD COLUMN family_help_level TEXT",
-    "ALTER TABLE submissions ADD COLUMN family_confirmed_at TEXT",
-    "ALTER TABLE diagnostic_items ADD COLUMN ability TEXT NOT NULL DEFAULT 'reading'",
-    "ALTER TABLE diagnostic_items ADD COLUMN media_id TEXT",
-    "ALTER TABLE diagnostic_items ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
-    "ALTER TABLE diagnostic_answers ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'",
-    "ALTER TABLE assignments ADD COLUMN diagnostic_mode TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE assignments ADD COLUMN diagnostic_prompt TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE assignments ADD COLUMN diagnostic_media_id TEXT",
-    "ALTER TABLE submissions ADD COLUMN diagnostic_snapshot_json TEXT NOT NULL DEFAULT '{}'",
-    "ALTER TABLE learning_recommendations ADD COLUMN family_plan_json TEXT NOT NULL DEFAULT '{}'",
-    "ALTER TABLE submissions ADD COLUMN family_snapshot_json TEXT NOT NULL DEFAULT '{}'",
-    "ALTER TABLE submissions ADD COLUMN family_confirmed_by TEXT",
-    "ALTER TABLE submissions ADD COLUMN family_confirmation_role TEXT",
-    "ALTER TABLE submissions ADD COLUMN sequence_id TEXT",
-    "ALTER TABLE submissions ADD COLUMN sequence_stage TEXT",
-    "ALTER TABLE submissions ADD COLUMN sequence_snapshot_json TEXT NOT NULL DEFAULT '{}'",
-    "ALTER TABLE submission_reviews ADD COLUMN evidence_json TEXT NOT NULL DEFAULT '{}'",
-    "ALTER TABLE learning_sequences ADD COLUMN retest_prompt TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE learning_sequences ADD COLUMN retest_context TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE learning_sequences ADD COLUMN retest_available_at TEXT",
-    "ALTER TABLE learning_sequences ADD COLUMN retest_reference_id TEXT",
-    "ALTER TABLE family_usability_feedback ADD COLUMN response_id TEXT",
-    "ALTER TABLE family_usability_feedback ADD COLUMN followup_outcome TEXT",
-  ]) await trySchema(db, statement);
   await db.batch([
     db.prepare("CREATE INDEX IF NOT EXISTS family_feedback_response_idx ON family_usability_feedback (tenant_id,response_id,created_at)"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS family_submission_pending_idx ON submissions (tenant_id,family_task_id) WHERE family_task_id IS NOT NULL AND review_status!='reviewed'"),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS sequence_submission_pending_idx ON submissions (tenant_id,sequence_id,sequence_stage) WHERE sequence_id IS NOT NULL AND review_status!='reviewed'"),
-    db.prepare("UPDATE lesson_plans SET updated_at=created_at WHERE updated_at IS NULL"),
-    db.prepare("UPDATE learning_recommendations SET updated_at=created_at WHERE updated_at IS NULL"),
-    db.prepare("UPDATE source_documents SET updated_at=created_at WHERE updated_at IS NULL"),
   ]);
 }
 

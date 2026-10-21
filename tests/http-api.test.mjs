@@ -12,7 +12,6 @@ const bundle = await build({
     export { NodeSqliteDatabase, LocalFileStorage } from './lib/platform-runtime-node';
     export { setPlatformRuntime } from './lib/platform-runtime';
     export { ensurePlatformSchema } from './lib/platform-store';
-    export { cleanupLegacyWorkspaceMetadata } from './lib/legacy-workspace-metadata';
   `, resolveDir: fileURLToPath(new URL("../", import.meta.url)) },
   bundle: true, platform: "node", format: "esm", target: "node22", write: false,
 });
@@ -123,54 +122,6 @@ test("Hono setup validates institution names before writing and defaults to neut
   const { response } = await f.json("/api/v1/auth/setup", { method: "POST", json: { email: "admin@http.example", password } });
   const cookie = response.headers.get("set-cookie").split(";")[0];
   const { data } = await f.json("/api/v1/workspace?include=bootstrap", { cookie });
-  assert.equal(data.workspace.name, "我的工作区");
-  assert.equal(data.workspace.region, "");
-});
-
-test("legacy institution cleanup changes only the exact default tuple and records one completion marker", async (t) => {
-  const f = await fixture(t, false);
-  await api.ensurePlatformSchema(f.db);
-  await f.db.batch([
-    f.db.prepare("DELETE FROM app_settings WHERE key='legacy_workspace_metadata_v1'"),
-    f.db.prepare("INSERT INTO tenants(id,name,region) VALUES ('legacy','华文知行示范学校','sg'),('custom-name','青禾语言学校','sg'),('custom-region','华文知行示范学校','cn'),('neutral','我的工作区','')"),
-  ]);
-  await api.cleanupLegacyWorkspaceMetadata(f.db);
-  const metadata = () => f.db.prepare("SELECT id,name,region FROM tenants ORDER BY id").all().then((result) => result.results);
-  assert.deepEqual(await metadata(), [
-    { id: "custom-name", name: "青禾语言学校", region: "sg" },
-    { id: "custom-region", name: "华文知行示范学校", region: "cn" },
-    { id: "legacy", name: "我的工作区", region: "" },
-    { id: "neutral", name: "我的工作区", region: "" },
-  ]);
-  assert.ok(await f.db.prepare("SELECT key FROM app_settings WHERE key='legacy_workspace_metadata_v1'").first());
-  // 迁移完成后的新用户选择不得被下一次启动再次改写。
-  await f.db.prepare("UPDATE tenants SET name='华文知行示范学校',region='sg' WHERE id='legacy'").run();
-  const afterUserEdit = await metadata();
-  await api.cleanupLegacyWorkspaceMetadata(f.db);
-  assert.deepEqual(await metadata(), afterUserEdit);
-});
-
-test("legacy institution cleanup rolls back metadata when its completion marker cannot be saved", async (t) => {
-  const f = await fixture(t, false);
-  await api.ensurePlatformSchema(f.db);
-  await f.db.prepare("DELETE FROM app_settings WHERE key='legacy_workspace_metadata_v1'").run();
-  await f.db.prepare("INSERT INTO tenants(id,name,region) VALUES ('legacy','华文知行示范学校','sg')").run();
-  await f.db.prepare("CREATE TRIGGER metadata_marker_failure BEFORE INSERT ON app_settings WHEN NEW.key='legacy_workspace_metadata_v1' BEGIN SELECT RAISE(ABORT,'fixture_metadata_marker_failed'); END").run();
-  await assert.rejects(api.cleanupLegacyWorkspaceMetadata(f.db), /fixture_metadata_marker_failed/);
-  assert.deepEqual(await f.db.prepare("SELECT name,region FROM tenants WHERE id='legacy'").first(), { name: "华文知行示范学校", region: "sg" });
-  assert.equal(await f.db.prepare("SELECT key FROM app_settings WHERE key='legacy_workspace_metadata_v1'").first(), null);
-  await f.db.prepare("DROP TRIGGER metadata_marker_failure").run();
-  await api.cleanupLegacyWorkspaceMetadata(f.db);
-  assert.deepEqual(await f.db.prepare("SELECT name,region FROM tenants WHERE id='legacy'").first(), { name: "我的工作区", region: "" });
-});
-
-test("HTTP workspace startup applies legacy institution cleanup before returning tenant metadata", async (t) => {
-  const f = await fixture(t);
-  await f.db.prepare("DELETE FROM app_settings WHERE key='legacy_workspace_metadata_v1'").run();
-  await f.db.prepare("UPDATE tenants SET name='华文知行示范学校',region='sg'").run();
-  // 模拟进程重启：同一数据库换一个适配器对象，不复用 schema WeakMap 缓存。
-  api.setPlatformRuntime({ kind: "node", database: { prepare: f.db.prepare.bind(f.db), batch: f.db.batch.bind(f.db) }, storage: f.storage });
-  const { data } = await f.json("/api/v1/workspace?include=bootstrap", { cookie: f.admin.cookie });
   assert.equal(data.workspace.name, "我的工作区");
   assert.equal(data.workspace.region, "");
 });

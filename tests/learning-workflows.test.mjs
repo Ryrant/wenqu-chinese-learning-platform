@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { build } from "esbuild";
 
@@ -2242,57 +2241,4 @@ test("student case timeline separates internal trial records and other-class fam
   assert.ok(other.events.some((event) => event.kind === "feedback" && event.entry.id === newer.id));
   assert.ok(!other.events.some((event) => event.kind === "feedback" && event.entry.id === feedback.id));
   for (const [actor, view] of [["student", "student"], ["guardian", "guardian"], ["teacher", "teaching"], ["admin", "teaching"]]) assert.ok(!JSON.stringify((await f.studentCase(f.actors[actor], view)).data).includes("仅内部用时细节"));
-});
-
-test("additive migration upgrades existing data and runtime initialization is repeatable", async () => {
-  const db = new DatabaseSync(":memory:");
-  try {
-    const files = (await readdir(path.join(root, "drizzle"))).filter((name) => /^\d+.*\.sql$/.test(name)).sort();
-    for (const name of files) {
-      if (name === "0008_family_exchange.sql") db.exec(`INSERT INTO submissions (id,tenant_id,assignment_id,student_user_id,score,review_status) VALUES ('legacy-exchange','legacy-tenant','legacy-assignment','legacy-student',81,'reviewed')`);
-      if (name === "0010_delayed_retest.sql") db.exec(`INSERT INTO learning_sequences (id,tenant_id,student_user_id,assignment_id,objective_id,objective_title,baseline_submission_id,baseline_snapshot_json,title,practice_prompt,transfer_prompt,transfer_context,rubric_json,medium,created_by) VALUES ('legacy-sequence','legacy-tenant','legacy-student','legacy-assignment','goal','旧目标','legacy-exchange','{}','旧任务组','原练习','原迁移','原情境','[]','text','legacy-teacher')`);
-      if (name === "0015_family_feedback_followups.sql") db.exec(`INSERT INTO family_usability_feedback (id,tenant_id,family_task_id,student_user_id,task_revision,task_snapshot_json,participation,instructions,operation_help,alternative,note,created_by) VALUES ('legacy-feedback','legacy-tenant','legacy-task','legacy-student',1,'{}','unable','unclear','guidance','not_tried','旧困难','legacy-guardian')`);
-      db.exec(await readFile(path.join(root, "drizzle", name), "utf8"));
-    }
-    assert.deepEqual({ ...db.prepare("SELECT score,family_snapshot_json,family_confirmed_by,family_confirmation_role FROM submissions WHERE id='legacy-exchange'").get() }, { score: 81, family_snapshot_json: "{}", family_confirmed_by: null, family_confirmation_role: null });
-    assert.ok(db.prepare("SELECT name FROM pragma_table_info('submission_reviews') WHERE name='objective_scores_json'").get());
-    assert.ok(db.prepare("SELECT name FROM pragma_table_info('submissions') WHERE name='family_confirmed_at'").get());
-    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0006_learning_workflow_evidence.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0007_ability_evidence.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0008_family_exchange.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0009_learning_sequences.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0010_delayed_retest.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0011_teaching_next_steps.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0012_trial_records.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0014_trial_batches.sql'").get());
-    assert.ok(db.prepare("SELECT name FROM d1_migrations WHERE name='0015_family_feedback_followups.sql'").get());
-    assert.deepEqual({ ...db.prepare("SELECT response_id,followup_outcome FROM family_usability_feedback WHERE id='legacy-feedback'").get() }, { response_id: null, followup_outcome: null });
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM family_feedback_responses").get().count, 0);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_trial_batches").get().count, 0);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM family_usability_feedback").get().count, 1);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_trial_records").get().count, 0);
-    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM learning_sequence_decisions").get().count, 0);
-    assert.deepEqual({ ...db.prepare("SELECT title,retest_prompt,retest_context,retest_available_at,retest_reference_id FROM learning_sequences WHERE id='legacy-sequence'").get() }, { title: "旧任务组", retest_prompt: "", retest_context: "", retest_available_at: null, retest_reference_id: null });
-    assert.deepEqual({ ...db.prepare("SELECT score,sequence_id,sequence_stage,sequence_snapshot_json FROM submissions WHERE id='legacy-exchange'").get() }, { score: 81, sequence_id: null, sequence_stage: null, sequence_snapshot_json: "{}" });
-    assert.ok(db.prepare("SELECT name FROM pragma_table_info('submissions') WHERE name='diagnostic_snapshot_json'").get());
-    db.exec("ALTER TABLE learning_sequence_decisions RENAME COLUMN remaining TO incomplete_remaining; DELETE FROM d1_migrations WHERE name='0011_teaching_next_steps.sql'");
-    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
-    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0011_teaching_next_steps.sql'").get(), undefined, "incomplete structures must not be registered as applied migrations");
-    db.exec("ALTER TABLE learning_trial_records RENAME COLUMN void_reason TO incomplete_void_reason; DELETE FROM d1_migrations WHERE name='0012_trial_records.sql'");
-    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
-    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0012_trial_records.sql'").get(), undefined);
-    db.exec("ALTER TABLE family_usability_feedback RENAME COLUMN operation_help TO incomplete_operation_help; DELETE FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'");
-    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
-    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0013_family_usability_feedback.sql'").get(), undefined);
-    db.exec("ALTER TABLE learning_trial_batches RENAME COLUMN scope_json TO incomplete_scope_json; DELETE FROM d1_migrations WHERE name='0014_trial_batches.sql'");
-    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
-    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0014_trial_batches.sql'").get(), undefined);
-    db.exec("ALTER TABLE family_feedback_responses RENAME COLUMN detail TO incomplete_detail; DELETE FROM d1_migrations WHERE name='0015_family_feedback_followups.sql'");
-    db.exec(await readFile(path.join(root, "scripts/baseline-d1-migrations.sql"), "utf8"));
-    assert.equal(db.prepare("SELECT name FROM d1_migrations WHERE name='0015_family_feedback_followups.sql'").get(), undefined);
-  } finally { db.close(); }
-  const runtimeDb = new api.NodeSqliteDatabase("file::memory:");
-  try { await api.ensurePlatformSchema(runtimeDb); await api.ensurePlatformSchema(runtimeDb); } finally { runtimeDb.close(); }
 });

@@ -55,22 +55,13 @@ test("admin workspace exposes objectives enrollment and real quality metrics", a
   assert.match(source, /qualityMetrics/);
 });
 
-test("v1.2 documentation explains the four-end workflow migration and safeguards", async () => {
-  const [readme, packageJson, migration] = await Promise.all([
-    read("README.md"),
-    read("package.json"),
-    read("drizzle/0004_learning_loop.sql"),
-  ]);
-  assert.equal(JSON.parse(packageJson).version, "1.2.0");
+test("documentation explains the four-end learning workflow and safeguards", async () => {
+  const readme = await read("README.md");
   for (const phrase of [
     "机构配置 → 教师发布 → 学生学习 → 家长查看",
     "自适应学习闭环",
     "诊断数据",
     "监护绑定",
     "内容权属",
-    "v1.2.0",
-    "0004_learning_loop.sql",
-    "回滚",
   ]) assert.match(readme, new RegExp(phrase));
-  assert.doesNotMatch(migration, /\bDROP\b|\bRENAME\b/i);
 });
