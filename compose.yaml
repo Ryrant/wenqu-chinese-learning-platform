@@ -3,14 +3,8 @@ services:
     image: ghcr.io/ryrant/huawen-zhixing:latest
     container_name: huawen-zhixing
     restart: unless-stopped
-    init: true
     ports:
       - "3000:3000"
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: file:/data/huawen-zhixing.db
-      UPLOAD_DIR: /data/uploads
-      HUAWEN_ZHIXING_RUNTIME: node
     volumes:
       - huawen-zhixing-data:/data
 
