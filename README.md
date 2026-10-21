@@ -106,15 +106,24 @@ npm run cf:deploy
 
 ### 方式四：Docker 自部署
 
-Docker 自部署适合希望在自有服务器、NAS 或学校内网运行的场景。该方式不依赖 Cloudflare D1/R2，默认使用容器数据卷中的 SQLite 与本地文件目录：
+Docker 自部署适合希望在自有服务器、NAS 或学校内网运行的场景。该方式不依赖 Cloudflare D1/R2，镜像以 root 用户运行，默认使用容器数据卷中的 SQLite 与本地文件目录：
 
 - 结构化数据：`/data/huawen-zhixing.db`
 - 上传教材、图片和音频：`/data/uploads`
 
-启动：
+在仓库目录构建并启动：
 
 ```bash
 docker compose up -d --build
+```
+
+Compose 会构建本地镜像 `huawen-zhixing:local`，配置自动重启，并继承镜像内的健康检查。运行镜像仅包含生产依赖、前端资源、Node.js 服务和启动脚本。
+
+查看状态和日志：
+
+```bash
+docker compose ps
+docker compose logs -f huawen-zhixing
 ```
 
 访问：
@@ -124,6 +133,25 @@ http://localhost:3000/
 ```
 
 首次访问会进入管理员初始化流程。Docker 版与 Cloudflare 版使用同一套数据模型和角色模型；第一阶段不提供 D1 与 SQLite 的自动迁移工具，也不面向多容器横向扩展。
+
+#### 📦 预构建镜像
+
+`.github/workflows/docker.yml` 在推送 `v*` 版本标签时构建并发布 GHCR 镜像，支持 `linux/amd64` 与 `linux/arm64`。PR 和手动运行只验证构建。稳定版本生成完整版本、主次版本、主版本和 `latest` 标签；预发布版本只生成完整预发布标签。
+
+首次成功发布镜像后，可将 `docker-compose.yml` 中的 `image: huawen-zhixing:local` 改为 `image: ghcr.io/ryrant/wenqu-chinese-learning-platform:latest`，移除 `build: .`，然后运行：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+首次发布后需将 GHCR 包可见性设为 Public，或先使用有权访问该包的账号执行 `docker login ghcr.io`。正式部署建议将 `latest` 换为已发布的完整版本号。Fork 仓库发布时，镜像地址使用实际仓库路径的小写形式。
+
+#### 🔄 升级与数据保留
+
+源码构建方式在拉取新代码后重新执行 `docker compose up -d --build`；预构建镜像方式重新执行 `docker compose pull` 和 `docker compose up -d`。沿用原来的 Compose 项目名和 `huawen-zhixing-data` 数据卷，数据库及上传文件会继续保留。
+
+备份时先停止服务，再备份整个 `/data` 目录，完成后启动服务。不要使用 `docker compose down -v`，该命令会删除数据卷。容器端口默认映射到宿主机 `3000`；同机 HTTPS 反向代理可将端口映射改为 `127.0.0.1:3000:3000`。
 
 ### 访问后台
 

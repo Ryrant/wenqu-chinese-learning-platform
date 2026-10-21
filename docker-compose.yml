@@ -1,6 +1,10 @@
 services:
   huawen-zhixing:
+    image: huawen-zhixing:local
     build: .
+    container_name: huawen-zhixing
+    restart: unless-stopped
+    init: true
     ports:
       - "3000:3000"
     environment:

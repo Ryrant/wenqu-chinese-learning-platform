@@ -1,22 +1,31 @@
-FROM node:22-bookworm-slim AS deps
+# 构建阶段使用宿主架构，运行依赖按目标架构单独安装。
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-
-FROM node:22-bookworm-slim AS builder
-WORKDIR /app
-ENV NODE_ENV=production
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
+FROM node:22-bookworm-slim AS production-deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
-ENV NODE_ENV=production
-ENV DATABASE_URL=file:/data/huawen-zhixing.db
-ENV UPLOAD_DIR=/data/uploads
-COPY --from=builder /app ./
-RUN mkdir -p /data/uploads && chown -R node:node /data /app
-USER node
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3000 \
+    HUAWEN_ZHIXING_RUNTIME=node \
+    DATABASE_URL=file:/data/huawen-zhixing.db \
+    UPLOAD_DIR=/data/uploads
+COPY --from=production-deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist/client ./dist/client
+COPY --from=builder /app/dist/node/index.mjs ./dist/node/index.mjs
+COPY package.json ./
+COPY scripts/start-docker.mjs scripts/check-docker-health.mjs ./scripts/
+RUN mkdir -p /data/uploads
+USER root
 EXPOSE 3000
-CMD ["npm", "run", "start:docker"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["node", "scripts/check-docker-health.mjs"]
+CMD ["node", "scripts/start-docker.mjs"]
