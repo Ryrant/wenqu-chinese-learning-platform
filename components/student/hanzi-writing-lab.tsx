@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/workspace/workspace-ui";
 import { practiceCharacters, type PracticeCharacter } from "@/lib/hanzi-practice";
 import { postJson, requestJson } from "@/lib/workspace/api";
 import { practiceError, type PracticeHistory, type PracticeRecord, type WritingResult } from "@/lib/practice-types";
+import { usePracticeSelection } from "@/lib/workspace/use-practice-selection";
 import styles from "./hanzi-writing-lab.module.css";
 
 type Mode = "trace" | "recall";
@@ -191,19 +192,22 @@ function WritingBoard({ item, onComplete, onNext }: {
 
 type CompletedWriting = { id: string; character: string; result: WritingResult };
 export default function HanziWritingLab({ characters = practiceCharacters, journeyRunId, onSaved, embedded = false }: { characters?: readonly PracticeCharacter[]; journeyRunId?: string; onSaved?: () => void; embedded?: boolean }) {
-  const [selected, setSelected] = useState<PracticeCharacter>(characters[0]);
+  const [character, setCharacter] = usePracticeSelection("/student/writing", "character", characters[0].character, !embedded);
+  const selected = characters.find((item) => item.character === character) ?? characters[0];
+  const setSelected = (item: PracticeCharacter) => setCharacter(item.character);
   const [completed, setCompleted] = useState<string[]>([]);
   const [history, setHistory] = useState<PracticeRecord[]>([]);
   const [pending, setPending] = useState<CompletedWriting | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [readError, setReadError] = useState("");
   const [reload, setReload] = useState(0);
   const version = useRef(0);
   useEffect(() => {
     const controller = new AbortController(); const current = ++version.current;
     void requestJson<PracticeHistory>(`/api/v1/practice?kind=writing${journeyRunId ? `&journeyRunId=${journeyRunId}` : ""}`, { signal: controller.signal, cache: "no-store" }).then((data) => {
-      if (!controller.signal.aborted && current === version.current) { setCompleted(data.writtenCharacters); setHistory(data.records); }
-    }).catch(() => { if (!controller.signal.aborted && current === version.current) setError("历史书写记录暂时没有读取成功，可以重新读取，也可以继续练习。"); });
+      if (!controller.signal.aborted && current === version.current) { setCompleted(data.writtenCharacters); setHistory(data.records); setReadError(""); }
+    }).catch(() => { if (!controller.signal.aborted && current === version.current) setReadError("历史书写记录暂时没有读取成功，可以重新读取，也可以继续练习。"); });
     return () => controller.abort();
   }, [journeyRunId, reload]);
   const save = useCallback(async (entry: CompletedWriting) => {
@@ -221,9 +225,10 @@ export default function HanziWritingLab({ characters = practiceCharacters, journ
   }, [save]);
   const next = () => setSelected(characters[(characters.indexOf(selected) + 1) % characters.length]);
 
+  if (!characters.some((item) => item.character === character)) return <section className={styles.page}><PageHeader title="汉字书写实验室" description="指定的字不在当前可练习字库中。"/><Button onClick={() => setCharacter(characters[0].character)}>选择可练习的字</Button></section>;
   return <section className={styles.page}>
     {!embedded && <PageHeader title="汉字书写实验室" description="看清一笔一画，把汉字写进自己的记忆。"/>}
-    {error && <div role="alert"><p>{error}</p>{pending ? <Button variant="outline" disabled={saving} onClick={() => void save(pending)}>重试保存本轮记录</Button> : <Button variant="outline" onClick={() => setReload((value) => value + 1)}>重新读取记录</Button>}</div>}
+    {(error || readError) && <div role="alert"><p>{error || readError}</p>{pending ? <Button variant="outline" disabled={saving} onClick={() => void save(pending)}>重试保存“{pending.character}”的记录</Button> : <Button variant="outline" onClick={() => setReload((value) => value + 1)}>重新读取记录</Button>}</div>}
     {saving && <p role="status">正在保存本轮书写记录…</p>}
     <div className={styles.layout}>
       <aside className={styles.selection} aria-label="练习字表">

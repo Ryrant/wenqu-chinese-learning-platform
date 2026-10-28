@@ -5,43 +5,48 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { EmptyState, PageHeader } from "@/components/workspace/workspace-ui";
 import { postJson, requestJson } from "@/lib/workspace/api";
 import { vocabularyReviewError, type VocabularyReviewCatalog } from "@/lib/vocabulary-review-types";
+import { usePracticeSelection } from "@/lib/workspace/use-practice-selection";
 import styles from "./vocabulary-challenge.module.css";
 
 const time = (value: string) => new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
 export default function VocabularyChallenge() {
   const [catalog, setCatalog] = useState<VocabularyReviewCatalog | null>(null);
-  const [sessionId, setSessionId] = useState("");
+  const [sessionId, setSessionId] = usePracticeSelection("/student/vocabulary", "sessionId");
   const [choice, setChoice] = useState<{ sessionId: string; revision: number; selected: number } | null>(null);
   const [dismissed, setDismissed] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [readError, setReadError] = useState("");
+  const [reading, setReading] = useState(true);
   const [reload, setReload] = useState(0);
   const version = useRef(0);
   const starts = useRef(new Map<string, string>());
   const requests = useRef(new Map<string, string>());
   useEffect(() => {
     const controller = new AbortController(); const current = ++version.current;
+    setReading(true);
     void requestJson<VocabularyReviewCatalog>(`/api/v1/vocabulary-review${sessionId ? `?sessionId=${sessionId}` : ""}`, { cache: "no-store", signal: controller.signal }).then((data) => {
       if (controller.signal.aborted || current !== version.current) return;
-      setCatalog(data); setError("");
+      setCatalog(data); setReadError(""); setReading(false);
       for (const [mode, id] of starts.current) if (data.recent.some((item) => item.id === id)) starts.current.delete(mode);
-    }).catch(() => { if (!controller.signal.aborted && current === version.current) setError("生词复习暂时没有读取成功，请重新读取。当前选择仍保留。"); });
+    }).catch(() => { if (!controller.signal.aborted && current === version.current) { setReadError("生词复习暂时没有读取成功，请重新读取。当前选择仍保留。"); setReading(false); } });
     return () => controller.abort();
   }, [reload, sessionId]);
-  const session = catalog?.recent.find((item) => item.id === sessionId) ?? catalog?.active ?? catalog?.recent[0];
+  const session = sessionId ? catalog?.recent.find((item) => item.id === sessionId) : catalog?.active ?? catalog?.recent[0];
   const feedback = session?.feedback && dismissed[session.id] !== session.feedback.requestId ? session.feedback : null;
   const selected = choice && session && choice.sessionId === session.id && choice.revision === session.revision ? choice.selected : undefined;
   async function perform(body: Record<string, unknown>) {
+    const origin = window.location.pathname + window.location.search;
     const operation = ++version.current; setBusy(true); setError("");
     try {
       const data = await postJson<VocabularyReviewCatalog>("/api/v1/vocabulary-review", body);
-      if (operation !== version.current) { setReload((value) => value + 1); return; }
+      if (operation !== version.current || window.location.pathname + window.location.search !== origin) { setReload((value) => value + 1); return; }
       version.current++; setCatalog(data); setChoice(null);
       if (body.action === "start") {
         starts.current.delete(String(body.mode));
         setSessionId(data.active?.id ?? data.recent.find((item) => item.id === body.id)?.id ?? "");
       } else setSessionId(String(body.sessionId));
-    } catch (reason) { if (operation === version.current) setError(vocabularyReviewError(reason)); setReload((value) => value + 1); }
+    } catch (reason) { if (operation === version.current && window.location.pathname + window.location.search === origin) setError(vocabularyReviewError(reason)); setReload((value) => value + 1); }
     finally { setBusy(false); }
   }
   function start(mode: "due" | "free") {
@@ -56,8 +61,8 @@ export default function VocabularyChallenge() {
   return <section className={styles.page}>
     <PageHeader title="生词复习挑战" description="把读过的词，再认一认、用一用。错词会在本轮再次出现。"/>
     <div className={styles.toolbar}><p>生词本 {catalog?.totalWords ?? "…"} 个词 · 当前到期 {catalog?.dueCount ?? "…"} 个</p><div><Button variant="outline" disabled={busy} onClick={() => setReload((value) => value + 1)}><RefreshCw/>重新读取</Button>{catalog?.active ? catalog.active.id !== session?.id && <Button disabled={busy} onClick={() => setSessionId(catalog.active!.id)}>继续上次练习<ArrowRight/></Button> : <><Button variant="outline" disabled={busy || !catalog?.totalWords} onClick={() => start("free")}>自由练习</Button><Button disabled={busy || !catalog?.dueCount} onClick={() => start("due")}>开始到期复习<ArrowRight/></Button></>}</div></div>
-    {error && <p className={styles.error} role="alert">{error}</p>}
-    {!catalog ? <p role="status">正在读取生词与复习安排…</p> : !catalog.totalWords && !session ? <EmptyState title="先把想记住的词收进生词本" description="在交互阅读中点词并收藏，就能在这里进行词义配对和选词填空。"/> : <>
+    {(error || readError) && <p className={styles.error} role="alert">{error || readError}</p>}
+    {!catalog ? readError ? <EmptyState title="生词复习暂未载入" description="点击重新读取，恢复本人已保存的复习安排。"/> : <p role="status">正在读取生词与复习安排…</p> : sessionId && !session ? <div><p role="status">{reading ? "正在读取指定复习轮次…" : readError ? "指定轮次未能读取，请重试。" : "指定轮次不存在或不在本人可回看范围。"}</p><Button variant="outline" disabled={reading} onClick={() => setSessionId("")}>查看最近记录</Button></div> : !catalog.totalWords && !session ? <EmptyState title="先把想记住的词收进生词本" description="在交互阅读中点词并收藏，就能在这里进行词义配对和选词填空。"/> : <>
       {session && <section className={styles.challenge} aria-label="本轮生词复习">
         <div className={styles.heading}><div><h2>{session.mode === "due" ? "到期复习" : "自由练习"}</h2><p>本轮 {session.total} 个词 · 已作答 {session.attemptCount} 次 · 剩余 {session.remaining} 次（含回练）</p></div><label>回看记录<NativeSelect value={session.id} disabled={busy} onChange={(event) => setSessionId(event.target.value)}>{catalog.recent.map((item) => <option value={item.id} key={item.id}>{time(item.createdAt)} · {item.mode === "due" ? "到期复习" : "自由练习"}{item.complete ? " · 已结束" : " · 进行中"}</option>)}</NativeSelect></label></div>
         {feedback ? <div className={styles.feedback} role="status"><h3>{feedback.correct ? <><Check/>答对了</> : "先记住这个词，再来一次"}</h3><strong>{feedback.word}</strong>{!feedback.correct && <p>本次选择：{feedback.selected}</p>}<p>{feedback.meaning}</p><blockquote>{feedback.example}</blockquote>{feedback.nextDueAt && <p>下次复习：{time(feedback.nextDueAt)}</p>}{feedback.repeated && session.mode === "due" && <p>纠正后的重答保留首次安排，不增加复习阶段。</p>}<Button disabled={busy} onClick={() => setDismissed({ ...dismissed, [session.id]: feedback.requestId })}>{session.complete ? "查看本轮小结" : "继续下一词"}<ArrowRight/></Button></div>

@@ -1,5 +1,5 @@
 import { lazy, useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import { useLocation, useNavigationType, useSearchParams } from "react-router";
 import { ArrowRight, Check, LockKeyhole, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -19,6 +19,7 @@ const stages = ["读懂课文", "写好汉字", "情境交流"];
 export default function JourneyMap({ notify }: { notify: Notify }) {
   const [query, setQuery] = useSearchParams();
   const { pathname } = useLocation();
+  const navigation = useNavigationType();
   const incomingRun = query.get("run") ?? ""; const incomingScenario = query.get("scenario") ?? "";
   const [selection, setSelection] = useState(() => ({ run: pathname === "/student/journeys" ? incomingRun : "", scenario: pathname === "/student/journeys" ? incomingScenario : "" }));
   const runId = selection.run;
@@ -26,6 +27,7 @@ export default function JourneyMap({ notify }: { notify: Notify }) {
   const [reload, setReload] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [readError, setReadError] = useState("");
   const [viewStep, setViewStep] = useState<number | null>(null);
   const version = useRef(0);
   const starts = useRef(new Map<string, string>());
@@ -34,19 +36,20 @@ export default function JourneyMap({ notify }: { notify: Notify }) {
   useEffect(() => {
     if (pathname !== "/student/journeys") return;
     if (!incomingRun && !incomingScenario) {
+      if (navigation === "POP") { setSelection({ run: "", scenario: "" }); return; }
       if (selection.run) setQuery({ run: selection.run }, { replace: true });
       else if (selection.scenario) setQuery({ scenario: selection.scenario }, { replace: true });
       return;
     }
     setSelection((current) => current.run === incomingRun && current.scenario === incomingScenario ? current : { run: incomingRun, scenario: incomingScenario });
-  }, [pathname, incomingRun, incomingScenario, selection.run, selection.scenario, setQuery]);
+  }, [pathname, navigation, incomingRun, incomingScenario, selection.run, selection.scenario, setQuery]);
   useEffect(() => {
     const controller = new AbortController(); const current = ++version.current;
     void requestJson<JourneyCatalog>(`/api/v1/journeys${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`, { cache: "no-store", signal: controller.signal }).then((data) => {
       if (controller.signal.aborted || current !== version.current) return;
-      setCatalog(data); setError("");
+      setCatalog(data); setReadError("");
       for (const [scenario, id] of starts.current) if (data.runs.some((item) => item.id === id)) starts.current.delete(scenario);
-    }).catch(() => { if (!controller.signal.aborted && current === version.current) setError("关卡进度暂时没有读取成功，请重新读取。已经保存的记录仍会保留。"); });
+    }).catch(() => { if (!controller.signal.aborted && current === version.current) setReadError("关卡进度暂时没有读取成功，请重新读取。已经保存的记录仍会保留。"); });
     return () => controller.abort();
   }, [reload, runId]);
   const requestedRun = catalog?.runs.find((item) => item.id === runId);
@@ -60,18 +63,20 @@ export default function JourneyMap({ notify }: { notify: Notify }) {
   async function start() {
     if (!scenarioId) return;
     const id = starts.current.get(scenarioId) ?? crypto.randomUUID(); starts.current.set(scenarioId, id);
-    version.current++; setBusy(true); setError("");
+    const origin = window.location.pathname + window.location.search;
+    const operation = ++version.current; setBusy(true); setError("");
     try {
       const data = await postJson<JourneyCatalog>("/api/v1/journeys", { action: "start", id, scenarioId });
-      version.current++; setCatalog(data); setSelection({ run: id, scenario: "" }); setQuery({ run: id }); setViewStep(null); starts.current.delete(scenarioId);
-    } catch (reason) { setError(practiceError(reason)); refresh(); }
+      if (operation !== version.current || window.location.pathname + window.location.search !== origin) { refresh(); return; }
+      version.current++; setCatalog(data); setSelection({ run: id, scenario: "" }); if (window.location.pathname === "/student/journeys") setQuery({ run: id }); setViewStep(null); starts.current.delete(scenarioId);
+    } catch (reason) { if (operation === version.current && window.location.pathname + window.location.search === origin) setError(practiceError(reason)); refresh(); }
     finally { setBusy(false); }
   }
   return <section className={styles.page}>
     <PageHeader title="主题闯关地图" description="读懂一篇课文，写好相关汉字，再把中文用在对话里。"/>
     <div className={styles.toolbar}><label>学习主题<NativeSelect value={scenarioId ?? ""} disabled={busy || !choices.length} onChange={(event) => { setSelection({ run: "", scenario: event.target.value }); setQuery({ scenario: event.target.value }); setViewStep(null); }}>{!choices.length && <option value="">等待老师发布</option>}{choices.map((item) => <option value={item.id} key={item.id}>{item.title} · {item.className}{catalog?.journeys.some((source) => source.id === item.id) ? "" : "（历史）"}</option>)}</NativeSelect></label><div><Button variant="outline" disabled={busy} onClick={refresh}><RefreshCw/>重新读取</Button><Button disabled={busy || !available} onClick={() => void start()}>{busy ? "正在准备…" : run ? "开始新一轮" : "开始主题闯关"}<ArrowRight/></Button></div></div>
-    {error && <p className={styles.error} role="alert">{error}</p>}
-    {!catalog ? <p role="status">正在读取主题与关卡…</p> : !choices.length ? <EmptyState title="等待老师发布主题" description="老师关联课文、练习字和情境对话后，就可以在这里开始完整的三关练习。"/> : !run ? <div className={styles.intro}><h2>一条主题，三种练习</h2><p>先阅读和自测，再写一写相关汉字，最后进入情境交流。每一关都会保存记录，刷新后也能继续。</p><Button disabled={busy || !available} onClick={() => void start()}>开始这一轮</Button></div> : <>
+    {(error || readError) && <p className={styles.error} role="alert">{error || readError}</p>}
+    {!catalog ? readError ? <EmptyState title="主题进度暂未载入" description="请点击重新读取，恢复已保存的主题与关卡。"/> : <p role="status">正在读取主题与关卡…</p> : !choices.length ? <EmptyState title="等待老师发布主题" description="老师关联课文、练习字和情境对话后，就可以在这里开始完整的三关练习。"/> : !run ? <div className={styles.intro}><h2>一条主题，三种练习</h2><p>先阅读和自测，再写一写相关汉字，最后进入情境交流。每一关都会保存记录，刷新后也能继续。</p><Button disabled={busy || !available} onClick={() => void start()}>开始这一轮</Button></div> : <>
       <div className={styles.heading}><div><h2>{run.title}</h2><p>《{run.lesson.title}》 · 练习字：{run.characters.join("、")} · 已完成 {run.stage}/3 关</p></div><label>回看轮次<NativeSelect value={run.id} disabled={busy} onChange={(event) => { setSelection({ run: event.target.value, scenario: "" }); setQuery({ run: event.target.value }); setViewStep(null); }}>{rounds.map((item) => <option key={item.id} value={item.id}>{new Date(item.createdAt.includes("T") ? item.createdAt : `${item.createdAt.replace(" ", "T")}Z`).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })} · {item.stage === 3 ? "已完成" : `已完成 ${item.stage}/3 关`}</option>)}</NativeSelect></label></div>
       <ol className={styles.map} aria-label="主题关卡进度">{stages.map((title, index) => <li key={title} data-complete={run.stage > index} data-current={selectedStep === index}><button disabled={index > run.stage || !run.available} aria-current={selectedStep === index ? "step" : undefined} onClick={() => setViewStep(index)}><span>{run.stage > index ? <Check/> : index > run.stage ? <LockKeyhole/> : index + 1}</span><div><strong>{title}</strong><small>{run.stage > index ? "已完成，可回看" : index === run.stage ? "当前关卡" : "完成前一关后解锁"}</small></div></button></li>)}</ol>
       {!run.available && <p className={styles.error}>任务已归档或班级权限有变化，已有记录仍可回看。</p>}

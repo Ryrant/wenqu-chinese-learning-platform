@@ -9,6 +9,7 @@ import { postJson, requestJson } from "@/lib/workspace/api";
 import type { Notify } from "@/lib/platform-types";
 import { practiceError, type PracticeHistory, type PracticeRecord, type ReadingResult } from "@/lib/practice-types";
 import type { ReadingCatalog } from "@/lib/reading-content-service";
+import { usePracticeSelection } from "@/lib/workspace/use-practice-selection";
 import styles from "./reading-workshop.module.css";
 
 function WordQuiz({ lesson, journeyRunId, onSaved }: { lesson: ReadingLesson; journeyRunId?: string; onSaved?: () => void }) {
@@ -113,7 +114,7 @@ function ReadingSession({ lesson, vocabulary, busy, save, notify, journeyRunId, 
 export function ReadingPreview({ lesson, notify }: { lesson: ReadingLesson; notify: Notify }) { return <ReadingSession lesson={lesson} notify={notify} vocabulary={[]} busy save={() => undefined} preview/>; }
 
 export default function ReadingWorkshop({ notify, fixedLesson, journeyRunId, onSaved, embedded = false }: { notify: Notify; fixedLesson?: ReadingLesson; journeyRunId?: string; onSaved?: () => void; embedded?: boolean }) {
-  const [lessonId, setLessonId] = useState(readingLessons[0].id);
+  const [lessonId, setLessonId] = usePracticeSelection("/student/reading", "lessonId", readingLessons[0].id, !embedded);
   const [lessons, setLessons] = useState<ReadingLesson[]>(readingLessons);
   const [pinnedLesson, setPinnedLesson] = useState<ReadingLesson | null>(null);
   const [lessonError, setLessonError] = useState("");
@@ -123,10 +124,12 @@ export default function ReadingWorkshop({ notify, fixedLesson, journeyRunId, onS
   const [reload, setReload] = useState(0);
   const [busy, setBusy] = useState(false);
   const version = useRef(0);
-  const lesson = fixedLesson ?? pinnedLesson ?? lessons.find((item) => item.id === lessonId) ?? readingLessons[0];
+  const chosen = pinnedLesson?.id === lessonId ? pinnedLesson : lessons.find((item) => item.id === lessonId);
+  const lesson = fixedLesson ?? chosen ?? readingLessons[0];
   const currentLesson = lessons.find((item) => item.id === lesson.id);
-  const unavailable = !fixedLesson && !!pinnedLesson && !currentLesson;
+  const unavailable = !fixedLesson && (!chosen || !currentLesson);
   const updated = !fixedLesson && !!pinnedLesson && !!currentLesson && (currentLesson.source?.revision ?? 0) !== (pinnedLesson.source?.revision ?? 0);
+  useEffect(() => { if (!fixedLesson && chosen && pinnedLesson?.id !== chosen.id) setPinnedLesson(chosen); }, [fixedLesson, chosen, pinnedLesson?.id]);
   useEffect(() => {
     if (fixedLesson) return;
     const controller = new AbortController();
@@ -155,7 +158,7 @@ export default function ReadingWorkshop({ notify, fixedLesson, journeyRunId, onS
 
   return <section className={styles.page}>
     {!embedded && <PageHeader title="交互式阅读" description="从读懂一个词开始，慢慢读懂整个故事。"/>}
-    {!fixedLesson && <div className={styles.toolbar}><label>选择课文<NativeSelect value={lesson.id} onChange={(event) => { const selected = lessons.find((item) => item.id === event.target.value); if (selected) { setLessonId(selected.id); setPinnedLesson(selected); } }}>{unavailable && <option value={lesson.id} disabled>{lesson.title}（已不可用）</option>}{lessons.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.level}{item.source ? ` · ${item.source.className}` : ""}</option>)}</NativeSelect></label><div><Button variant="ghost" onClick={() => setLessonReload((value) => value + 1)}><RefreshCw/>重新读取课文</Button><a href="#reading-vocabulary">我的生词本{vocabulary ? `（${vocabulary.length}）` : ""}</a></div></div>}
+    {!fixedLesson && <div className={styles.toolbar}><label>选择课文<NativeSelect value={lessonId} onChange={(event) => { const selected = lessons.find((item) => item.id === event.target.value); if (selected) { setLessonId(selected.id); setPinnedLesson(selected); } }}>{unavailable && <option value={lessonId} disabled>{chosen?.title ?? "指定课文"}（待读取或已不可用）</option>}{lessons.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.level}{item.source ? ` · ${item.source.className}` : ""}</option>)}</NativeSelect></label><div><Button variant="ghost" onClick={() => setLessonReload((value) => value + 1)}><RefreshCw/>重新读取课文</Button><a href="#reading-vocabulary">我的生词本{vocabulary ? `（${vocabulary.length}）` : ""}</a></div></div>}
     {lessonError && <p role="alert">{lessonError}</p>}
     {updated && <div className={styles.error} role="status"><p>老师已发布课文新版本，当前保留原页面。加载新版本后再进行新的自测或收藏。</p><Button variant="outline" onClick={() => setPinnedLesson(currentLesson!)}>加载新版本</Button></div>}
     {error && <div className={styles.error} role="alert"><p>{error}</p><Button variant="outline" disabled={busy} onClick={() => setReload((value) => value + 1)}>重新读取生词本</Button></div>}
