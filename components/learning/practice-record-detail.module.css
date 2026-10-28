@@ -1,0 +1,7 @@
+.detail { display: grid; gap: 1rem; min-width: 0; font-size: .9rem; line-height: 1.9; overflow-wrap: anywhere; }
+.detail article { display: grid; gap: .5rem; padding-block: 1rem; border-top: 1px solid var(--border); }
+.detail h4 { font-size: .95rem; font-weight: 600; }
+.detail p { white-space: pre-wrap; }
+.detail summary { cursor: pointer; font-weight: 550; }
+.detail details p { margin-top: .75rem; }
+.meta { color: var(--muted-foreground); font-size: .8rem; }

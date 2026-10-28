@@ -27,6 +27,7 @@ const DialogueChallenge = lazy(() => import("./dialogue-challenge"));
 const JourneyMap = lazy(() => import("./journey-map"));
 const VocabularyChallenge = lazy(() => import("./vocabulary-challenge"));
 const DictationLab = lazy(() => import("./dictation-lab"));
+const PracticeArchive = lazy(() => import("./practice-archive"));
 const AbilityEvidenceProfile = lazy(() => import("@/components/diagnostic-evidence").then(module => ({ default: module.AbilityEvidenceProfile })));
 const FamilyPortfolio = lazy(() => import("@/components/family/family-portfolio").then(module => ({ default: module.FamilyPortfolio })));
 const StudentCaseTimeline = lazy(() => import("@/components/learning/student-case-timeline").then(module => ({ default: module.StudentCaseTimeline })));
@@ -343,6 +344,7 @@ export default function StudentView({ nav, data, receivedAt, act, refresh, notif
     <PageHeader title="成长档案" description="回看每一次练习、作品和老师的反馈。"/>
     {retestRefreshNotice}
     <section className={styles.stats}><StatCard label="已提交作品" value={submittedCount} icon={<FileText/>}/><StatCard label="待教师评价" value={pendingCount} icon={<CheckCheck/>}/><StatCard label="平均掌握度" value={masteryAverage === null ? "待评估" : masteryAverage + "%"} icon={<BookOpen/>}/></section>
+    <PracticeArchive revision={data.generatedAt}/>
     <AbilityEvidenceProfile studentId={data.user.id} revision={data.generatedAt}/>
     <StudentCaseTimeline view="student" studentId={data.user.id} revision={data.generatedAt}/>
     <FamilyPortfolio studentId={data.user.id} revision={data.generatedAt}/>

@@ -2,7 +2,12 @@ import type { ReadingLesson } from "./reading-lessons";
 import type { EvidencePlanItem } from "./learning-plan-types";
 import type { LearningAnalyticsState } from "./learning-analytics";
 
-export type PracticeOverview = LearningAnalyticsState & { nextActions: EvidencePlanItem[] };
+export type PracticeKind = "writing" | "reading" | "vocabulary" | "dictation" | "journey";
+export type PracticeMetric = { kind: PracticeKind; rounds: number; completed: number; correct: number | null; total: number | null; hints: number | null; referenceViewed: number | null };
+export type PracticeTimelineEntry = { id: string; kind: PracticeKind; title: string; createdAt: string; status: "active" | "finished" | "ended"; href: string; summary: string };
+export type PracticeAnswer = { prompt: string; actual: string; expected: string; correct: boolean; at?: string; usedReference?: boolean; playCount?: number };
+export type PracticeDetail = { entry: PracticeTimelineEntry; answers: PracticeAnswer[]; texts: string[]; writing?: WritingResult; turns?: import("./dialogue-types").DialogueTurn[]; hints?: number };
+export type PracticeOverview = LearningAnalyticsState & { nextActions: EvidencePlanItem[]; period: 7 | 30; rangeStart: string; asOf: string; metrics: PracticeMetric[] | null; records: PracticeTimelineEntry[]; currentCursor: string; nextCursor: string | null };
 
 export type WritingResult = { mode: "trace" | "recall"; mistakes: number; hints: number; elapsedMs: number };
 export type ReadingResult = { correct: number; total: number; answers: Array<{ word: string; selected: string; meaning: string; correct: boolean }> };

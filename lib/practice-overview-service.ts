@@ -5,6 +5,7 @@ import { rankLearningPlan } from "./learning-loop";
 import type { EvidencePlanItem } from "./learning-plan-types";
 import type { PlatformContext } from "./platform-store";
 import type { PracticeOverview } from "./practice-types";
+import { readPracticeArchive } from "./practice-history-service";
 
 function action(studentId: string, id: string, title: string, reason: string, href: string, priority: "resume" | "due" | "retry"): EvidencePlanItem {
   return { id: "practice:" + id, kind: "practice", studentUserId: studentId, title, selectionReason: reason, basis: [], dueAt: null, practiceHref: href, practicePriority: priority };
@@ -36,9 +37,10 @@ export async function readPracticeNextActions(context: PlatformContext, studentI
   return (await readLearningAnalyticsState(db, tenantId, studentId)).available ? items : [];
 }
 
-export async function readPracticeOverview(context: PlatformContext): Promise<PracticeOverview> {
+export async function readPracticeOverview(context: PlatformContext, query = new URLSearchParams()): Promise<PracticeOverview> {
   practiceStudent(context);
-  const nextActions = await readPracticeNextActions(context, context.userId);
-  const analytics = await readLearningAnalyticsState(context.db, context.tenantId, context.userId);
-  return { ...analytics, nextActions: analytics.available ? rankLearningPlan(nextActions) : [] };
+  const archive = await readPracticeArchive(context, query);
+  const nextActions = archive.available ? await readPracticeNextActions(context, context.userId) : [];
+  const analytics = archive.available ? await readLearningAnalyticsState(context.db, context.tenantId, context.userId) : archive;
+  return { ...archive, available: analytics.available, consentStatus: analytics.consentStatus, metrics: analytics.available ? archive.metrics : null, nextActions: analytics.available ? rankLearningPlan(nextActions) : [] };
 }

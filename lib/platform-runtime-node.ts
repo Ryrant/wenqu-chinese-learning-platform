@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   PlatformDatabase,
   PlatformPreparedStatement,
+  PlatformRunResult,
   PlatformRuntime,
   PlatformStorage,
   PlatformStoredObject,
@@ -55,6 +56,10 @@ export class NodeSqlitePreparedStatement implements PlatformPreparedStatement {
   }
 
   async all<T = Record<string, unknown>>() {
+    return this.readSynchronously<T>();
+  }
+
+  private readSynchronously<T>() {
     return {
       results: (this.database.prepare(this.query) as unknown as SqliteStatement).all(...this.values).map((row) => Object.fromEntries(Object.entries(row))) as T[],
       success: true,
@@ -66,13 +71,13 @@ export class NodeSqlitePreparedStatement implements PlatformPreparedStatement {
     return this.runSynchronously<T>();
   }
 
-  static batchRunner<T>(statement: PlatformPreparedStatement, database: DatabaseSync) {
+  static batchRunner<T>(statement: PlatformPreparedStatement, database: DatabaseSync, read = false) {
     if (!(statement instanceof NodeSqlitePreparedStatement)
       || statement.database !== database
-      || statement.run !== NodeSqlitePreparedStatement.prototype.run) {
+      || (read ? statement.all !== NodeSqlitePreparedStatement.prototype.all : statement.run !== NodeSqlitePreparedStatement.prototype.run)) {
       throw new Error("invalid_batch_statement");
     }
-    return () => statement.runSynchronously<T>();
+    return () => read ? statement.readSynchronously<T>() : statement.runSynchronously<T>();
   }
 
   private runSynchronously<T>() {
@@ -102,6 +107,15 @@ export class NodeSqliteDatabase implements PlatformDatabase {
   async batch<T = unknown>(statements: PlatformPreparedStatement[]) {
     // 先校验来源；事务内只执行同步 SQLite 调用，避免让并发请求进入同一连接。
     const runners = statements.map((statement) => NodeSqlitePreparedStatement.batchRunner<T>(statement, this.database));
+    return this.runBatch(runners);
+  }
+
+  async readBatch<T = unknown>(statements: PlatformPreparedStatement[]) {
+    const readers = statements.map((statement) => NodeSqlitePreparedStatement.batchRunner<T>(statement, this.database, true));
+    return this.runBatch(readers);
+  }
+
+  private runBatch<T>(runners: Array<() => PlatformRunResult<T>>) {
     this.database.exec("BEGIN");
     try {
       const results = runners.map((run) => run());

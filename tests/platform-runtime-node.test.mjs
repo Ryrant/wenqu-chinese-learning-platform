@@ -64,6 +64,24 @@ test("concurrent Node SQLite batches commit independently without nesting transa
   assert.deepEqual((await db.prepare("SELECT id FROM writes ORDER BY id").all()).results.map((row) => row.id), ["first-1", "first-2", "second-1", "second-2"]);
 });
 
+test("Node read batches return a consistent plain-object snapshot and release failed transactions", async (t) => {
+  const { NodeSqliteDatabase } = await importRuntimeNode();
+  const db = new NodeSqliteDatabase("file::memory:"); const other = new NodeSqliteDatabase("file::memory:");
+  t.after(() => { db.close(); other.close(); });
+  await db.prepare("CREATE TABLE entries (id TEXT PRIMARY KEY)").run();
+  await db.prepare("INSERT INTO entries VALUES ('first')").run();
+  const [read] = await Promise.all([
+    db.readBatch([db.prepare("SELECT COUNT(*) AS count FROM entries"), db.prepare("WITH snapshot AS (SELECT id FROM entries) SELECT * FROM snapshot ORDER BY id")]),
+    db.batch([db.prepare("INSERT INTO entries VALUES ('second')")]),
+  ]);
+  assert.equal(read[0].results[0].count, read[1].results.length);
+  assert.equal(read[0].meta.changes, 0); assert.equal(read[1].meta.changes, 0);
+  await assert.rejects(db.readBatch([db.prepare("SELECT id FROM entries"), db.prepare("SELECT * FROM missing_table")]), /no such table/);
+  await db.batch([db.prepare("INSERT INTO entries VALUES ('third')")]);
+  await assert.rejects(db.readBatch([other.prepare("SELECT 1")]), /invalid_batch_statement/);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM entries").first()).count, 3);
+});
+
 test("a failed batch cannot roll back an independently successful run", async (t) => {
   const { NodeSqliteDatabase } = await importRuntimeNode();
   const db = new NodeSqliteDatabase("file::memory:");

@@ -1,0 +1,15 @@
+.section { display: grid; gap: 1.25rem; min-width: 0; padding: 1.5rem; border: 1px solid var(--border); border-radius: .875rem; background: var(--card); }
+.toolbar, .identity, .pagination { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.toolbar label { display: grid; gap: .5rem; font-size: .85rem; }
+.identity { justify-content: space-between; align-items: start; }
+.identity h4 { font-size: 1rem; font-weight: 600; }
+.identity p, .note { color: var(--muted-foreground); font-size: .8rem; line-height: 1.9; }
+.metrics { display: grid; gap: .75rem; font-size: .85rem; line-height: 1.9; }
+.metrics > div { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: .75rem; }
+.metrics dt { font-weight: 600; }
+.records { display: grid; }
+.records > li { display: grid; gap: .85rem; padding-block: 1.25rem; border-top: 1px solid var(--border); font-size: .9rem; line-height: 1.9; overflow-wrap: anywhere; }
+.detail { display: grid; gap: 1rem; min-width: 0; }
+.detail > a { justify-self: start; }
+.error { color: var(--destructive); font-size: .85rem; line-height: 1.9; }
+@media (max-width: 650px) { .section { padding: 1rem; } .metrics > div { grid-template-columns: minmax(0, 1fr); gap: .1rem; } }

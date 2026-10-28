@@ -22,6 +22,8 @@ export interface PlatformPreparedStatement {
 export interface PlatformDatabase {
   prepare(query: string): PlatformPreparedStatement;
   batch<T = unknown>(statements: PlatformPreparedStatement[]): Promise<Array<PlatformRunResult<T>>>;
+  // D1 的 batch 原生返回查询结果；Node 专用读取事务保留现有写入返回约定。
+  readBatch?<T = unknown>(statements: PlatformPreparedStatement[]): Promise<Array<PlatformRunResult<T>>>;
 }
 
 export type StoragePutOptions = {
