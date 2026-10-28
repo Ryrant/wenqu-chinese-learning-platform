@@ -4,6 +4,7 @@ import type { AiGenerationResult } from "./ai/provider";
 import { aiProviderSettings, loadPlatformSettings } from "./platform-settings";
 import { practiceCharacters } from "./hanzi-practice";
 import { readingLessons } from "./reading-lessons";
+import { readReadingCatalog, resolveReadingLesson } from "./reading-content-service";
 import type { PlatformContext } from "./platform-store";
 import { matchedDialogueExpression, normalizeDialogueText, publicDialogueScenario, type DialogueCatalog, type DialogueContent, type DialogueScenario, type DialogueSession, type DialogueTurn } from "./dialogue-types";
 
@@ -46,7 +47,7 @@ export async function readDialogueCatalog(context: PlatformContext, staff = fals
     ORDER BY CASE WHEN s.id=? THEN 0 ELSE 1 END,s.created_at DESC,s.rowid DESC LIMIT ${staff ? 50 : 20}`).bind(context.tenantId, ...args, focusId).all<SessionRow>();
   const classes = staff ? (await context.db.prepare("SELECT id,name FROM classes WHERE tenant_id=? AND (?=1 OR teacher_user_id=?) ORDER BY name,id").bind(context.tenantId, isAdmin(context) ? 1 : 0, context.userId).all<{ id: string; name: string }>()).results : [];
   const settings = staff ? await loadPlatformSettings(context.db) : null;
-  return { view: staff ? "teacher" : "student", classes, scenarios: staff ? scenarios : scenarios.map(publicDialogueScenario), sessions: sessions.results.map((row) => session(row, scenarios)), aiConfigured: !!settings && !!aiProviderSettings(settings).openAiKey };
+  return { view: staff ? "teacher" : "student", classes, scenarios: staff ? scenarios : scenarios.map(publicDialogueScenario), sessions: sessions.results.map((row) => session(row, scenarios)), aiConfigured: !!settings && !!aiProviderSettings(settings).openAiKey, ...(staff ? { readingLessons: [...readingLessons, ...(await readReadingCatalog(context, true)).lessons.filter((item) => item.source?.status === "published")] } : {}) };
 }
 
 function content(value: unknown): DialogueContent {
@@ -65,11 +66,12 @@ function content(value: unknown): DialogueContent {
   if (body.journey !== undefined) {
     if (!body.journey || typeof body.journey !== "object" || Array.isArray(body.journey)) throw new Error("invalid_dialogue_journey");
     const definition = body.journey as Record<string, unknown>;
-    const lesson = readingLessons.find((item) => item.id === definition.lessonId);
-    if (!lesson || !Array.isArray(definition.characters) || definition.characters.length < 1 || definition.characters.length > 4) throw new Error("invalid_dialogue_journey");
+    const lessonId = text(definition.lessonId, 120);
+    if (!readingLessons.some((item) => item.id === lessonId)) uuid(lessonId);
+    if (!Array.isArray(definition.characters) || definition.characters.length < 1 || definition.characters.length > 4) throw new Error("invalid_dialogue_journey");
     const characters = definition.characters.map((value) => text(value, 2));
-    if (new Set(characters).size !== characters.length || characters.some((value) => !practiceCharacters.some((item) => item.character === value) || !lesson.sentences.join("").includes(value))) throw new Error("invalid_dialogue_journey");
-    journey = { lessonId: lesson.id, characters };
+    if (new Set(characters).size !== characters.length || characters.some((value) => !practiceCharacters.some((item) => item.character === value))) throw new Error("invalid_dialogue_journey");
+    journey = { lessonId, characters };
   }
   return { roleName: text(body.roleName, 60), brief: text(body.brief, 1000), opening: text(body.opening, 300), goals, aiEnabled: body.aiEnabled, ...(journey ? { journey } : {}) };
 }
@@ -79,12 +81,21 @@ export async function publishDialogueScenario(context: PlatformContext, body: Re
   const id = uuid(body.id); const classId = text(body.classId, 120); const title = text(body.title, 100); const expected = revision(body.revision); const data = content(body.content);
   const classroom = await context.db.prepare("SELECT id FROM classes WHERE id=? AND tenant_id=? AND (?=1 OR teacher_user_id=?)").bind(classId, context.tenantId, isAdmin(context) ? 1 : 0, context.userId).first();
   if (!classroom) throw new Error("forbidden");
+  let readingGuard = ""; const readingArgs: Array<string | number> = [];
+  if (data.journey) {
+    const lesson = await resolveReadingLesson(context, data.journey.lessonId, true, classId);
+    if (data.journey.characters.some((value) => !lesson.sentences.join("").includes(value))) throw new Error("invalid_dialogue_journey");
+    if (lesson.source) {
+      readingGuard = " AND EXISTS (SELECT 1 FROM teacher_reading_lessons WHERE id=? AND tenant_id=? AND class_id=? AND revision=? AND status='published')";
+      readingArgs.push(lesson.id, context.tenantId, classId, lesson.source.revision);
+    }
+  }
   const current = await scenarioRow(context, id, true); const serialized = JSON.stringify(data);
   if (current && current.status === "published" && current.class_id === classId && current.title === title && current.content_json === serialized) return readDialogueCatalog(context, true);
   if (current && (current.revision !== expected || current.class_id !== classId)) throw new Error("dialogue_scenario_changed");
   if (!current && expected !== 0) throw new Error("dialogue_scenario_changed");
-  const guard = "EXISTS (SELECT 1 FROM classes c WHERE c.id=? AND c.tenant_id=? AND (?=1 OR c.teacher_user_id=?))";
-  const guardArgs = [classId, context.tenantId, isAdmin(context) ? 1 : 0, context.userId];
+  const guard = "EXISTS (SELECT 1 FROM classes c WHERE c.id=? AND c.tenant_id=? AND (?=1 OR c.teacher_user_id=?))" + readingGuard;
+  const guardArgs = [classId, context.tenantId, isAdmin(context) ? 1 : 0, context.userId, ...readingArgs];
   const statement = current
     ? context.db.prepare(`UPDATE dialogue_scenarios SET title=?,content_json=?,status='published',revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND class_id=? AND revision=? AND ${guard}`).bind(title, serialized, id, context.tenantId, classId, expected, ...guardArgs)
     : context.db.prepare(`INSERT OR IGNORE INTO dialogue_scenarios (id,tenant_id,class_id,title,content_json,created_by) SELECT ?,?,?,?,?,? WHERE ${guard}`).bind(id, context.tenantId, classId, title, serialized, context.userId, ...guardArgs);

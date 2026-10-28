@@ -9,7 +9,7 @@ const bundle = await build({ stdin: { contents: `
   export { createSessionToken } from './lib/auth-token';
   export { createApiApp } from './server/app';
   export { dialogueTemplates } from './lib/dialogue-types';
-  export { readingLessons } from './lib/reading-lessons';
+  export { readingLessons, suggestedReadingTerms, missingReadingCharacters, createReadingQuiz } from './lib/reading-lessons';
 `, resolveDir: fileURLToPath(new URL("../../", import.meta.url)) }, bundle: true, platform: "node", format: "esm", target: "node22", write: false });
 export const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 

@@ -1,6 +1,7 @@
 import { auditStatement } from "./audit";
 import { practiceCharacters } from "./hanzi-practice";
-import { readingLessons } from "./reading-lessons";
+import { resolveReadingLesson } from "./reading-content-service";
+import type { ReadingLesson } from "./reading-lessons";
 import { journeySnapshot, journeySourceGuard, ownJourneyRow, practiceId, practiceStudent } from "./journey-service";
 import type { PlatformContext } from "./platform-store";
 import type { PracticeHistory, PracticeRecord, ReadingResult, WritingResult } from "./practice-types";
@@ -24,6 +25,7 @@ export async function savePractice(context: PlatformContext, body: Record<string
   if (body.kind !== "reading" && body.kind !== "writing") throw new Error("invalid_practice_kind");
   if (typeof body.referenceId !== "string" || !body.referenceId || body.referenceId.length > 120) throw new Error("invalid_practice_reference");
   const kind = body.kind; const referenceId = body.referenceId; const runId = body.journeyRunId ? practiceId(body.journeyRunId) : null;
+  const sourceRevision = kind === "reading" && body.sourceRevision !== undefined ? count(body.sourceRevision, 1000000) : 0;
   let submission: unknown;
   if (kind === "writing") {
     if (body.mode !== "trace" && body.mode !== "recall") throw new Error("invalid_practice_mode");
@@ -37,7 +39,7 @@ export async function savePractice(context: PlatformContext, body: Record<string
       return { word: item.word, meaning: item.meaning };
     });
   }
-  const payload = JSON.stringify({ kind, referenceId, journeyRunId: runId, submission });
+  const payload = JSON.stringify({ kind, referenceId, journeyRunId: runId, submission, ...(sourceRevision ? { sourceRevision } : {}) });
   const existing = await context.db.prepare(`${selectRecord} WHERE id=? AND tenant_id=? AND user_id=?`).bind(id, context.tenantId, context.userId).first<RecordRow>();
   if (existing) { if (existing.payloadJson !== payload) throw new Error("practice_record_conflict"); return { record: record(existing) }; }
   const journey = runId ? await ownJourneyRow(context, runId) : null;
@@ -50,8 +52,9 @@ export async function savePractice(context: PlatformContext, body: Record<string
     if (journey && journey.stage < 1) throw new Error("journey_stage_locked");
     title = item.character; source = item; result = submission as WritingResult;
   } else {
-    const lesson = snapshot?.lesson ?? readingLessons.find((item) => item.id === referenceId);
+    const lesson = snapshot?.lesson ?? await resolveReadingLesson(context, referenceId);
     if (!lesson || lesson.id !== referenceId) throw new Error("invalid_practice_lesson");
+    if ((lesson.source?.revision ?? 0) !== sourceRevision) throw new Error("reading_lesson_changed");
     const answers = submission as Array<{ word: string; meaning: string }>;
     if (new Set(answers.map((item) => item.word)).size !== 3) throw new Error("invalid_practice_answers");
     const graded = answers.map((answer) => {
@@ -61,7 +64,11 @@ export async function savePractice(context: PlatformContext, body: Record<string
     });
     title = lesson.title; source = lesson; result = { correct: graded.filter((item) => item.correct).length, total: graded.length, answers: graded } satisfies ReadingResult;
   }
-  const guard = journey ? journeySourceGuard(context, journey.scenario_id, journey.class_id) : { sql: "1=1", args: [] };
+  const teacherLesson = kind === "reading" && (source as ReadingLesson).source ? source as ReadingLesson : null;
+  const guard = journey ? journeySourceGuard(context, journey.scenario_id, journey.class_id) : teacherLesson ? {
+    sql: "EXISTS (SELECT 1 FROM teacher_reading_lessons r JOIN enrollments e ON e.tenant_id=r.tenant_id AND e.class_id=r.class_id WHERE r.id=? AND r.tenant_id=? AND r.revision=? AND r.status='published' AND e.student_user_id=? AND e.status='active')",
+    args: [teacherLesson.id, context.tenantId, teacherLesson.source!.revision, context.userId],
+  } : { sql: "1=1", args: [] };
   const runGuard = journey ? "AND EXISTS (SELECT 1 FROM journey_runs WHERE id=? AND tenant_id=? AND user_id=? AND (?='reading' OR stage>=1))" : "";
   const statements = [context.db.prepare(`INSERT OR IGNORE INTO practice_records (id,tenant_id,user_id,kind,reference_id,journey_run_id,title,snapshot_json,payload_json,result_json) SELECT ?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql} ${runGuard}`)
     .bind(id, context.tenantId, context.userId, kind, referenceId, runId, title, JSON.stringify(source), payload, JSON.stringify(result), ...guard.args, ...(journey ? [journey.id, context.tenantId, context.userId, kind] : [])),
@@ -73,7 +80,7 @@ export async function savePractice(context: PlatformContext, body: Record<string
   }
   const [saved] = await context.db.batch(statements);
   const stored = await context.db.prepare(`${selectRecord} WHERE id=? AND tenant_id=? AND user_id=?`).bind(id, context.tenantId, context.userId).first<RecordRow>();
-  if (!saved.meta.changes && (!stored || stored.payloadJson !== payload)) throw new Error(journey ? "journey_unavailable" : "practice_record_conflict");
+  if (!saved.meta.changes && (!stored || stored.payloadJson !== payload)) throw new Error(journey ? "journey_unavailable" : teacherLesson ? "reading_lesson_changed" : "practice_record_conflict");
   if (!stored) throw new Error("practice_record_not_found");
   return { record: record(stored) };
 }

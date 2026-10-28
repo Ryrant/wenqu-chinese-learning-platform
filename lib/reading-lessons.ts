@@ -1,5 +1,5 @@
 export type ReadingTerm = { word: string; pinyin: string; meaning: string };
-export type ReadingLesson = { id: string; title: string; level: string; sentences: string[]; terms: ReadingTerm[]; focusWords: string[] };
+export type ReadingLesson = { id: string; title: string; level: string; sentences: string[]; terms: ReadingTerm[]; focusWords: string[]; source?: { classId: string; className: string; authorName: string; revision: number; status: "draft" | "published" | "archived" } };
 
 const commonTerms: ReadingTerm[] = [
   { word: "我", pinyin: "wǒ", meaning: "说话的人自己。" },
@@ -167,6 +167,18 @@ export function readingTokens(sentence: string, lesson: ReadingLesson): Array<Re
     else { const character = String.fromCodePoint(sentence.codePointAt(offset)!); tokens.push(character); offset += character.length; }
   }
   return tokens;
+}
+
+export function suggestedReadingTerms(sentences: string[]): ReadingTerm[] {
+  const dictionary = new Map(commonTerms.map((term) => [term.word, term]));
+  for (const lesson of readingLessons) for (const term of lesson.terms) dictionary.set(term.word, term);
+  const draft: ReadingLesson = { id: "preview", title: "预览", level: "A2", sentences, terms: [...dictionary.values()], focusWords: [] };
+  const used = sentences.flatMap((sentence) => readingTokens(sentence, draft)).filter((token): token is ReadingTerm => typeof token !== "string");
+  return [...new Map(used.map((term) => [term.word, term])).values()];
+}
+
+export function missingReadingCharacters(lesson: ReadingLesson): string[] {
+  return [...new Set(lesson.sentences.flatMap((sentence) => readingTokens(sentence, lesson)).flatMap((token) => typeof token === "string" ? token.match(/\p{Script=Han}/gu) ?? [] : []))];
 }
 
 export type ReadingQuestion = { word: string; options: string[]; correctOption: number };

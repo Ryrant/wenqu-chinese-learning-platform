@@ -53,9 +53,9 @@ export async function startVocabularyReview(context: PlatformContext, body: Reco
   const pool = [...words, ...readingLessons.flatMap((lesson) => lesson.terms)];
   const items: Item[] = selected.map((word, index) => {
     const kind = index % 2 === 0 ? "meaning" : "cloze"; const answer = kind === "meaning" ? word.meaning : word.word;
-    const distractors = [...new Set(pool.map((term) => kind === "meaning" ? term.meaning : term.word))].filter((value) => value !== answer);
+    const distractors = [...new Set(pool.filter((term) => term.word !== word.word).map((term) => kind === "meaning" ? term.meaning : term.word))].filter((value) => value !== answer);
     const options = shuffled([answer, ...shuffled(distractors).slice(0, 3)]);
-    return { vocabularyId: word.id, word: word.word, meaning: word.meaning, example: word.example, stage: word.stage ?? 0, kind, prompt: kind === "meaning" ? `“${word.word}”是什么意思？` : `${word.example.replaceAll(word.word, "____")}\n选择生词本中的原词，意思是：${word.meaning}`, options, answerIndex: options.indexOf(answer) };
+    return { vocabularyId: word.id, word: word.word, meaning: word.meaning, example: word.example, stage: word.stage ?? 0, kind, prompt: kind === "meaning" ? `《${word.lessonTitle}》中，“${word.word}”是什么意思？\n${word.example}` : `${word.example.replaceAll(word.word, "____")}\n选择生词本中的原词，意思是：${word.meaning}`, options, answerIndex: options.indexOf(answer) };
   });
   const state: ReviewState = { queue: items.map((_, index) => index), position: 0, attempts: [] };
   await context.db.batch([

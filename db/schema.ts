@@ -297,6 +297,10 @@ export const vocabularyReviewState = sqliteTable("vocabulary_review_state", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), vocabularyId: text("vocabulary_id").notNull(), stage: integer("stage").notNull().default(0), dueAt: text("due_at").notNull(), updatedAt: text("updated_at").notNull(),
 }, (table) => [uniqueIndex("vocabulary_review_word_idx").on(table.tenantId, table.userId, table.vocabularyId)]);
 
+export const teacherReadingLessons = sqliteTable("teacher_reading_lessons", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(), title: text("title").notNull(), level: text("level").notNull(), contentJson: text("content_json").notNull(), status: text("status").notNull().default("draft"), revision: integer("revision").notNull().default(1), createdBy: text("created_by").notNull(), createdAt: createdAt(), updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("teacher_reading_lessons_class_idx").on(table.tenantId, table.classId, table.status)]);
+
 export const vocabularyReviewSessions = sqliteTable("vocabulary_review_sessions", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), mode: text("mode").notNull(), snapshotJson: text("snapshot_json").notNull(), stateJson: text("state_json").notNull(), revision: integer("revision").notNull().default(0), createdAt: createdAt(), completedAt: text("completed_at"),
 }, (table) => [index("vocabulary_review_sessions_owner_idx").on(table.tenantId, table.userId, table.createdAt), uniqueIndex("vocabulary_review_active_idx").on(table.tenantId, table.userId).where(sql`completed_at IS NULL`)]);

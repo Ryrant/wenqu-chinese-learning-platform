@@ -50,6 +50,8 @@ async function identity(request: Request, db: PlatformDatabase) {
 // 全新安装直接创建当前完整结构，不执行旧数据库补列或历史数据修正。
 async function ensureCoreSchema(db: PlatformDatabase) {
   await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS teacher_reading_lessons (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, title TEXT NOT NULL, level TEXT NOT NULL, content_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', revision INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS teacher_reading_lessons_class_idx ON teacher_reading_lessons (tenant_id,class_id,status)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS vocabulary_review_state (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, vocabulary_id TEXT NOT NULL, stage INTEGER NOT NULL DEFAULT 0, due_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS vocabulary_review_word_idx ON vocabulary_review_state (tenant_id,user_id,vocabulary_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS vocabulary_review_sessions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, mode TEXT NOT NULL, snapshot_json TEXT NOT NULL, state_json TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT)`),
@@ -231,7 +233,7 @@ export async function platformContext(request: Request, requiredRole?: PlatformR
 
 export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
-  const status = ["vocabulary_review_changed", "vocabulary_review_empty", "vocabulary_review_conflict", "practice_record_conflict", "journey_unavailable", "journey_stage_locked", "dialogue_turn_pending", "dialogue_turn_conflict", "dialogue_session_changed", "dialogue_scenario_changed", "dialogue_scenario_unavailable", "family_feedback_response_unavailable", "family_response_id_conflict", "family_response_source_changed", "family_response_already_voided", "trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
+  const status = ["reading_lesson_changed", "reading_lesson_unavailable", "vocabulary_review_changed", "vocabulary_review_empty", "vocabulary_review_conflict", "practice_record_conflict", "journey_unavailable", "journey_stage_locked", "dialogue_turn_pending", "dialogue_turn_conflict", "dialogue_session_changed", "dialogue_scenario_changed", "dialogue_scenario_unavailable", "family_feedback_response_unavailable", "family_response_id_conflict", "family_response_source_changed", "family_response_already_voided", "trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
     ? 401
     : message === "forbidden" || message === "account_access_denied" || message === "password_change_required"
       ? 403

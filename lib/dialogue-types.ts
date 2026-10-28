@@ -4,7 +4,7 @@ export type DialogueScenario = DialogueContent & { id: string; title: string; cl
 export type PublicDialogueScenario = Omit<DialogueScenario, "goals"> & { goals: Array<{ title: string }> };
 export type DialogueTurn = { id: string; kind: "student" | "role" | "hint"; text: string; step: number; at: string; provider?: "script" | "openai" | "fallback"; model?: string; matchedExpression?: string };
 export type DialogueSession = { id: string; scenario: PublicDialogueScenario; turns: DialogueTurn[]; step: number; hintCount: number; revision: number; complete: boolean; pending: boolean; canContinue: boolean; journeyLocked?: boolean; studentName: string; createdAt: string };
-export type DialogueCatalog = { view: "student" | "teacher"; classes: Array<{ id: string; name: string }>; scenarios: Array<DialogueScenario | PublicDialogueScenario>; sessions: DialogueSession[]; aiConfigured: boolean };
+export type DialogueCatalog = { view: "student" | "teacher"; classes: Array<{ id: string; name: string }>; scenarios: Array<DialogueScenario | PublicDialogueScenario>; sessions: DialogueSession[]; aiConfigured: boolean; readingLessons?: import("./reading-lessons").ReadingLesson[] };
 
 export const dialogueTemplates: Array<{ title: string; content: DialogueContent }> = [
   {

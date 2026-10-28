@@ -14,9 +14,9 @@ import { practiceCharacters } from "@/lib/hanzi-practice";
 import styles from "./dialogue-scenarios.module.css";
 
 type Draft = { id: string; revision: number; title: string; classId: string; content: DialogueContent };
-function fromTemplate(index: number): Draft {
+function fromTemplate(index: number, classId = ""): Draft {
   const template = dialogueTemplates[index];
-  return { id: crypto.randomUUID(), revision: 0, title: template.title, classId: "", content: structuredClone(template.content) };
+  return { id: crypto.randomUUID(), revision: 0, title: template.title, classId, content: structuredClone(template.content) };
 }
 function fromScenario(scenario: DialogueScenario): Draft {
   const { roleName, brief, opening, goals, aiEnabled, journey } = scenario;
@@ -35,17 +35,18 @@ export default function TeacherDialogueScenarios({ notify }: { notify: Notify })
   useEffect(() => {
     const controller = new AbortController(); const current = ++version.current;
     void requestJson<DialogueCatalog>("/api/v1/dialogue?view=teacher", { cache: "no-store", signal: controller.signal }).then((data) => {
-      if (!controller.signal.aborted && current === version.current) { setCatalog(data); setError(""); }
+      if (!controller.signal.aborted && current === version.current) { setCatalog(data); setError(""); setDraft((editing) => editing.classId || !data.classes.length ? editing : { ...editing, classId: data.classes[0].id }); }
     }).catch(() => { if (!controller.signal.aborted && current === version.current) setError("情境与对话记录暂时没有读取成功，请重试。编辑内容仍保留。"); });
     return () => controller.abort();
   }, [reload]);
 
   const scenarios = (catalog?.scenarios ?? []) as DialogueScenario[];
   const current = scenarios.find((item) => item.id === draft.id);
-  const classId = draft.classId || catalog?.classes[0]?.id || "";
+  const classId = draft.classId;
   const review = catalog?.sessions.find((item) => item.id === reviewId) ?? catalog?.sessions[0];
-  const journeyLesson = readingLessons.find((item) => item.id === draft.content.journey?.lessonId) ?? readingLessons[0];
-  const availableCharacters = practiceCharacters.filter((item) => journeyLesson.sentences.join("").includes(item.character));
+  const availableLessons = (catalog?.readingLessons ?? readingLessons).filter((item) => !item.source || item.source.classId === classId);
+  const journeyLesson = availableLessons.find((item) => item.id === draft.content.journey?.lessonId) ?? (!draft.content.journey ? availableLessons[0] : undefined);
+  const availableCharacters = practiceCharacters.filter((item) => journeyLesson?.sentences.join("").includes(item.character));
   function changeContent(patch: Partial<DialogueContent>) { setDraft({ ...draft, content: { ...draft.content, ...patch } }); }
   function changeGoal(index: number, patch: Partial<DialogueGoal>) { changeContent({ goals: draft.content.goals.map((goal, at) => at === index ? { ...goal, ...patch } : goal) }); }
   async function perform(action: "publish" | "archive") {
@@ -64,7 +65,7 @@ export default function TeacherDialogueScenarios({ notify }: { notify: Notify })
 
   return <section className={styles.page}>
     <PageHeader title="情境对话任务" description="用一段有来有回的交流，让学生练习课堂里的中文。"/>
-    <div className={styles.toolbar}><label>选择模板<NativeSelect value={templateIndex} disabled={busy} onChange={(event) => setTemplateIndex(Number(event.target.value))}>{dialogueTemplates.map((item, index) => <option key={item.title} value={index}>{item.title}</option>)}</NativeSelect></label><Button variant="outline" disabled={busy} onClick={() => { setDraft(fromTemplate(templateIndex)); setError(""); }}><Plus/>新建情境</Button><Button variant="outline" disabled={busy} onClick={() => setReload((value) => value + 1)}><RefreshCw/>重新读取</Button></div>
+    <div className={styles.toolbar}><label>选择模板<NativeSelect value={templateIndex} disabled={busy} onChange={(event) => setTemplateIndex(Number(event.target.value))}>{dialogueTemplates.map((item, index) => <option key={item.title} value={index}>{item.title}</option>)}</NativeSelect></label><Button variant="outline" disabled={busy} onClick={() => { setDraft(fromTemplate(templateIndex, catalog?.classes.some((item) => item.id === classId) ? classId : catalog?.classes[0]?.id ?? "")); setError(""); }}><Plus/>新建情境</Button><Button variant="outline" disabled={busy} onClick={() => setReload((value) => value + 1)}><RefreshCw/>重新读取</Button></div>
     {error && <p className={styles.error} role="alert">{error}</p>}
     {!catalog ? <p role="status">正在读取班级与情境…</p> : !catalog.classes.length ? <EmptyState title="先创建一个教学班" description="情境按班级发布。请先到班级管理创建班级并加入学生。"/> : <div className={styles.layout}>
       <aside className={styles.library}><h2>已发布与已归档</h2>{scenarios.length ? scenarios.map((item) => <button key={item.id} type="button" disabled={busy} aria-pressed={draft.id === item.id} onClick={() => { setDraft(fromScenario(item)); setError(""); }}><strong>{item.title}</strong><small>{item.className} · 版本 {item.revision} · {item.status === "published" ? "已发布" : "已归档"}</small></button>) : <p>右侧模板可以直接修改后发布。</p>}</aside>
@@ -75,8 +76,8 @@ export default function TeacherDialogueScenarios({ notify }: { notify: Notify })
           <label>对话角色<Input required maxLength={60} value={draft.content.roleName} onChange={(event) => changeContent({ roleName: event.target.value })}/></label>
           <label>学生看到的情境说明<Textarea required rows={3} maxLength={1000} value={draft.content.brief} onChange={(event) => changeContent({ brief: event.target.value })}/></label>
           <label>角色开场白<Textarea required rows={2} maxLength={300} value={draft.content.opening} onChange={(event) => changeContent({ opening: event.target.value })}/></label>
-          <label className={styles.check}><input type="checkbox" checked={!!draft.content.journey} onChange={(event) => changeContent({ journey: event.target.checked ? { lessonId: journeyLesson.id, characters: availableCharacters.slice(0, 2).map((item) => item.character) } : undefined })}/>同时发布为主题闯关</label>
-          {draft.content.journey && <fieldset className={styles.goal}><legend>阅读 → 书写 → 对话</legend><label>关联课文<NativeSelect value={journeyLesson.id} onChange={(event) => { const lesson = readingLessons.find((item) => item.id === event.target.value)!; changeContent({ journey: { lessonId: lesson.id, characters: practiceCharacters.filter((item) => lesson.sentences.join("").includes(item.character)).slice(0, 2).map((item) => item.character) } }); }}>{readingLessons.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</NativeSelect></label><p className={styles.note}>选择课文中出现的 1–4 个字。学生完成词义自测、依次写完这些字后，进入当前情境对话；记录按轮次保留。</p><div className={styles.toolbar}>{availableCharacters.map((item) => <label key={item.character} className={styles.check}><input type="checkbox" checked={draft.content.journey!.characters.includes(item.character)} disabled={!draft.content.journey!.characters.includes(item.character) && draft.content.journey!.characters.length >= 4} onChange={(event) => changeContent({ journey: { lessonId: journeyLesson.id, characters: event.target.checked ? [...draft.content.journey!.characters, item.character] : draft.content.journey!.characters.filter((value) => value !== item.character) } })}/>{item.character} · {item.pinyin}</label>)}</div>{!draft.content.journey.characters.length && <p className={styles.error}>请选择至少一个练习字。</p>}</fieldset>}
+          <label className={styles.check}><input type="checkbox" checked={!!draft.content.journey} onChange={(event) => changeContent({ journey: event.target.checked ? { lessonId: journeyLesson?.id ?? availableLessons[0].id, characters: availableCharacters.slice(0, 2).map((item) => item.character) } : undefined })}/>同时发布为主题闯关</label>
+          {draft.content.journey && <fieldset className={styles.goal}><legend>阅读 → 书写 → 对话</legend><label>关联课文<NativeSelect value={draft.content.journey.lessonId} onChange={(event) => { const lesson = availableLessons.find((item) => item.id === event.target.value)!; changeContent({ journey: { lessonId: lesson.id, characters: practiceCharacters.filter((item) => lesson.sentences.join("").includes(item.character)).slice(0, 2).map((item) => item.character) } }); }}>{!journeyLesson && <option value={draft.content.journey.lessonId} disabled>原课文已不可用，请重新选择</option>}{availableLessons.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</NativeSelect></label><p className={styles.note}>选择课文中出现的 1–4 个字。学生完成词义自测、依次写完这些字后，进入当前情境对话；记录按轮次保留。</p><div className={styles.toolbar}>{availableCharacters.map((item) => <label key={item.character} className={styles.check}><input type="checkbox" checked={draft.content.journey!.characters.includes(item.character)} disabled={!draft.content.journey!.characters.includes(item.character) && draft.content.journey!.characters.length >= 4} onChange={(event) => changeContent({ journey: { lessonId: journeyLesson?.id ?? availableLessons[0].id, characters: event.target.checked ? [...draft.content.journey!.characters, item.character] : draft.content.journey!.characters.filter((value) => value !== item.character) } })}/>{item.character} · {item.pinyin}</label>)}</div>{(!draft.content.journey.characters.length || draft.content.journey.characters.some((value) => !availableCharacters.some((item) => item.character === value))) && <p className={styles.error}>原选字已不适用或尚未选择。<Button variant="ghost" type="button" onClick={() => changeContent({ journey: { lessonId: journeyLesson?.id ?? availableLessons[0].id, characters: availableCharacters.slice(0, 2).map((item) => item.character) } })}>使用当前课文的练习字</Button></p>}</fieldset>}
           <div className={styles.goalsHeading}><h3>依次练习的表达</h3><span>每轮发言最多推进一项</span></div>
           {draft.content.goals.map((goal, index) => <fieldset key={index} className={styles.goal}><legend>第 {index + 1} 项</legend>
             <label>表达目标<Input required maxLength={80} value={goal.title} onChange={(event) => changeGoal(index, { title: event.target.value })}/></label>
