@@ -104,6 +104,7 @@ test("all protected public API paths remain registered behind authentication", a
     ["GET", "/teaching-followups"], ["GET", "/trial-batches/fixture-id/report"], ["GET", "/trial-batches/fixture-id"],
     ["GET", "/trial-batches"], ["POST", "/trial-batches"], ["GET", "/trial-records/report"],
     ["POST", "/workspace/actions"], ["GET", "/workspace/audits"], ["GET", "/workspace"],
+    ["GET", "/reading/vocabulary"], ["POST", "/reading/vocabulary"],
   ];
   for (const [method, path] of endpoints) {
     const response = await f.request(`/api/v1${path}`, { method, ...(method === "POST" ? { json: { action: "create_class" } } : {}) });

@@ -276,3 +276,7 @@ export const notifications = sqliteTable("notifications", {
 export const invitations = sqliteTable("invitations", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), email: text("email").notNull(), role: text("role").notNull(), token: text("token").notNull(), status: text("status").notNull().default("pending"), invitedBy: text("invited_by").notNull(), expiresAt: text("expires_at").notNull(), createdAt: createdAt(),
 }, (table) => [index("invitations_tenant_idx").on(table.tenantId, table.createdAt), uniqueIndex("invitations_token_idx").on(table.token)]);
+
+export const studentVocabulary = sqliteTable("student_vocabulary", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), lessonId: text("lesson_id").notNull(), lessonTitle: text("lesson_title").notNull(), word: text("word").notNull(), pinyin: text("pinyin").notNull(), meaning: text("meaning").notNull(), example: text("example").notNull(), createdAt: createdAt(),
+}, (table) => [uniqueIndex("student_vocabulary_owner_idx").on(table.tenantId, table.userId, table.lessonId, table.word)]);

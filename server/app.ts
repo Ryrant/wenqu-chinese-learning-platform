@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import * as readingVocabularyEndpoint from "../app/api/v1/reading/vocabulary/route";
 import * as endpoint0 from "../app/api/v1/ability-profile/route";
 import * as endpoint1 from "../app/api/v1/ai/generate/route";
 import * as endpoint2 from "../app/api/v1/auth/change-password/route";
@@ -31,6 +32,9 @@ import * as endpoint28 from "../app/api/v1/workspace/route";
 /** 浏览器和 Node/Workers 共用同一组标准 HTTP 处理器。 */
 export function createApiApp(options: { remoteAddress?: (context: Context) => string | undefined } = {}) {
   const app = new Hono();
+  app.get("/api/v1/reading/vocabulary", (context) => readingVocabularyEndpoint.GET(context.req.raw));
+  app.post("/api/v1/reading/vocabulary", (context) => readingVocabularyEndpoint.POST(context.req.raw));
+  app.all("/api/v1/reading/vocabulary", (context) => context.json({ error: "method_not_allowed" }, 405));
   app.get("/api/v1/ability-profile", (context) => endpoint0.GET(context.req.raw));
   app.all("/api/v1/ability-profile", (context) => context.json({ error: "method_not_allowed" }, 405));
   app.post("/api/v1/ai/generate", (context) => endpoint1.POST(context.req.raw));

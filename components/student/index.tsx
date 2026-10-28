@@ -21,6 +21,7 @@ const StudentDiagnostic = lazy(() => import("./diagnostic").then(module => ({ de
 const StudentReviewCenter = lazy(() => import("./review-center").then(module => ({ default: module.StudentReviewCenter })));
 const StudentTodayPlan = lazy(() => import("./today-plan").then(module => ({ default: module.StudentTodayPlan })));
 const HanziWritingLab = lazy(() => import("./hanzi-writing-lab"));
+const ReadingWorkshop = lazy(() => import("./reading-workshop"));
 const AbilityEvidenceProfile = lazy(() => import("@/components/diagnostic-evidence").then(module => ({ default: module.AbilityEvidenceProfile })));
 const FamilyPortfolio = lazy(() => import("@/components/family/family-portfolio").then(module => ({ default: module.FamilyPortfolio })));
 const StudentCaseTimeline = lazy(() => import("@/components/learning/student-case-timeline").then(module => ({ default: module.StudentCaseTimeline })));
@@ -345,7 +346,8 @@ export default function StudentView({ nav, data, receivedAt, act, refresh, notif
     <Card><CardHeader><CardTitle>提交记录</CardTitle></CardHeader><CardContent>{recentWork()}</CardContent></Card>
   </section>}</RetainedFeature>
 <RetainedFeature active={nav === "汉字书写"}><HanziWritingLab/></RetainedFeature>
-<RetainedFeature active={nav !== "AI 课堂" && nav !== "学习任务" && nav !== "成长档案" && nav !== "汉字书写"}>{<section className={styles.page}>
+<RetainedFeature active={nav === "交互阅读"}><ReadingWorkshop notify={notify}/></RetainedFeature>
+<RetainedFeature active={nav !== "AI 课堂" && nav !== "学习任务" && nav !== "成长档案" && nav !== "汉字书写" && nav !== "交互阅读"}>{<section className={styles.page}>
     <PageHeader title={data.user.displayName + "，开始今天的学习吧"} description="从当前任务出发，一点点积累自己的中文表达。" actions={<Button variant="outline" type="button" onClick={() => navigate("成长档案")}>成长档案<ArrowRight/></Button>}/>
     {retestRefreshNotice}
     <section className={styles.stats}><StatCard label="已发布任务" value={published.length} icon={<BookOpen/>}/><StatCard label="已提交作品" value={submittedCount} icon={<FileText/>}/><StatCard label="待教师评价" value={pendingCount} icon={<CheckCheck/>}/></section>

@@ -50,6 +50,8 @@ async function identity(request: Request, db: PlatformDatabase) {
 // 全新安装直接创建当前完整结构，不执行旧数据库补列或历史数据修正。
 async function ensureCoreSchema(db: PlatformDatabase) {
   await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS student_vocabulary (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, lesson_id TEXT NOT NULL, lesson_title TEXT NOT NULL, word TEXT NOT NULL, pinyin TEXT NOT NULL, meaning TEXT NOT NULL, example TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS student_vocabulary_owner_idx ON student_vocabulary (tenant_id,user_id,lesson_id,word)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS tenants (id TEXT PRIMARY KEY, name TEXT NOT NULL, region TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL, display_name TEXT NOT NULL, locale TEXT NOT NULL DEFAULT 'zh-CN', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, password_hash TEXT, must_change_password INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', last_login_at TEXT, session_version INTEGER NOT NULL DEFAULT 0)`),
     db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email)"),
