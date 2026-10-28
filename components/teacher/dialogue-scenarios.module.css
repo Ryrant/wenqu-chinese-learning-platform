@@ -1,0 +1,28 @@
+.page { display: grid; gap: 1.5rem; min-width: 0; }
+.page > :global(.page-header) { margin-bottom: 0; }
+.toolbar, .actions, .goalsHeading { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.toolbar label { display: flex; gap: .5rem; align-items: center; font-size: .85rem; }
+.layout { display: grid; grid-template-columns: minmax(12rem, .6fr) minmax(0, 1.8fr); gap: 1.75rem; align-items: start; }
+.library { display: grid; gap: .75rem; }
+.library h2, .goalsHeading h3 { font-size: 1rem; font-weight: 600; }
+.library button { display: grid; gap: .4rem; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); text-align: left; overflow-wrap: anywhere; }
+.library button[aria-pressed="true"] { border-color: var(--primary); background: var(--accent); }
+.library button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.library button small, .library > p, .note, .fields small, .goalsHeading span { color: var(--muted-foreground); font-size: .75rem; line-height: 1.8; }
+.editor, .fields { display: grid; gap: 1.25rem; min-width: 0; }
+.fields label, .reviewSelect { display: grid; gap: .5rem; font-size: .85rem; line-height: 1.7; min-width: 0; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.goal { display: grid; gap: 1rem; border-top: 1px solid var(--border); padding-top: 1rem; min-width: 0; }
+.goal legend { padding-right: .75rem; font-size: .85rem; font-weight: 600; }
+.goal > button { justify-self: start; }
+.fields .check { display: flex; align-items: center; gap: .6rem; }
+.check input { accent-color: var(--primary); width: 1rem; height: 1rem; }
+.error { color: var(--destructive); font-size: .85rem; line-height: 1.8; }
+.reviews { display: grid; gap: 1.25rem; padding-top: 1.75rem; border-top: 1px solid var(--border); }
+.reviewLayout { display: grid; grid-template-columns: minmax(12rem, .7fr) minmax(0, 1.7fr); gap: 1.5rem; align-items: start; }
+.reviewLayout > div:first-child { display: grid; gap: 1rem; }
+.reviewLayout h3 { font-size: 1rem; font-weight: 600; }
+.reviewLayout > div > p { color: var(--muted-foreground); font-size: .85rem; line-height: 1.8; }
+.reviewSelect select { width: 100%; }
+@media (max-width: 900px) { .layout, .reviewLayout { grid-template-columns: minmax(0, 1fr); } .library { grid-template-columns: repeat(2, minmax(0, 1fr)); } .library h2 { grid-column: 1 / -1; } }
+@media (max-width: 600px) { .pair, .library { grid-template-columns: minmax(0, 1fr); } .toolbar, .toolbar label { align-items: stretch; } .toolbar label { width: 100%; } }

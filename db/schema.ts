@@ -280,3 +280,11 @@ export const invitations = sqliteTable("invitations", {
 export const studentVocabulary = sqliteTable("student_vocabulary", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), lessonId: text("lesson_id").notNull(), lessonTitle: text("lesson_title").notNull(), word: text("word").notNull(), pinyin: text("pinyin").notNull(), meaning: text("meaning").notNull(), example: text("example").notNull(), createdAt: createdAt(),
 }, (table) => [uniqueIndex("student_vocabulary_owner_idx").on(table.tenantId, table.userId, table.lessonId, table.word)]);
+
+export const dialogueScenarios = sqliteTable("dialogue_scenarios", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(), title: text("title").notNull(), contentJson: text("content_json").notNull(), status: text("status").notNull().default("published"), revision: integer("revision").notNull().default(1), createdBy: text("created_by").notNull(), createdAt: createdAt(), updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("dialogue_scenarios_class_idx").on(table.tenantId, table.classId, table.status)]);
+
+export const dialogueSessions = sqliteTable("dialogue_sessions", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), classId: text("class_id").notNull(), scenarioId: text("scenario_id").notNull(), snapshotJson: text("snapshot_json").notNull(), turnsJson: text("turns_json").notNull(), step: integer("step").notNull().default(0), hintCount: integer("hint_count").notNull().default(0), revision: integer("revision").notNull().default(1), pendingRequestId: text("pending_request_id"), pendingText: text("pending_text"), pendingAt: text("pending_at"), createdAt: createdAt(), updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("dialogue_sessions_owner_idx").on(table.tenantId, table.userId, table.createdAt), index("dialogue_sessions_class_idx").on(table.tenantId, table.classId, table.createdAt)]);

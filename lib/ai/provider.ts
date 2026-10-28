@@ -2,13 +2,14 @@ import { createOpenAiProvider } from "./openai-provider";
 import { createTemplateProvider } from "./template-provider";
 import type { RetrievedChunk } from "../retrieval";
 
-export type AiPurpose = "tutor" | "lesson" | "review";
+export type AiPurpose = "tutor" | "lesson" | "review" | "dialogue";
 export type AiGenerationInput = {
   purpose: AiPurpose;
   prompt: string;
   level?: string;
   role: "student" | "teacher" | "guardian" | "admin";
   contextChunks: RetrievedChunk[];
+  signal?: AbortSignal;
 };
 export type AiGenerationResult = {
   text: string;

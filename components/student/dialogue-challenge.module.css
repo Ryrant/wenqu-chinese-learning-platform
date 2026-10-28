@@ -1,0 +1,27 @@
+.page { display: grid; gap: 1.5rem; min-width: 0; }
+.page > :global(.page-header) { margin-bottom: 0; }
+.toolbar, .toolbar > div { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.toolbar { justify-content: space-between; }
+.toolbar label { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; font-size: .85rem; }
+.layout { display: grid; grid-template-columns: minmax(13rem, .7fr) minmax(0, 1.7fr); gap: 1.5rem; align-items: start; }
+.context { display: grid; gap: 1.25rem; padding: 1rem 0; }
+.context > h2 { font-size: 1.4rem; line-height: 1.5; font-weight: 600; }
+.context > p { font-size: .9rem; line-height: 1.9; }
+.context > small { color: var(--muted-foreground); font-size: .75rem; line-height: 1.8; }
+.context > ol { display: grid; gap: .75rem; font-size: .9rem; line-height: 1.8; }
+.context .note, .note { color: var(--muted-foreground); font-size: .8rem; line-height: 1.9; }
+.conversation { min-width: 0; border: 1px solid var(--border); border-radius: .875rem; background: var(--card); overflow: hidden; }
+.roundHeading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); }
+.roundHeading h2 { font-size: 1rem; font-weight: 550; }
+.roundHeading label { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; font-size: .75rem; }
+.answer { display: grid; gap: .75rem; padding: 1.25rem; border-top: 1px solid var(--border); }
+.answer label { display: grid; gap: .6rem; font-size: .85rem; font-weight: 550; }
+.answer > div { display: flex; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.conversation > .note { padding: .5rem 1.25rem; }
+.finished { display: grid; justify-items: start; gap: 1rem; padding: 1.25rem; border-top: 1px solid var(--border); font-size: .85rem; line-height: 1.9; }
+.intro { display: grid; justify-items: start; gap: 1rem; padding: 2rem; min-height: 18rem; align-content: center; }
+.intro h2 { font-size: 1.25rem; font-weight: 550; }
+.intro p { font-size: .9rem; line-height: 1.9; color: var(--muted-foreground); }
+.error { padding: 1rem; background: var(--muted); border-radius: var(--radius); font-size: .85rem; line-height: 1.9; }
+@media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr); gap: 1rem; } }
+@media (max-width: 600px) { .toolbar label, .toolbar select { width: 100%; } .answer, .roundHeading { padding: 1rem; } .intro { padding: 1.25rem; } }

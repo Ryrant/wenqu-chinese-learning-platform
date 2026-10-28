@@ -11,12 +11,14 @@ export function createOpenAiProvider(config: { apiKey?: string; model?: string }
       const context = input.contextChunks.map((chunk, index) => `[${index + 1}] ${chunk.title}\n${chunk.content}`).join("\n\n");
       const response = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
+        signal: input.signal,
         headers: {
           "content-type": "application/json",
           authorization: `Bearer ${config.apiKey}`,
         },
         body: JSON.stringify({
           model,
+          ...(input.purpose === "dialogue" ? { store: false } : {}),
           input: [
             { role: "system", content: "你是华文教学助手。只能依据给定来源回答。输出必须包含可追溯引用编号。找不到依据时说明无法回答。" },
             { role: "user", content: `用途：${input.purpose}\n水平：${input.level ?? "A2"}\n问题：${input.prompt}\n\n来源：\n${context}` },
