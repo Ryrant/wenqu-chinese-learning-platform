@@ -285,6 +285,14 @@ export const dialogueScenarios = sqliteTable("dialogue_scenarios", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(), title: text("title").notNull(), contentJson: text("content_json").notNull(), status: text("status").notNull().default("published"), revision: integer("revision").notNull().default(1), createdBy: text("created_by").notNull(), createdAt: createdAt(), updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("dialogue_scenarios_class_idx").on(table.tenantId, table.classId, table.status)]);
 
+export const practiceRecords = sqliteTable("practice_records", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), kind: text("kind").notNull(), referenceId: text("reference_id").notNull(), journeyRunId: text("journey_run_id"), title: text("title").notNull(), snapshotJson: text("snapshot_json").notNull(), payloadJson: text("payload_json").notNull(), resultJson: text("result_json").notNull(), createdAt: createdAt(),
+}, (table) => [index("practice_records_owner_idx").on(table.tenantId, table.userId, table.kind, table.createdAt), index("practice_records_journey_idx").on(table.tenantId, table.userId, table.journeyRunId)]);
+
+export const journeyRuns = sqliteTable("journey_runs", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), scenarioId: text("scenario_id").notNull(), classId: text("class_id").notNull(), snapshotJson: text("snapshot_json").notNull(), dialogueSessionId: text("dialogue_session_id").notNull(), stage: integer("stage").notNull().default(0), createdAt: createdAt(),
+}, (table) => [index("journey_runs_owner_idx").on(table.tenantId, table.userId, table.createdAt), uniqueIndex("journey_runs_dialogue_idx").on(table.dialogueSessionId)]);
+
 export const dialogueSessions = sqliteTable("dialogue_sessions", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), userId: text("user_id").notNull(), classId: text("class_id").notNull(), scenarioId: text("scenario_id").notNull(), snapshotJson: text("snapshot_json").notNull(), turnsJson: text("turns_json").notNull(), step: integer("step").notNull().default(0), hintCount: integer("hint_count").notNull().default(0), revision: integer("revision").notNull().default(1), pendingRequestId: text("pending_request_id"), pendingText: text("pending_text"), pendingAt: text("pending_at"), createdAt: createdAt(), updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("dialogue_sessions_owner_idx").on(table.tenantId, table.userId, table.createdAt), index("dialogue_sessions_class_idx").on(table.tenantId, table.classId, table.createdAt)]);

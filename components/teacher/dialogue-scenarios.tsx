@@ -9,6 +9,8 @@ import { DialogueGoals, DialogueTranscript } from "@/components/learning/dialogu
 import { dialogueErrorMessage, dialogueTemplates, type DialogueCatalog, type DialogueContent, type DialogueGoal, type DialogueScenario } from "@/lib/dialogue-types";
 import { postJson, requestJson } from "@/lib/workspace/api";
 import type { Notify } from "@/lib/platform-types";
+import { readingLessons } from "@/lib/reading-lessons";
+import { practiceCharacters } from "@/lib/hanzi-practice";
 import styles from "./dialogue-scenarios.module.css";
 
 type Draft = { id: string; revision: number; title: string; classId: string; content: DialogueContent };
@@ -17,8 +19,8 @@ function fromTemplate(index: number): Draft {
   return { id: crypto.randomUUID(), revision: 0, title: template.title, classId: "", content: structuredClone(template.content) };
 }
 function fromScenario(scenario: DialogueScenario): Draft {
-  const { roleName, brief, opening, goals, aiEnabled } = scenario;
-  return { id: scenario.id, revision: scenario.revision, title: scenario.title, classId: scenario.classId, content: structuredClone({ roleName, brief, opening, goals, aiEnabled }) };
+  const { roleName, brief, opening, goals, aiEnabled, journey } = scenario;
+  return { id: scenario.id, revision: scenario.revision, title: scenario.title, classId: scenario.classId, content: structuredClone({ roleName, brief, opening, goals, aiEnabled, ...(journey ? { journey } : {}) }) };
 }
 
 export default function TeacherDialogueScenarios({ notify }: { notify: Notify }) {
@@ -42,6 +44,8 @@ export default function TeacherDialogueScenarios({ notify }: { notify: Notify })
   const current = scenarios.find((item) => item.id === draft.id);
   const classId = draft.classId || catalog?.classes[0]?.id || "";
   const review = catalog?.sessions.find((item) => item.id === reviewId) ?? catalog?.sessions[0];
+  const journeyLesson = readingLessons.find((item) => item.id === draft.content.journey?.lessonId) ?? readingLessons[0];
+  const availableCharacters = practiceCharacters.filter((item) => journeyLesson.sentences.join("").includes(item.character));
   function changeContent(patch: Partial<DialogueContent>) { setDraft({ ...draft, content: { ...draft.content, ...patch } }); }
   function changeGoal(index: number, patch: Partial<DialogueGoal>) { changeContent({ goals: draft.content.goals.map((goal, at) => at === index ? { ...goal, ...patch } : goal) }); }
   async function perform(action: "publish" | "archive") {
@@ -71,6 +75,8 @@ export default function TeacherDialogueScenarios({ notify }: { notify: Notify })
           <label>对话角色<Input required maxLength={60} value={draft.content.roleName} onChange={(event) => changeContent({ roleName: event.target.value })}/></label>
           <label>学生看到的情境说明<Textarea required rows={3} maxLength={1000} value={draft.content.brief} onChange={(event) => changeContent({ brief: event.target.value })}/></label>
           <label>角色开场白<Textarea required rows={2} maxLength={300} value={draft.content.opening} onChange={(event) => changeContent({ opening: event.target.value })}/></label>
+          <label className={styles.check}><input type="checkbox" checked={!!draft.content.journey} onChange={(event) => changeContent({ journey: event.target.checked ? { lessonId: journeyLesson.id, characters: availableCharacters.slice(0, 2).map((item) => item.character) } : undefined })}/>同时发布为主题闯关</label>
+          {draft.content.journey && <fieldset className={styles.goal}><legend>阅读 → 书写 → 对话</legend><label>关联课文<NativeSelect value={journeyLesson.id} onChange={(event) => { const lesson = readingLessons.find((item) => item.id === event.target.value)!; changeContent({ journey: { lessonId: lesson.id, characters: practiceCharacters.filter((item) => lesson.sentences.join("").includes(item.character)).slice(0, 2).map((item) => item.character) } }); }}>{readingLessons.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</NativeSelect></label><p className={styles.note}>选择课文中出现的 1–4 个字。学生完成词义自测、依次写完这些字后，进入当前情境对话；记录按轮次保留。</p><div className={styles.toolbar}>{availableCharacters.map((item) => <label key={item.character} className={styles.check}><input type="checkbox" checked={draft.content.journey!.characters.includes(item.character)} disabled={!draft.content.journey!.characters.includes(item.character) && draft.content.journey!.characters.length >= 4} onChange={(event) => changeContent({ journey: { lessonId: journeyLesson.id, characters: event.target.checked ? [...draft.content.journey!.characters, item.character] : draft.content.journey!.characters.filter((value) => value !== item.character) } })}/>{item.character} · {item.pinyin}</label>)}</div>{!draft.content.journey.characters.length && <p className={styles.error}>请选择至少一个练习字。</p>}</fieldset>}
           <div className={styles.goalsHeading}><h3>依次练习的表达</h3><span>每轮发言最多推进一项</span></div>
           {draft.content.goals.map((goal, index) => <fieldset key={index} className={styles.goal}><legend>第 {index + 1} 项</legend>
             <label>表达目标<Input required maxLength={80} value={goal.title} onChange={(event) => changeGoal(index, { title: event.target.value })}/></label>

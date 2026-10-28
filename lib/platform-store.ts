@@ -50,6 +50,12 @@ async function identity(request: Request, db: PlatformDatabase) {
 // 全新安装直接创建当前完整结构，不执行旧数据库补列或历史数据修正。
 async function ensureCoreSchema(db: PlatformDatabase) {
   await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS practice_records (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, reference_id TEXT NOT NULL, journey_run_id TEXT, title TEXT NOT NULL, snapshot_json TEXT NOT NULL, payload_json TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS practice_records_owner_idx ON practice_records (tenant_id,user_id,kind,created_at)"),
+    db.prepare("CREATE INDEX IF NOT EXISTS practice_records_journey_idx ON practice_records (tenant_id,user_id,journey_run_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS journey_runs (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, scenario_id TEXT NOT NULL, class_id TEXT NOT NULL, snapshot_json TEXT NOT NULL, dialogue_session_id TEXT NOT NULL, stage INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS journey_runs_owner_idx ON journey_runs (tenant_id,user_id,created_at)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS journey_runs_dialogue_idx ON journey_runs (dialogue_session_id)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS dialogue_scenarios (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, class_id TEXT NOT NULL, title TEXT NOT NULL, content_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'published', revision INTEGER NOT NULL DEFAULT 1, created_by TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS dialogue_scenarios_class_idx ON dialogue_scenarios (tenant_id,class_id,status)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS dialogue_sessions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, class_id TEXT NOT NULL, scenario_id TEXT NOT NULL, snapshot_json TEXT NOT NULL, turns_json TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0, hint_count INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 1, pending_request_id TEXT, pending_text TEXT, pending_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -220,7 +226,7 @@ export async function platformContext(request: Request, requiredRole?: PlatformR
 
 export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
-  const status = ["dialogue_turn_pending", "dialogue_turn_conflict", "dialogue_session_changed", "dialogue_scenario_changed", "dialogue_scenario_unavailable", "family_feedback_response_unavailable", "family_response_id_conflict", "family_response_source_changed", "family_response_already_voided", "trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
+  const status = ["practice_record_conflict", "journey_unavailable", "journey_stage_locked", "dialogue_turn_pending", "dialogue_turn_conflict", "dialogue_session_changed", "dialogue_scenario_changed", "dialogue_scenario_unavailable", "family_feedback_response_unavailable", "family_response_id_conflict", "family_response_source_changed", "family_response_already_voided", "trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
     ? 401
     : message === "forbidden" || message === "account_access_denied" || message === "password_change_required"
       ? 403

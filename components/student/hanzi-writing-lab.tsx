@@ -4,13 +4,15 @@ import { ArrowRight, Check, Lightbulb, Play, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/workspace/workspace-ui";
 import { practiceCharacters, type PracticeCharacter } from "@/lib/hanzi-practice";
+import { postJson, requestJson } from "@/lib/workspace/api";
+import { practiceError, type PracticeHistory, type PracticeRecord, type WritingResult } from "@/lib/practice-types";
 import styles from "./hanzi-writing-lab.module.css";
 
 type Mode = "trace" | "recall";
 type Phase = "loading" | "writing" | "playing" | "ready" | "complete" | "error";
 
 function WritingBoard({ item, onComplete, onNext }: {
-  item: PracticeCharacter; onComplete: (character: string) => void; onNext: () => void;
+  item: PracticeCharacter; onComplete: (character: string, result: WritingResult) => void; onNext: () => void;
 }) {
   const [mode, setMode] = useState<Mode>("trace");
   const [phase, setPhase] = useState<Phase>("loading");
@@ -22,6 +24,8 @@ function WritingBoard({ item, onComplete, onNext }: {
   const target = useRef<HTMLDivElement>(null);
   const writer = useRef<HanziWriter | null>(null);
   const generation = useRef(0);
+  const hints = useRef(0);
+  const startedAt = useRef(0);
   const statusId = useId();
 
   useEffect(() => {
@@ -35,6 +39,7 @@ function WritingBoard({ item, onComplete, onNext }: {
     setMistakes(0);
     setStrokeCount(0);
     setMessage("正在准备笔顺…");
+    hints.current = 0;
 
     // 复用实例；切换字和练习方式时不重复注册书写监听器。
     if (!writer.current) {
@@ -81,6 +86,7 @@ function WritingBoard({ item, onComplete, onNext }: {
       else await instance.hideOutline({ duration: 0 });
       if (cancelled) return;
       setPhase("writing");
+      startedAt.current = Date.now();
       setMessage(mode === "trace" ? "沿着轮廓，按笔顺写下第一笔。" : "不看轮廓，试着按笔顺写出这个字。需要帮助时可以看提示。");
       await instance.quiz({
         onCorrectStroke: (data) => {
@@ -99,7 +105,7 @@ function WritingBoard({ item, onComplete, onNext }: {
           setPhase("complete");
           setMistakes(data.totalMistakes);
           setMessage(`“${item.character}”字写完了！${data.totalMistakes ? "可以再练一次，让笔顺更熟悉。" : "每一笔都顺利完成了。"}`);
-          onComplete(item.character);
+          onComplete(item.character, { mode, mistakes: data.totalMistakes, hints: hints.current, elapsedMs: Math.min(3600000, Math.max(0, Date.now() - startedAt.current)) });
         },
       });
     }
@@ -141,6 +147,7 @@ function WritingBoard({ item, onComplete, onNext }: {
 
   async function hint() {
     const current = generation.current;
+    hints.current++;
     try { await writer.current?.highlightStroke(written); }
     catch {
       if (generation.current === current) setMessage("提示暂时不可用，可以重新练习，或先看笔顺演示。");
@@ -182,31 +189,58 @@ function WritingBoard({ item, onComplete, onNext }: {
   </section>;
 }
 
-export default function HanziWritingLab() {
-  const [selected, setSelected] = useState<PracticeCharacter>(practiceCharacters[0]);
+type CompletedWriting = { id: string; character: string; result: WritingResult };
+export default function HanziWritingLab({ characters = practiceCharacters, journeyRunId, onSaved, embedded = false }: { characters?: readonly PracticeCharacter[]; journeyRunId?: string; onSaved?: () => void; embedded?: boolean }) {
+  const [selected, setSelected] = useState<PracticeCharacter>(characters[0]);
   const [completed, setCompleted] = useState<string[]>([]);
-  const complete = useCallback((character: string) => {
-    setCompleted((items) => items.includes(character) ? items : [...items, character]);
-  }, []);
-  const next = () => setSelected(practiceCharacters[(practiceCharacters.indexOf(selected) + 1) % practiceCharacters.length]);
+  const [history, setHistory] = useState<PracticeRecord[]>([]);
+  const [pending, setPending] = useState<CompletedWriting | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+  const version = useRef(0);
+  useEffect(() => {
+    const controller = new AbortController(); const current = ++version.current;
+    void requestJson<PracticeHistory>(`/api/v1/practice?kind=writing${journeyRunId ? `&journeyRunId=${journeyRunId}` : ""}`, { signal: controller.signal, cache: "no-store" }).then((data) => {
+      if (!controller.signal.aborted && current === version.current) { setCompleted(data.writtenCharacters); setHistory(data.records); }
+    }).catch(() => { if (!controller.signal.aborted && current === version.current) setError("历史书写记录暂时没有读取成功，可以重新读取，也可以继续练习。"); });
+    return () => controller.abort();
+  }, [journeyRunId, reload]);
+  const save = useCallback(async (entry: CompletedWriting) => {
+    version.current++; setSaving(true); setError("");
+    try {
+      const data = await postJson<{ record: PracticeRecord }>("/api/v1/practice", { id: entry.id, kind: "writing", referenceId: entry.character, journeyRunId, ...entry.result });
+      setCompleted((items) => items.includes(entry.character) ? items : [...items, entry.character]);
+      setHistory((items) => [data.record, ...items.filter((item) => item.id !== data.record.id)].slice(0, 30));
+      setPending((current) => current?.id === entry.id ? null : current); onSaved?.();
+    } catch (reason) { setError(practiceError(reason)); }
+    finally { setSaving(false); }
+  }, [journeyRunId, onSaved]);
+  const complete = useCallback((character: string, result: WritingResult) => {
+    const entry = { id: crypto.randomUUID(), character, result }; setPending(entry); void save(entry);
+  }, [save]);
+  const next = () => setSelected(characters[(characters.indexOf(selected) + 1) % characters.length]);
 
   return <section className={styles.page}>
-    <PageHeader title="汉字书写实验室" description="看清一笔一画，把汉字写进自己的记忆。"/>
+    {!embedded && <PageHeader title="汉字书写实验室" description="看清一笔一画，把汉字写进自己的记忆。"/>}
+    {error && <div role="alert"><p>{error}</p>{pending ? <Button variant="outline" disabled={saving} onClick={() => void save(pending)}>重试保存本轮记录</Button> : <Button variant="outline" onClick={() => setReload((value) => value + 1)}>重新读取记录</Button>}</div>}
+    {saving && <p role="status">正在保存本轮书写记录…</p>}
     <div className={styles.layout}>
       <aside className={styles.selection} aria-label="练习字表">
         <div className={styles.selectionHeading}><h2>今天，写好一个字</h2><p>选一个字，从描红开始。</p></div>
         <div className={styles.characters}>
-          {practiceCharacters.map((item) => <button key={item.character} type="button" aria-pressed={selected.character === item.character} aria-label={`${item.character}，${item.pinyin}${completed.includes(item.character) ? "，本次已完成练习" : ""}`} onClick={() => setSelected(item)}>
+          {characters.map((item) => <button key={item.character} type="button" disabled={saving || !!pending} aria-pressed={selected.character === item.character} aria-label={`${item.character}，${item.pinyin}${completed.includes(item.character) ? "，已有练习记录" : ""}`} onClick={() => setSelected(item)}>
             <span lang="zh-CN">{item.character}</span><small>{item.pinyin}</small>{completed.includes(item.character) && <Check aria-hidden="true"/>}
           </button>)}
         </div>
         <div className={styles.wordNote}>
           <p className={styles.pinyin}>{selected.pinyin}</p><h3>{selected.word}</h3><p>{selected.example}</p>
         </div>
-        <p className={styles.sessionNote}>{completed.length ? `本次已练完 ${completed.length} 个字，换一个继续吧。` : "鼠标或手指都可以写，按笔顺慢慢来。"}</p>
+        <p className={styles.sessionNote}>{completed.length ? `已有 ${characters.filter((item) => completed.includes(item.character)).length} 个字的保存记录，换一个继续吧。` : "鼠标或手指都可以写，按笔顺慢慢来。"}</p>
       </aside>
-      <WritingBoard item={selected} onComplete={complete} onNext={next}/>
+      <div inert={saving || !!pending}><WritingBoard item={selected} onComplete={complete} onNext={next}/></div>
     </div>
-    <footer className={styles.footer}><p>这里只记录本次页面中的练习，刷新后重新开始。逐笔反馈用于练习，不作为课程成绩。</p><a href="/hanzi/NOTICE.txt" target="_blank" rel="noreferrer">笔顺数据来源与许可</a></footer>
+    {!embedded && history.length > 0 && <section className={styles.history} aria-label="书写练习记录"><h2>最近的书写练习</h2>{history.slice(0, 6).map((item) => <p key={item.id}><strong>{item.title}</strong> · {(item.result as WritingResult).mode === "trace" ? "描红" : "独立书写"} · 重试 {(item.result as WritingResult).mistakes} 次 · 主动提示 {(item.result as WritingResult).hints} 次 · 本轮 {Math.max(1, Math.round((item.result as WritingResult).elapsedMs / 1000))} 秒</p>)}</section>}
+    <footer className={styles.footer}><p>练习结果保存到本人账号，刷新后可回看。逐笔反馈为练习记录，不作为课程成绩。</p><a href="/hanzi/NOTICE.txt" target="_blank" rel="noreferrer">笔顺数据来源与许可</a></footer>
   </section>;
 }

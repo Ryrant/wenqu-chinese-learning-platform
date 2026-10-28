@@ -23,7 +23,7 @@ const navigation = Object.fromEntries(Object.entries(workspacePages).map(([role,
 type Toast = { title: string; detail: string; tone: "success" | "error" } | null;
 
 const navigationIcons: Record<string, LucideIcon> = {
-  学习总览: LayoutDashboard, "AI 课堂": MessageCircle, 学习任务: ClipboardList, 汉字书写: PenLine, 交互阅读: BookOpen, 情境闯关: MessageCircle, 成长档案: ChartNoAxesCombined,
+  学习总览: LayoutDashboard, "AI 课堂": MessageCircle, 学习任务: ClipboardList, 主题闯关: GraduationCap, 汉字书写: PenLine, 交互阅读: BookOpen, 情境闯关: MessageCircle, 成长档案: ChartNoAxesCombined,
   教学总览: LayoutDashboard, 来源化备课: BookOpen, 班级管理: Users, 情境任务: MessageCircle, 作业批阅: FileText,
   孩子概览: LayoutDashboard, 成长报告: ChartNoAxesCombined, 家庭任务: CalendarCheck, 授权管理: ShieldCheck,
   机构总览: LayoutDashboard, 平台设置: Settings, 内容中心: FolderOpen, 知识检索: Search, 成员管理: Users, 权限审计: ClipboardList,

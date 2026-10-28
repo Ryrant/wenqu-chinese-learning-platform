@@ -1,9 +1,9 @@
 export type DialogueGoal = { title: string; expressions: string[]; prompt: string; response: string; hint: string };
-export type DialogueContent = { roleName: string; brief: string; opening: string; goals: DialogueGoal[]; aiEnabled: boolean };
+export type DialogueContent = { roleName: string; brief: string; opening: string; goals: DialogueGoal[]; aiEnabled: boolean; journey?: { lessonId: string; characters: string[] } };
 export type DialogueScenario = DialogueContent & { id: string; title: string; classId: string; className: string; authorName: string; revision: number; status: "published" | "archived" };
 export type PublicDialogueScenario = Omit<DialogueScenario, "goals"> & { goals: Array<{ title: string }> };
 export type DialogueTurn = { id: string; kind: "student" | "role" | "hint"; text: string; step: number; at: string; provider?: "script" | "openai" | "fallback"; model?: string; matchedExpression?: string };
-export type DialogueSession = { id: string; scenario: PublicDialogueScenario; turns: DialogueTurn[]; step: number; hintCount: number; revision: number; complete: boolean; pending: boolean; canContinue: boolean; studentName: string; createdAt: string };
+export type DialogueSession = { id: string; scenario: PublicDialogueScenario; turns: DialogueTurn[]; step: number; hintCount: number; revision: number; complete: boolean; pending: boolean; canContinue: boolean; journeyLocked?: boolean; studentName: string; createdAt: string };
 export type DialogueCatalog = { view: "student" | "teacher"; classes: Array<{ id: string; name: string }>; scenarios: Array<DialogueScenario | PublicDialogueScenario>; sessions: DialogueSession[]; aiConfigured: boolean };
 
 export const dialogueTemplates: Array<{ title: string; content: DialogueContent }> = [

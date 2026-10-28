@@ -69,6 +69,8 @@
   .controls button { font-size: .8rem; padding-inline: .75rem; }
   .feedback { min-height: 5.5rem; }
 }
+.history { display: grid; gap: .75rem; padding-top: 1.5rem; border-top: 1px solid var(--border); font-size: .85rem; line-height: 1.8; }
+.history h2 { font-size: 1.1rem; font-weight: 600; }
 @media (prefers-reduced-motion: reduce) {
   .characters button, .progress span { transition: none; }
 }

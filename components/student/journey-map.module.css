@@ -1,0 +1,28 @@
+.page { display: grid; gap: 1.5rem; min-width: 0; }
+.page > :global(.page-header) { margin-bottom: 0; }
+.toolbar, .toolbar > div, .heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.toolbar label, .heading label { display: grid; gap: .5rem; min-width: 0; max-width: 100%; font-size: .85rem; }
+.toolbar :global([data-slot="native-select-wrapper"]), .heading :global([data-slot="native-select-wrapper"]) { max-width: 100%; }
+.heading h2, .intro h2, .summary h2 { font-size: 1.25rem; line-height: 1.7; font-weight: 600; }
+.heading p, .intro p, .summary p { color: var(--muted-foreground); font-size: .85rem; line-height: 1.9; }
+.map { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; padding: 1.5rem 0; border-block: 1px solid var(--border); }
+.map button { display: flex; align-items: center; gap: .8rem; width: 100%; padding: .65rem; text-align: left; border-radius: var(--radius); transition: background-color .2s ease-out; }
+.map button:hover:enabled { background: var(--accent); }
+.map button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.map button > span { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; flex-shrink: 0; }
+.map button svg { width: 1.15rem; height: 1.15rem; }
+.map button > div { display: grid; gap: .35rem; }
+.map strong { font-size: .95rem; }
+.map small { color: var(--muted-foreground); font-size: .75rem; line-height: 1.6; }
+.map li[data-complete="true"] button > span, .map li[data-current="true"] button > span { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.map li[data-current="true"] strong { color: var(--primary); }
+.activity { min-width: 0; }
+.intro { display: grid; gap: 1rem; justify-items: start; padding: 2rem 0; }
+.summary { display: grid; gap: 1.25rem; padding: 1.5rem; border: 1px solid var(--border); border-radius: .875rem; background: var(--card); }
+.summary dl { display: grid; gap: 1rem; }
+.summary dl > div { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: .75rem; line-height: 1.9; font-size: .9rem; }
+.summary dt { color: var(--muted-foreground); }
+.error { color: var(--destructive); font-size: .85rem; line-height: 1.9; }
+.page > details > summary { cursor: pointer; padding-block: 1rem; font-size: .9rem; }
+@media (max-width: 700px) { .map { grid-template-columns: minmax(0, 1fr); gap: .25rem; padding-block: .75rem; } .toolbar, .toolbar > div { justify-content: start; } .toolbar > label { width: 100%; } .summary { padding: 1rem; } .summary dl > div { grid-template-columns: minmax(0, 1fr); gap: .2rem; } }
+@media (prefers-reduced-motion: reduce) { .map button { transition: none; } }
