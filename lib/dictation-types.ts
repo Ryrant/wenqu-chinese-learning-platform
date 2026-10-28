@@ -2,8 +2,8 @@ import type { ReadingLesson } from "./reading-lessons";
 
 export type DictationDifference = { kind: "same" | "missing" | "extra" | "different"; expected: string; actual: string };
 export type DictationAnswer = { requestId: string; index: number; expected: string; actual: string; correct: boolean; differences: DictationDifference[]; playCount: number; usedReference: boolean; at: string };
-export type DictationSession = { id: string; sourceTitle: string; kind: "vocabulary" | "words" | "sentences"; revision: number; total: number; index: number; complete: boolean; available: boolean; question: { id: string; speechText: string; sourceTitle: string; referenceVisible: boolean; pinyin: string } | null; answers: DictationAnswer[]; createdAt: string };
-export type DictationCatalog = { lessons: Array<Pick<ReadingLesson, "id" | "title" | "level" | "source">>; wordCount: number; active: DictationSession | null; recent: DictationSession[] };
+export type DictationSession = { id: string; sourceTitle: string; kind: "vocabulary" | "words" | "sentences"; revision: number; total: number; retryCount: number; index: number; complete: boolean; available: boolean; question: { id: string; speechText: string; sourceTitle: string; referenceVisible: boolean; pinyin: string } | null; answers: DictationAnswer[]; createdAt: string };
+export type DictationCatalog = { lessons: Array<Pick<ReadingLesson, "id" | "title" | "level" | "source">>; wordCount: number; retrySessionId: string | null; active: DictationSession | null; recent: DictationSession[] };
 export function normalizeDictation(value: string) { return value.normalize("NFKC").toLowerCase().replace(/[\s\p{P}]/gu, ""); }
 export function compareDictation(expected: string, actual: string): { correct: boolean; differences: DictationDifference[] } {
   const target = Array.from(normalizeDictation(expected)); const input = Array.from(normalizeDictation(actual));

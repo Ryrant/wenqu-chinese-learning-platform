@@ -1,4 +1,8 @@
 import type { ReadingLesson } from "./reading-lessons";
+import type { EvidencePlanItem } from "./learning-plan-types";
+import type { LearningAnalyticsState } from "./learning-analytics";
+
+export type PracticeOverview = LearningAnalyticsState & { nextActions: EvidencePlanItem[] };
 
 export type WritingResult = { mode: "trace" | "recall"; mistakes: number; hints: number; elapsedMs: number };
 export type ReadingResult = { correct: number; total: number; answers: Array<{ word: string; selected: string; meaning: string; correct: boolean }> };

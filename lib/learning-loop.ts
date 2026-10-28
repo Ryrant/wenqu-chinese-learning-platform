@@ -1,8 +1,8 @@
 export type DiagnosticEvidence = { objectiveId: string; isCorrect: boolean };
 export type ObjectiveScore = { score: number; evidenceCount: number };
 export type RubricDimension = { name: string; weight: number };
-export type LearningPlanKind = "teacher" | "review" | "family" | "assignment" | "sequence";
-export type LearningPlanItem = { id: string; kind: LearningPlanKind; dueAt?: string | null; waitingReview?: boolean; supportMatch?: boolean };
+export type LearningPlanKind = "teacher" | "review" | "family" | "assignment" | "sequence" | "practice";
+export type LearningPlanItem = { id: string; kind: LearningPlanKind; dueAt?: string | null; waitingReview?: boolean; supportMatch?: boolean; practicePriority?: "resume" | "due" | "retry" };
 
 export function calculateDiagnosticScores(evidence: DiagnosticEvidence[]) {
   const totals: Record<string, { correct: number; count: number }> = {};
@@ -34,6 +34,7 @@ function planPriority(item: LearningPlanItem, now: Date) {
   const due = item.dueAt ? new Date(item.dueAt).getTime() : Number.POSITIVE_INFINITY;
   const daysUntilDue = (due - now.getTime()) / 86400000;
   if (item.waitingReview) return 0;
+  if (item.kind === "practice") return item.practicePriority === "resume" ? 180 : item.practicePriority === "due" ? 170 : 110;
   if (item.kind === "teacher" || item.kind === "sequence") return 500;
   if (item.kind === "review") return !item.dueAt || daysUntilDue <= 1 ? 400 : 140;
   if (item.supportMatch) return 350;

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import type { Role, WorkspaceSection } from "../lib/platform-types";
-import { ApiError, postJson, requestJson } from "../lib/workspace/api";
+import { ApiError, postJson, practiceSavedEvent, requestJson } from "../lib/workspace/api";
 import { sectionsChangedByAction } from "../lib/workspace/invalidation";
 import { defaultWorkspaceRole, matchWorkspaceRoute, pageSections, workspacePath, type WorkspaceRoute } from "../lib/workspace/navigation";
 import { observePageResume } from "../lib/workspace/observe-page-resume";
@@ -145,6 +145,28 @@ export function useWorkspaceController() {
     });
     return () => { active = false; stop(); };
   }, [session?.authenticated, session?.user?.mustChangePassword, rolesKey, committedRoute, desiredRoute, store, loadWorkspace, handleAccessError]);
+
+  useEffect(() => {
+    if (!session?.authenticated || session.user?.mustChangePassword) return;
+    let active = true;
+    const saved = () => {
+      if (!store.getSnapshot().data) return;
+      store.invalidate(["progress"]);
+      const route = committed.current;
+      const visible = route ? pageSections(route) : [];
+      if (!visible.includes("progress")) return;
+      const ticket = epoch.current;
+      void loadWorkspace(["progress"], { revalidate: true }, visible).then(() => {
+        if (active && ticket === epoch.current) setRefreshError("");
+      }).catch((reason) => {
+        if (!active || ticket !== epoch.current) return;
+        handleAccessError(reason);
+        setRefreshError("练习已保存，最新计划暂未读取成功；请重新读取，已有输入仍保留。");
+      });
+    };
+    window.addEventListener(practiceSavedEvent, saved);
+    return () => { active = false; window.removeEventListener(practiceSavedEvent, saved); };
+  }, [session?.authenticated, session?.user?.mustChangePassword, store, loadWorkspace, handleAccessError]);
 
   const refresh = useCallback(async (studentId?: string) => {
     const route = committed.current;

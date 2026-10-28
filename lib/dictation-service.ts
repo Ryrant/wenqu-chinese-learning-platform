@@ -24,19 +24,44 @@ function sourceGuard(context: PlatformContext, source: Source, exactRevision = f
 }
 async function ownSession(context: PlatformContext, id: string) { const row = await context.db.prepare("SELECT * FROM dictation_sessions WHERE id=? AND tenant_id=? AND user_id=?").bind(id, context.tenantId, context.userId).first<Row>(); if (!row) throw new Error("dictation_session_not_found"); return row; }
 function available(source: Source, lessons: ReadingLesson[]) { return source.kind === "vocabulary" || lessons.some((lesson) => lesson.id === source.lessonId && (lesson.source?.classId ?? "") === (source.classId ?? "")); }
-function session(row: Row, lessons: ReadingLesson[]): DictationSession {
+type RetryMetadata = { id: string; sourceJson: string; targetsJson: string; answersJson: string };
+async function retries(context: PlatformContext) {
+  // 只读取目标和对错，不复制历史原始作答；跨轮次按显式 retryOf 追踪纠正情况。
+  const rows = (await context.db.prepare("SELECT id,source_json AS sourceJson,(SELECT json_group_array(json_extract(value,'$.expected')) FROM json_each(snapshot_json)) AS targetsJson,(SELECT json_group_array(json_object('expected',json_extract(value,'$.expected'),'correct',json_extract(value,'$.correct'))) FROM json_each(json_extract(state_json,'$.answers'))) AS answersJson FROM dictation_sessions WHERE tenant_id=? AND user_id=? AND completed_at IS NOT NULL ORDER BY created_at,rowid").bind(context.tenantId, context.userId).all<RetryMetadata>()).results;
+  const roots = new Map<string, string>(); const unresolved = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const source = JSON.parse(row.sourceJson) as Source;
+    const root = source.retryOf ? roots.get(source.retryOf) ?? row.id : row.id;
+    roots.set(row.id, root);
+    const pending = unresolved.get(root) ?? new Set<string>();
+    for (const answer of JSON.parse(row.answersJson) as Array<{ expected: string; correct: boolean | number }>) {
+      const key = normalizeDictation(answer.expected);
+      if (answer.correct) pending.delete(key); else pending.add(key);
+    }
+    unresolved.set(root, pending);
+  }
+  const pending = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const group = unresolved.get(roots.get(row.id)!)!;
+    pending.set(row.id, new Set((JSON.parse(row.targetsJson) as string[]).map(normalizeDictation).filter((key) => group.has(key))));
+  }
+  return { rows, pending };
+}
+function session(row: Row, lessons: ReadingLesson[], retryCount: number): DictationSession {
   const source = JSON.parse(row.source_json) as Source; const items = JSON.parse(row.snapshot_json) as Item[]; const state = JSON.parse(row.state_json) as State;
   const item = items[state.index]; const canContinue = available(source, lessons);
-  return { id: row.id, kind: source.kind, sourceTitle: `${source.retryOf ? "错项重练 · " : ""}${source.title}`, revision: row.revision, total: items.length, index: state.index, complete: !!row.completed_at, available: canContinue,
+  return { id: row.id, kind: source.kind, sourceTitle: `${source.retryOf ? "错项重练 · " : ""}${source.title}`, revision: row.revision, total: items.length, retryCount, index: state.index, complete: !!row.completed_at, available: canContinue,
     question: item && !row.completed_at && canContinue ? { id: `${row.id}:${state.index}`, speechText: item.expected, sourceTitle: item.sourceTitle, pinyin: state.hints[state.index] ? item.pinyin : "", referenceVisible: !!state.hints[state.index] } : null, answers: state.answers, createdAt: row.created_at };
 }
 export async function readDictation(context: PlatformContext, focusId = ""): Promise<DictationCatalog> {
   practiceStudent(context);
   const catalog = await readReadingCatalog(context);
+  const retryState = await retries(context);
+  const retrySessionId = retryState.rows.toReversed().find((row) => retryState.pending.get(row.id)?.size && available(JSON.parse(row.sourceJson) as Source, catalog.lessons))?.id ?? null;
   const count = await context.db.prepare("SELECT COUNT(*) AS count FROM student_vocabulary WHERE tenant_id=? AND user_id=?").bind(context.tenantId, context.userId).first<{ count: number }>();
-  const rows = await context.db.prepare("SELECT * FROM dictation_sessions WHERE tenant_id=? AND user_id=? ORDER BY CASE WHEN completed_at IS NULL THEN 0 WHEN id=? THEN 1 ELSE 2 END,created_at DESC,rowid DESC LIMIT 10").bind(context.tenantId, context.userId, focusId).all<Row>();
-  const recent = rows.results.map((row) => session(row, catalog.lessons));
-  return { lessons: catalog.lessons.map(({ id, title, level, source }) => ({ id, title, level, ...(source ? { source } : {}) })), wordCount: count?.count ?? 0, active: recent.find((item) => !item.complete) ?? null, recent };
+  const rows = await context.db.prepare("SELECT * FROM dictation_sessions WHERE tenant_id=? AND user_id=? ORDER BY CASE WHEN completed_at IS NULL THEN 0 WHEN id=? THEN 1 WHEN id=? THEN 2 ELSE 3 END,created_at DESC,rowid DESC LIMIT 10").bind(context.tenantId, context.userId, focusId, retrySessionId).all<Row>();
+  const recent = rows.results.map((row) => session(row, catalog.lessons, retryState.pending.get(row.id)?.size ?? 0));
+  return { lessons: catalog.lessons.map(({ id, title, level, source }) => ({ id, title, level, ...(source ? { source } : {}) })), wordCount: count?.count ?? 0, retrySessionId, active: recent.find((item) => !item.complete) ?? null, recent };
 }
 
 export async function startDictation(context: PlatformContext, body: Record<string, unknown>) {
@@ -54,8 +79,9 @@ export async function startDictation(context: PlatformContext, body: Record<stri
   let source: Source; let items: Item[];
   if (retry) {
     const parent = await ownSession(context, parentId); if (!parent.completed_at) throw new Error("invalid_dictation_incomplete");
-    const original = JSON.parse(parent.snapshot_json) as Item[]; const results = (JSON.parse(parent.state_json) as State).answers;
-    items = results.filter((answer) => !answer.correct).map((answer) => original[answer.index]);
+    const original = JSON.parse(parent.snapshot_json) as Item[];
+    const pending = (await retries(context)).pending.get(parentId) ?? new Set<string>();
+    items = original.filter((item) => pending.has(normalizeDictation(item.expected)));
     if (!items.length) throw new Error("dictation_no_mistakes");
     source = { ...JSON.parse(parent.source_json) as Source, retryOf: parentId };
   } else if (body.kind === "vocabulary") {

@@ -115,7 +115,7 @@ export default function DictationLab() {
     const key = `${question.id}:${session.revision}:${answer.trim()}:${plays[question.id] ?? 0}`; const id = requests.current.get(key) ?? crypto.randomUUID(); requests.current.set(key, id);
     void perform({ action: "answer", sessionId: session.id, requestId: id, revision: session.revision, answer: answer.trim(), playCount: plays[question.id] ?? 0 }, question.id);
   }
-  const wrong = session?.answers.filter((item) => !item.correct).length ?? 0;
+  const wrong = session?.retryCount ?? 0;
   return <section className={styles.page}>
     <PageHeader title="听写实验室" description="听一听，写下来，再对照原文找出不同。词语和短句都可以练。"/>
     <div className={styles.toolbar}>{!catalog?.active ? <><label>练习来源<NativeSelect value={kind} disabled={busy} onChange={(event) => setKind(event.target.value as typeof kind)}><option value="vocabulary">生词本词语</option><option value="words">课文重点词</option><option value="sentences">课文短句</option></NativeSelect></label>{kind !== "vocabulary" && <label>选择课文<NativeSelect value={lessonId} disabled={busy} onChange={(event) => setLessonId(event.target.value)}>{!selectedLesson && <option value={lessonId} disabled>原课文已不可用，请重新选择</option>}{catalog?.lessons.map((item) => <option key={item.id} value={item.id}>{item.title}{item.source ? ` · ${item.source.className}` : ""}</option>)}</NativeSelect></label>}<Button disabled={busy || !catalog || (kind === "vocabulary" ? !catalog.wordCount : !selectedLesson)} onClick={() => start()}>开始一轮听写<ArrowRight/></Button></> : session?.id !== catalog.active.id && <Button disabled={busy} onClick={() => setSessionId(catalog.active!.id)}>继续未完成的听写<ArrowRight/></Button>}<Button variant="outline" disabled={busy} onClick={() => setReload((value) => value + 1)}><RefreshCw/>重新读取</Button></div>

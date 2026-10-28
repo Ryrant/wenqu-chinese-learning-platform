@@ -8,5 +8,5 @@ export type PlanReference = {
 };
 export type PlanBasis = { objectiveId: string; title: string; note: string; records: PlanReference[] };
 export type EvidencePlanItem = LearningPlanItem & Record<string, unknown> & {
-  studentUserId: string; title: string; selectionReason: string; basis: PlanBasis[]; sequenceId?: string;
+  studentUserId: string; title: string; selectionReason: string; basis: PlanBasis[]; sequenceId?: string; practiceHref?: string;
 };

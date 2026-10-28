@@ -11,6 +11,7 @@ const bundle = await build({ stdin: { contents: `
   export { dialogueTemplates } from './lib/dialogue-types';
   export { readingLessons, suggestedReadingTerms, missingReadingCharacters, createReadingQuiz } from './lib/reading-lessons';
   export { compareDictation, normalizeDictation } from './lib/dictation-types';
+  export { rankLearningPlan } from './lib/learning-loop';
 `, resolveDir: fileURLToPath(new URL("../../", import.meta.url)) }, bundle: true, platform: "node", format: "esm", target: "node22", write: false });
 export const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 

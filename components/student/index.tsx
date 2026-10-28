@@ -1,5 +1,6 @@
 import { RetainedFeature } from "../workspace/retained-feature";
 import { lazy, useEffect, useEffectEvent, useRef, useState } from "react";
+import { Link } from "react-router";
 import { ProgressRing } from "../progress-ring";
 import type { Act, Notify, WorkspaceData } from "@/lib/platform-types";
 import { numberValue, stringValue } from "@/lib/platform-types";
@@ -287,6 +288,7 @@ export default function StudentView({ nav, data, receivedAt, act, refresh, notif
   };
 
   const current = assignment;
+  const nextPractice = !current && !familyTask && !sequence ? data.learningPlan.find((item) => item.practiceHref) : undefined;
   return <>
 <RetainedFeature active={nav === "AI 课堂"}>{<section className={styles.page}>
     <PageHeader title="AI 课堂" description="把学习中遇到的问题留在这里，一起寻找答案。"/>
@@ -362,10 +364,10 @@ export default function StudentView({ nav, data, receivedAt, act, refresh, notif
     <div className={styles.overviewGrid}>
       <Card className={styles.currentTask}><CardContent>
         <div className={styles.currentLabel}><span className={styles.featureIcon}><BookOpen/></span><Badge variant="secondary">继续学习</Badge></div>
-        <h2>{sequence ? sequence.title + " · " + SEQUENCE_STAGE_LABELS[sequenceStage] : stringValue(familyTask?.title ?? current?.title, "准备迎接新的任务")}</h2>
-        <p>{current ? sequence ? sequence.objectiveTitle : familyTask ? stringValue(familyTask.detail, "完成交流后，留下自己的作品。") : current.diagnostic_prompt ? stringValue(current.diagnostic_prompt) : stringValue(current.activity_type, "选择表达方式，完成后提交给老师。") : "老师发布任务后，你就可以在这里开始学习。"}</p>
+        <h2>{sequence ? sequence.title + " · " + SEQUENCE_STAGE_LABELS[sequenceStage] : stringValue(familyTask?.title ?? current?.title, nextPractice?.title ?? "准备迎接新的任务")}</h2>
+        <p>{current ? sequence ? sequence.objectiveTitle : familyTask ? stringValue(familyTask.detail, "完成交流后，留下自己的作品。") : current.diagnostic_prompt ? stringValue(current.diagnostic_prompt) : stringValue(current.activity_type, "选择表达方式，完成后提交给老师。") : nextPractice?.selectionReason ?? "老师发布任务后，你就可以在这里开始学习。"}</p>
         {published.length > 0 && targetSelector}
-        <Button type="button" onClick={() => navigate("学习任务")}>{current ? "查看任务并开始" : "查看学习任务"}<ArrowRight/></Button>
+        {nextPractice?.practiceHref ? <Button asChild><Link to={nextPractice.practiceHref}>继续这项练习<ArrowRight/></Link></Button> : <Button type="button" onClick={() => navigate("学习任务")}>{current ? "查看任务并开始" : "查看学习任务"}<ArrowRight/></Button>}
       </CardContent></Card>
       <Card className={styles.masterySummary}><CardHeader><CardTitle>我的学习进度</CardTitle></CardHeader><CardContent>
         <ProgressRing value={masteryAverage} label="平均掌握度"/>

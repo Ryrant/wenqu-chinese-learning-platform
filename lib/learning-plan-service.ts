@@ -1,4 +1,5 @@
 import { readAbilityProfile } from "./ability-profile-service";
+import { readPracticeNextActions } from "./practice-overview-service";
 import { ABILITY_LABELS, type Ability } from "./diagnostic-types";
 import { measureIntervention } from "./intervention-support";
 import { isRecommendationDue, rankLearningPlan } from "./learning-loop";
@@ -62,7 +63,7 @@ export async function readLearningPlan(context: PlatformContext, studentId: stri
     return { basis, supportMatch };
   };
   const now = new Date();
-  const candidates: EvidencePlanItem[] = [];
+  const candidates: EvidencePlanItem[] = await readPracticeNextActions(context, studentId);
   for (const item of recommendations.results) {
     const dueAt = text(item.due_at) || null;
     const family = item.source_type === "family";

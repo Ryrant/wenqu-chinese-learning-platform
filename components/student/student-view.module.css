@@ -7,8 +7,8 @@
 .currentTask p { line-height: 1.8; opacity: .8; max-width: 60ch; }
 .currentTask .field { width: 100%; max-width: 30rem; color: inherit; }
 .currentTask select { background: var(--card); color: var(--foreground); }
-.currentTask button { background: var(--card); color: var(--primary); }
-.currentTask button:hover { background: var(--secondary); }
+.currentTask :global([data-slot="button"]) { background: var(--card); color: var(--primary); }
+.currentTask :global([data-slot="button"]):hover { background: var(--secondary); }
 .currentLabel { display: flex; align-items: center; gap: .75rem; }
 .featureIcon { display: inline-flex; width: 2.75rem; height: 2.75rem; align-items: center; justify-content: center; background: var(--secondary); color: var(--primary); border-radius: .8rem; }
 .featureIcon svg { width: 1.25rem; height: 1.25rem; }

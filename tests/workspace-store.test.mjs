@@ -33,6 +33,27 @@ function controlledStore() {
   return { store, requests };
 }
 
+test("confirmed practice writes announce progress invalidation after persistence and failures do not", async (t) => {
+  const compiled = await build({ entryPoints: [fileURLToPath(new URL("../lib/workspace/api.ts", import.meta.url))], bundle: true, format: "esm", platform: "node", target: "node22", write: false });
+  const { postJson, practiceSavedEvent } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString("base64")}`);
+  const previousWindow = globalThis.window; const previousFetch = globalThis.fetch;
+  const events = new EventTarget(); globalThis.window = events;
+  t.after(() => { if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow; globalThis.fetch = previousFetch; });
+  let notifications = 0; events.addEventListener(practiceSavedEvent, () => notifications++);
+  let complete;
+  globalThis.fetch = () => new Promise((resolve) => { complete = resolve; });
+  const saving = postJson("/api/v1/dictation", { action: "finish" });
+  assert.equal(notifications, 0);
+  complete(Response.json({ saved: true })); await saving;
+  assert.equal(notifications, 1);
+  globalThis.fetch = async () => Response.json({ error: "dictation_changed" }, { status: 409 });
+  await assert.rejects(postJson("/api/v1/dictation", { action: "finish" }), /dictation_changed/);
+  assert.equal(notifications, 1);
+  globalThis.fetch = async () => Response.json({ saved: true });
+  await postJson("/api/v1/workspace/actions", { action: "mark_notification" });
+  assert.equal(notifications, 1);
+});
+
 async function seed(store, requests, sections = [], fields = {}) {
   const reading = store.load(sections);
   requests.at(-1).resolve(patch("child-a", fields));

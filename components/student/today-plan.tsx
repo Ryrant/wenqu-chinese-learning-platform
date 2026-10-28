@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import { stringValue } from "@/lib/platform-types";
 import { ABILITY_LABELS } from "@/lib/diagnostic-types";
 import { HELP_LEVEL_LABELS, sequenceTime } from "@/lib/learning-sequence-types";
@@ -11,10 +12,13 @@ import { dueLabel } from "@/lib/learning-display";
 
 export function StudentTodayPlan({ data, act, notify, navigate, onStartTask }: LoopProps & { navigate: (target: string) => void; onStartTask?: (id: string) => void }) {
   const [busyId, setBusyId] = useState("");
-  const kindLabels: Record<string, string> = { teacher: "老师安排", review: "错题复习", family: "家庭任务", assignment: "学习作业", sequence: "阶段练习" };
+  const openPractice = useNavigate();
+  const kindLabels: Record<string, string> = { teacher: "老师安排", review: "错题复习", family: "家庭任务", assignment: "学习作业", sequence: "阶段练习", practice: "自主练习" };
   async function handle(item: Record<string, unknown>) {
     const id = String(item.id);
     const kind = stringValue(item.kind, "");
+    if (typeof item.practiceHref === "string" && item.practiceHref.startsWith("/student/")) return openPractice(item.practiceHref);
+    if (kind === "practice") return notify("练习入口暂不可用", "请重新读取今日计划。", "error");
     if (kind === "review") return navigate("成长档案");
     if (kind === "assignment" || kind === "family" || kind === "sequence") return onStartTask ? onStartTask(kind === "family" ? `family:${id}` : id) : navigate("学习任务");
     setBusyId(id);
@@ -42,13 +46,13 @@ export function StudentTodayPlan({ data, act, notify, navigate, onStartTask }: L
               <span>评价：{record.measuredAt ? sequenceTime(record.measuredAt) : "时间未记录"} · {record.score === null ? "目标未评价" : record.kind === "choice" ? `正确率 ${record.score}%` : `目标评分 ${record.score}/100`}</span>
               {record.kind === "work" && <span>帮助程度：{HELP_LEVEL_LABELS[record.helpLevel ?? "unknown"]}{record.promptCount !== undefined ? ` · 提示次数：${record.promptCount ?? "未记录"}` : ""}</span>}
             </li>)}</ul> : <p>当前没有可用于本次排序的目标评价记录。</p>}
-          </section>) : <p>暂无关联评价记录。</p>}
+          </section>) : !item.practiceHref && <p>暂无关联评价记录。</p>}
           {item.sequenceId ? <UnitReportLink sequenceId={item.sequenceId}>查看任务组原始作品与教师安排</UnitReportLink> : item.basis.some((basis) => basis.records.length) && <Button variant="outline" className="h-auto min-h-10 whitespace-normal" type="button" onClick={() => navigate("成长档案")}>查看能力画像与原始作品</Button>}
         </details>
         {item.kind === "teacher" && !!item.detail && <details className="support-evidence"><summary>练习要求</summary><p className="generated-copy">{String(item.detail)}</p></details>}
       </div>
       {item.kind === "sequence" && item.waitingReview ? <span className="status draft">待教师评价</span> : item.kind === "family" && item.familyReviewStatus && item.familyReviewStatus !== "reviewed" ? <span className="status draft">{item.familyConfirmedAt ? "待教师评价" : "待家长确认"}</span> : <Button variant="outline" className="h-auto min-h-10 whitespace-normal" type="button" disabled={busyId === String(item.id)} onClick={() => handle(item)}>
-        {stringValue(item.kind, "") === "review" ? "进入复习" : item.kind === "assignment" || item.kind === "family" || item.kind === "sequence" ? "进入作业" : busyId === String(item.id) ? "更新中…" : "标记完成"}
+        {item.practiceHref ? "进入练习" : stringValue(item.kind, "") === "review" ? "进入复习" : item.kind === "assignment" || item.kind === "family" || item.kind === "sequence" ? "进入作业" : busyId === String(item.id) ? "更新中…" : "标记完成"}
       </Button>}
     </div>) : <p className="empty-state">当前没有可安排的任务；教师发布任务或复测开放后可在这里查看。</p>}
   </Card>;

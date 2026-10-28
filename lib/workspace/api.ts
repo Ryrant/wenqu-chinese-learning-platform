@@ -23,6 +23,9 @@ export function readWorkspace(sections: readonly WorkspaceSection[], studentId?:
   return requestJson<WorkspacePatch>(`/api/v1/workspace?${query}`, { signal, cache: "no-store" });
 }
 
-export function postJson<T>(url: string, body: Record<string, unknown>) {
-  return requestJson<T>(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+export const practiceSavedEvent = "huawen-practice-saved";
+export async function postJson<T>(url: string, body: Record<string, unknown>) {
+  const data = await requestJson<T>(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (typeof window !== "undefined" && (url.startsWith("/api/v1/practice") || ["/api/v1/journeys", "/api/v1/dictation", "/api/v1/vocabulary-review", "/api/v1/reading/vocabulary", "/api/v1/reading/lessons", "/api/v1/dialogue"].includes(url))) window.dispatchEvent(new Event(practiceSavedEvent));
+  return data;
 }
