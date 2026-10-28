@@ -28,6 +28,7 @@
     "cn": "^0.5.0",
     "drizzle-orm": "0.45.2",
     "fflate": "^0.8.3",
+    "hanzi-writer": "3.7.3",
     "hono": "4.13.13",
     "lucide-react": "^1.60.0",
     "pdfjs-dist": "^6.2.108",

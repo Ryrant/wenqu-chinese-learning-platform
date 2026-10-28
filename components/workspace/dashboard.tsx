@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from "react";
-import { Bell, BookOpen, CalendarCheck, ChartNoAxesCombined, Check, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, ClipboardList, FileText, FolderOpen, GraduationCap, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, Search, Settings, ShieldCheck, Users, type LucideIcon } from "lucide-react";
+import { Bell, BookOpen, CalendarCheck, ChartNoAxesCombined, Check, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, ClipboardList, FileText, FolderOpen, GraduationCap, LayoutDashboard, LoaderCircle, LogOut, Menu, MessageCircle, PenLine, Search, Settings, ShieldCheck, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +23,7 @@ const navigation = Object.fromEntries(Object.entries(workspacePages).map(([role,
 type Toast = { title: string; detail: string; tone: "success" | "error" } | null;
 
 const navigationIcons: Record<string, LucideIcon> = {
-  学习总览: LayoutDashboard, "AI 课堂": MessageCircle, 学习任务: ClipboardList, 成长档案: ChartNoAxesCombined,
+  学习总览: LayoutDashboard, "AI 课堂": MessageCircle, 学习任务: ClipboardList, 汉字书写: PenLine, 成长档案: ChartNoAxesCombined,
   教学总览: LayoutDashboard, 来源化备课: BookOpen, 班级管理: Users, 作业批阅: FileText,
   孩子概览: LayoutDashboard, 成长报告: ChartNoAxesCombined, 家庭任务: CalendarCheck, 授权管理: ShieldCheck,
   机构总览: LayoutDashboard, 平台设置: Settings, 内容中心: FolderOpen, 知识检索: Search, 成员管理: Users, 权限审计: ClipboardList,

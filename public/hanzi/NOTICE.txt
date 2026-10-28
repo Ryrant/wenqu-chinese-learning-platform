@@ -1,0 +1,20 @@
+汉字笔顺数据来源与许可
+
+本目录中的 12 个 JSON 文件选自 hanzi-writer-data 2.0.1：
+https://www.npmjs.com/package/hanzi-writer-data/v/2.0.1
+https://github.com/chanind/hanzi-writer-data
+
+上游数据由 Make Me a Hanzi 项目从文鼎字体中提取：
+https://github.com/skishore/makemeahanzi
+
+Copyright (C) 1999 Arphic Technology Co., Ltd.
+笔顺数据依据 Arphic Public License 提供，许可全文见同目录 ARPHICPL.TXT。
+这些数据不受项目主许可证替代，重新分发时请保留本说明及 ARPHICPL.TXT。
+数据不附带任何担保；可以按该许可证规定复制、分发及修改。
+
+项目只选取并分发原始笔顺文件，未改动笔画和中线数据。
+界面的拼音、组词和例句由本项目编写。
+
+书写交互使用 Hanzi Writer 3.7.3，其代码依据 MIT License 提供：
+https://github.com/chanind/hanzi-writer
+许可全文见同目录 HANZI-WRITER-LICENSE.txt。

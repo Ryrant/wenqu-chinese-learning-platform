@@ -1,0 +1,74 @@
+.page { display: grid; gap: 1.5rem; min-width: 0; }
+.page > :global(.page-header) { margin-bottom: 0; }
+.layout { display: grid; grid-template-columns: minmax(14rem, .75fr) minmax(0, 1.6fr); gap: 1.5rem; align-items: start; }
+.selection { display: grid; gap: 1.5rem; padding: 1.5rem 0; }
+.selectionHeading h2 { font-size: 1.1rem; font-weight: 600; line-height: 1.5; }
+.selectionHeading p { margin-top: .4rem; font-size: .875rem; color: var(--muted-foreground); }
+.characters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; }
+.characters button { position: relative; display: grid; justify-items: center; gap: .3rem; padding: .75rem .25rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); transition: background-color .15s, border-color .15s; }
+.characters button:hover { background: var(--secondary); border-color: var(--ring); }
+.characters button[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+.characters button:focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
+.characters button > span { font-family: "Kaiti SC", KaiTi, STKaiti, "Noto Serif SC", serif; font-size: 1.8rem; line-height: 1.3; }
+.characters small { font-size: .75rem; opacity: .85; }
+.characters svg { position: absolute; top: .25rem; right: .2rem; width: .7rem; height: .7rem; }
+.wordNote { display: grid; gap: .5rem; padding-top: 1.25rem; border-top: 1px solid var(--border); }
+.wordNote .pinyin { color: var(--primary); font-size: 1rem; }
+.wordNote h3 { font-size: 1.5rem; line-height: 1.5; font-weight: 550; }
+.wordNote p:last-child { font-size: .9rem; line-height: 1.8; }
+.sessionNote { color: var(--muted-foreground); font-size: .8rem; line-height: 1.8; }
+.practice { display: grid; min-width: 0; background: var(--card); border: 1px solid var(--border); border-radius: .875rem; }
+.practiceHeader { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); }
+.modes { display: flex; gap: .25rem; }
+.modes button { padding-inline: .85rem; }
+.strokeCount { color: var(--muted-foreground); font-size: .8rem; white-space: nowrap; }
+.boardArea { display: grid; justify-items: center; gap: 1.25rem; padding: 1.25rem 1.5rem 1rem; }
+.board { position: relative; width: 100%; max-width: 24rem; aspect-ratio: 1; border: 1px solid var(--input); background: var(--card); }
+.grid { position: absolute; width: 100%; height: 100%; color: var(--input); pointer-events: none; }
+.grid path { stroke: currentColor; stroke-width: .35; stroke-dasharray: 2 2; fill: none; }
+.canvas { position: absolute; inset: 0; overflow: hidden; }
+.canvas > svg { display: block; }
+.board[data-writing="true"] .canvas { touch-action: none; cursor: crosshair; }
+.board:not([data-writing="true"]) .canvas { pointer-events: none; }
+.boardPlaceholder { position: absolute; inset: 0; display: grid; place-items: center; background: var(--card); color: var(--muted-foreground); font-size: .9rem; pointer-events: none; }
+.progress { display: flex; gap: .4rem; width: min(100%, 12rem); min-height: .3rem; }
+.progress span { flex: 1; height: .3rem; border-radius: 1rem; background: var(--border); transition: background-color .15s; }
+.progress span[data-complete="true"] { background: var(--primary); }
+.feedback { display: grid; justify-items: center; align-content: start; gap: .5rem; width: 100%; min-height: 5rem; text-align: center; }
+.feedback p { display: flex; align-items: center; justify-content: center; gap: .4rem; max-width: 45ch; font-size: .875rem; line-height: 1.8; }
+.feedback p[role="alert"] { color: var(--destructive); }
+.feedback svg { flex-shrink: 0; width: 1rem; height: 1rem; }
+.feedback small { color: var(--muted-foreground); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.success { color: var(--primary); font-weight: 550; }
+.controls { display: flex; justify-content: center; flex-wrap: wrap; gap: .6rem; padding: 0 1.25rem 1.5rem; }
+.footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .75rem; color: var(--muted-foreground); font-size: .75rem; line-height: 1.8; }
+.footer a { color: var(--primary); text-decoration: underline; text-underline-offset: .2em; }
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .selection { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: start; gap: 1rem 1.5rem; padding: 0; }
+  .selectionHeading { grid-column: 1 / -1; }
+  .characters { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .characters button > span { font-size: 1.5rem; }
+  .wordNote { border-top: 0; padding-top: 0; }
+  .sessionNote { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .page { gap: 1.1rem; }
+  .selection { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .characters { gap: .35rem; }
+  .characters button { padding: .55rem .1rem; }
+  .characters button > span { font-size: 1.4rem; }
+  .characters small { font-size: .65rem; }
+  .wordNote { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem .75rem; }
+  .wordNote h3 { font-size: 1.1rem; }
+  .wordNote p:last-child { flex-basis: 100%; font-size: .8rem; }
+  .practiceHeader { padding: .75rem; gap: .5rem; }
+  .modes button { font-size: .8rem; height: 2.25rem; padding-inline: .65rem; }
+  .boardArea { padding: 1.25rem 1rem .5rem; gap: 1rem; }
+  .controls { gap: .5rem; padding: 0 .75rem 1rem; }
+  .controls button { font-size: .8rem; padding-inline: .75rem; }
+  .feedback { min-height: 5.5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .characters button, .progress span { transition: none; }
+}
