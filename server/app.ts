@@ -3,6 +3,7 @@ import * as readingVocabularyEndpoint from "../app/api/v1/reading/vocabulary/rou
 import * as dialogueEndpoint from "../app/api/v1/dialogue/route";
 import * as practiceEndpoint from "../app/api/v1/practice/route";
 import * as journeysEndpoint from "../app/api/v1/journeys/route";
+import * as vocabularyReviewEndpoint from "../app/api/v1/vocabulary-review/route";
 import * as endpoint0 from "../app/api/v1/ability-profile/route";
 import * as endpoint1 from "../app/api/v1/ai/generate/route";
 import * as endpoint2 from "../app/api/v1/auth/change-password/route";
@@ -35,6 +36,9 @@ import * as endpoint28 from "../app/api/v1/workspace/route";
 /** 浏览器和 Node/Workers 共用同一组标准 HTTP 处理器。 */
 export function createApiApp(options: { remoteAddress?: (context: Context) => string | undefined } = {}) {
   const app = new Hono();
+  app.get("/api/v1/vocabulary-review", (context) => vocabularyReviewEndpoint.GET(context.req.raw));
+  app.post("/api/v1/vocabulary-review", (context) => vocabularyReviewEndpoint.POST(context.req.raw));
+  app.all("/api/v1/vocabulary-review", (context) => context.json({ error: "method_not_allowed" }, 405));
   app.get("/api/v1/practice", (context) => practiceEndpoint.GET(context.req.raw));
   app.post("/api/v1/practice", (context) => practiceEndpoint.POST(context.req.raw));
   app.all("/api/v1/practice", (context) => context.json({ error: "method_not_allowed" }, 405));

@@ -2,7 +2,7 @@ import type { Role, WorkspaceSection } from "../platform-types";
 
 export const workspacePages = {
   student: [
-    ["overview", "学习总览"], ["tutor", "AI 课堂"], ["tasks", "学习任务"], ["journeys", "主题闯关"], ["writing", "汉字书写"], ["reading", "交互阅读"], ["dialogue", "情境闯关"], ["portfolio", "成长档案"],
+    ["overview", "学习总览"], ["tutor", "AI 课堂"], ["tasks", "学习任务"], ["journeys", "主题闯关"], ["writing", "汉字书写"], ["reading", "交互阅读"], ["vocabulary", "生词复习"], ["dialogue", "情境闯关"], ["portfolio", "成长档案"],
   ],
   teacher: [
     ["overview", "教学总览"], ["lessons", "来源化备课"], ["classes", "班级管理"], ["scenarios", "情境任务"], ["reviews", "作业批阅"],

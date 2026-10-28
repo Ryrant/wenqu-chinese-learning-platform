@@ -18,7 +18,10 @@ export async function changeReadingVocabulary(context: PlatformContext, body: Re
   } else if (body.action === "remove") {
     if (typeof body.id !== "string" || !body.id || body.id.length > 120) throw new Error("invalid_reading_word_id");
     // 删除限定在本人和本机构；重复删除仍是已移除状态，便于响应丢失后重试。
-    await db.prepare("DELETE FROM student_vocabulary WHERE id=? AND tenant_id=? AND user_id=?").bind(body.id, tenantId, userId).run();
+    await db.batch([
+      db.prepare("DELETE FROM vocabulary_review_state WHERE vocabulary_id=? AND tenant_id=? AND user_id=?").bind(body.id, tenantId, userId),
+      db.prepare("DELETE FROM student_vocabulary WHERE id=? AND tenant_id=? AND user_id=?").bind(body.id, tenantId, userId),
+    ]);
   } else throw new Error("invalid_reading_action");
   return { vocabulary: await readReadingVocabulary(context) };
 }

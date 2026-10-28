@@ -50,6 +50,11 @@ async function identity(request: Request, db: PlatformDatabase) {
 // 全新安装直接创建当前完整结构，不执行旧数据库补列或历史数据修正。
 async function ensureCoreSchema(db: PlatformDatabase) {
   await db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS vocabulary_review_state (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, vocabulary_id TEXT NOT NULL, stage INTEGER NOT NULL DEFAULT 0, due_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS vocabulary_review_word_idx ON vocabulary_review_state (tenant_id,user_id,vocabulary_id)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS vocabulary_review_sessions (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, mode TEXT NOT NULL, snapshot_json TEXT NOT NULL, state_json TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT)`),
+    db.prepare("CREATE INDEX IF NOT EXISTS vocabulary_review_sessions_owner_idx ON vocabulary_review_sessions (tenant_id,user_id,created_at)"),
+    db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS vocabulary_review_active_idx ON vocabulary_review_sessions (tenant_id,user_id) WHERE completed_at IS NULL"),
     db.prepare(`CREATE TABLE IF NOT EXISTS practice_records (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, user_id TEXT NOT NULL, kind TEXT NOT NULL, reference_id TEXT NOT NULL, journey_run_id TEXT, title TEXT NOT NULL, snapshot_json TEXT NOT NULL, payload_json TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     db.prepare("CREATE INDEX IF NOT EXISTS practice_records_owner_idx ON practice_records (tenant_id,user_id,kind,created_at)"),
     db.prepare("CREATE INDEX IF NOT EXISTS practice_records_journey_idx ON practice_records (tenant_id,user_id,journey_run_id)"),
@@ -226,7 +231,7 @@ export async function platformContext(request: Request, requiredRole?: PlatformR
 
 export function platformApiError(error: unknown) {
   const message = error instanceof Error ? error.message : "unexpected_error";
-  const status = ["practice_record_conflict", "journey_unavailable", "journey_stage_locked", "dialogue_turn_pending", "dialogue_turn_conflict", "dialogue_session_changed", "dialogue_scenario_changed", "dialogue_scenario_unavailable", "family_feedback_response_unavailable", "family_response_id_conflict", "family_response_source_changed", "family_response_already_voided", "trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
+  const status = ["vocabulary_review_changed", "vocabulary_review_empty", "vocabulary_review_conflict", "practice_record_conflict", "journey_unavailable", "journey_stage_locked", "dialogue_turn_pending", "dialogue_turn_conflict", "dialogue_session_changed", "dialogue_scenario_changed", "dialogue_scenario_unavailable", "family_feedback_response_unavailable", "family_response_id_conflict", "family_response_source_changed", "family_response_already_voided", "trial_batch_id_conflict", "trial_batch_changed", "trial_batch_scope_changed", "trial_batch_already_voided", "family_feedback_id_conflict", "family_feedback_task_changed", "family_feedback_already_voided"].includes(message) ? 409 : message === "authentication_required"
     ? 401
     : message === "forbidden" || message === "account_access_denied" || message === "password_change_required"
       ? 403
