@@ -1,3 +1,4 @@
+import { practiceTaskError } from "./practice-task-types";
 import type { ReadingLesson } from "./reading-lessons";
 
 export type DictationDifference = { kind: "same" | "missing" | "extra" | "different"; expected: string; actual: string };
@@ -20,6 +21,7 @@ export function compareDictation(expected: string, actual: string): { correct: b
 }
 export function dictationError(reason: unknown) {
   const code = reason instanceof Error ? reason.message : "";
+  if (code.startsWith("practice_task_")) return practiceTaskError(reason);
   if (code === "dictation_changed") return "本轮进度已更新，正在重新读取；当前输入仍保留。";
   if (code === "dictation_in_progress") return "已有一轮未完成的听写，正在读取进度，请继续或结束后再开始新一轮。";
   if (code === "dictation_source_unavailable" || code === "reading_lesson_unavailable") return "来源已归档或班级权限有变化，已有结果仍可回看。";

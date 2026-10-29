@@ -85,9 +85,11 @@ test("journeys use class scoped teacher readings and keep their starting snapsho
   await f.request("teacher", "/reading/lessons", { action: "archive", id: body.id, revision: 2 });
   assert.equal((await f.request("student", "/journeys")).journeys.length, 0);
   await f.request("student", "/journeys", { action: "start", id: crypto.randomUUID(), scenarioId: f.scenario.id }, 409);
-  await f.request("student", "/practice", f.writing(run));
+  await f.request("student", "/practice", f.writing(run), 409);
+  await f.request("student", "/practice", oldPractice);
   const first = (await f.request("student", `/journeys?runId=${run.id}`)).runs[0];
-  assert.equal(first.lesson.title, body.title); assert.equal(first.available, true);
+  assert.equal(first.lesson.title, body.title); assert.equal(first.available, false);
+  assert.equal(first.records.length, 1);
   const foreign = { ...lessonBody(), id: crypto.randomUUID(), classId: "other-class" }; await f.request("colleague", "/reading/lessons", foreign);
   await f.request("admin", "/dialogue", { ...f.scenario, id: crypto.randomUUID(), content: { ...content, journey: { lessonId: foreign.id, characters: ["人"] } } }, 409);
 });

@@ -27,6 +27,7 @@ const DialogueChallenge = lazy(() => import("./dialogue-challenge"));
 const JourneyMap = lazy(() => import("./journey-map"));
 const VocabularyChallenge = lazy(() => import("./vocabulary-challenge"));
 const DictationLab = lazy(() => import("./dictation-lab"));
+const StudentPracticeTasks = lazy(() => import("./practice-tasks"));
 const PracticeArchive = lazy(() => import("./practice-archive"));
 const AbilityEvidenceProfile = lazy(() => import("@/components/diagnostic-evidence").then(module => ({ default: module.AbilityEvidenceProfile })));
 const FamilyPortfolio = lazy(() => import("@/components/family/family-portfolio").then(module => ({ default: module.FamilyPortfolio })));
@@ -358,8 +359,9 @@ export default function StudentView({ nav, data, receivedAt, act, refresh, notif
 <RetainedFeature active={nav === "情境闯关"}><DialogueChallenge notify={notify}/></RetainedFeature>
 <RetainedFeature active={nav === "主题闯关"}><JourneyMap notify={notify}/></RetainedFeature>
 <RetainedFeature active={nav === "生词复习"}><VocabularyChallenge/></RetainedFeature>
+<RetainedFeature active={nav === "教师练习"}><StudentPracticeTasks notify={notify}/></RetainedFeature>
 <RetainedFeature active={nav === "听写实验室"}><DictationLab/></RetainedFeature>
-<RetainedFeature active={nav !== "AI 课堂" && nav !== "学习任务" && nav !== "成长档案" && nav !== "汉字书写" && nav !== "交互阅读" && nav !== "情境闯关" && nav !== "主题闯关" && nav !== "生词复习" && nav !== "听写实验室"}>{<section className={styles.page}>
+<RetainedFeature active={nav !== "AI 课堂" && nav !== "学习任务" && nav !== "成长档案" && nav !== "汉字书写" && nav !== "交互阅读" && nav !== "情境闯关" && nav !== "主题闯关" && nav !== "生词复习" && nav !== "听写实验室" && nav !== "教师练习"}>{<section className={styles.page}>
     <PageHeader title={data.user.displayName + "，开始今天的学习吧"} description="从当前任务出发，一点点积累自己的中文表达。" actions={<Button variant="outline" type="button" onClick={() => navigate("成长档案")}>成长档案<ArrowRight/></Button>}/>
     {retestRefreshNotice}
     <section className={styles.stats}><StatCard label="已发布任务" value={published.length} icon={<BookOpen/>}/><StatCard label="已提交作品" value={submittedCount} icon={<FileText/>}/><StatCard label="待教师评价" value={pendingCount} icon={<CheckCheck/>}/></section>

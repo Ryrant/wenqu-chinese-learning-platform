@@ -175,6 +175,21 @@ export const learningRecommendations = sqliteTable("learning_recommendations", {
   uniqueIndex("learning_recommendation_source_idx").on(table.tenantId, table.studentUserId, table.sourceType, table.sourceId),
 ]);
 
+export const practiceTasks = sqliteTable("practice_tasks", {
+  id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), classId: text("class_id").notNull(),
+  targetKind: text("target_kind", { enum: ["reading", "writing", "dictation", "journey"] }).notNull(),
+  snapshotJson: text("snapshot_json").notNull(), payloadJson: text("payload_json").notNull(),
+}, (table) => [index("practice_tasks_class_idx").on(table.tenantId, table.classId)]);
+
+export const practiceTaskActivities = sqliteTable("practice_task_activities", {
+  tenantId: text("tenant_id").notNull(), taskId: text("task_id").notNull(), userId: text("user_id").notNull(),
+  activityKind: text("activity_kind", { enum: ["reading", "writing", "dictation", "journey"] }).notNull(),
+  activityId: text("activity_id").notNull(), createdAt: createdAt(),
+}, (table) => [
+  uniqueIndex("practice_task_activities_activity_idx").on(table.tenantId, table.activityKind, table.activityId),
+  index("practice_task_activities_task_idx").on(table.tenantId, table.taskId, table.userId),
+]);
+
 export const learningSequences = sqliteTable("learning_sequences", {
   id: text("id").primaryKey(), tenantId: text("tenant_id").notNull(), studentUserId: text("student_user_id").notNull(),
   assignmentId: text("assignment_id").notNull(), objectiveId: text("objective_id").notNull(), objectiveTitle: text("objective_title").notNull(),

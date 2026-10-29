@@ -191,7 +191,7 @@ function WritingBoard({ item, onComplete, onNext }: {
 }
 
 type CompletedWriting = { id: string; character: string; result: WritingResult };
-export default function HanziWritingLab({ characters = practiceCharacters, journeyRunId, onSaved, embedded = false }: { characters?: readonly PracticeCharacter[]; journeyRunId?: string; onSaved?: () => void; embedded?: boolean }) {
+export default function HanziWritingLab({ characters = practiceCharacters, journeyRunId, practiceTaskId, onSaved, embedded = false }: { characters?: readonly PracticeCharacter[]; journeyRunId?: string; practiceTaskId?: string; onSaved?: () => void; embedded?: boolean }) {
   const [character, setCharacter] = usePracticeSelection("/student/writing", "character", characters[0].character, !embedded);
   const selected = characters.find((item) => item.character === character) ?? characters[0];
   const setSelected = (item: PracticeCharacter) => setCharacter(item.character);
@@ -205,21 +205,21 @@ export default function HanziWritingLab({ characters = practiceCharacters, journ
   const version = useRef(0);
   useEffect(() => {
     const controller = new AbortController(); const current = ++version.current;
-    void requestJson<PracticeHistory>(`/api/v1/practice?kind=writing${journeyRunId ? `&journeyRunId=${journeyRunId}` : ""}`, { signal: controller.signal, cache: "no-store" }).then((data) => {
+    void requestJson<PracticeHistory>(`/api/v1/practice?kind=writing${journeyRunId ? `&journeyRunId=${journeyRunId}` : ""}${practiceTaskId ? `&practiceTaskId=${practiceTaskId}` : ""}`, { signal: controller.signal, cache: "no-store" }).then((data) => {
       if (!controller.signal.aborted && current === version.current) { setCompleted(data.writtenCharacters); setHistory(data.records); setReadError(""); }
     }).catch(() => { if (!controller.signal.aborted && current === version.current) setReadError("历史书写记录暂时没有读取成功，可以重新读取，也可以继续练习。"); });
     return () => controller.abort();
-  }, [journeyRunId, reload]);
+  }, [journeyRunId, practiceTaskId, reload]);
   const save = useCallback(async (entry: CompletedWriting) => {
     version.current++; setSaving(true); setError("");
     try {
-      const data = await postJson<{ record: PracticeRecord }>("/api/v1/practice", { id: entry.id, kind: "writing", referenceId: entry.character, journeyRunId, ...entry.result });
+      const data = await postJson<{ record: PracticeRecord }>("/api/v1/practice", { id: entry.id, kind: "writing", referenceId: entry.character, journeyRunId, practiceTaskId, ...entry.result });
       setCompleted((items) => items.includes(entry.character) ? items : [...items, entry.character]);
       setHistory((items) => [data.record, ...items.filter((item) => item.id !== data.record.id)].slice(0, 30));
       setPending((current) => current?.id === entry.id ? null : current); onSaved?.();
     } catch (reason) { setError(practiceError(reason)); }
     finally { setSaving(false); }
-  }, [journeyRunId, onSaved]);
+  }, [journeyRunId, practiceTaskId, onSaved]);
   const complete = useCallback((character: string, result: WritingResult) => {
     const entry = { id: crypto.randomUUID(), character, result }; setPending(entry); void save(entry);
   }, [save]);

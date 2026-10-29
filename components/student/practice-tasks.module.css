@@ -1,0 +1,11 @@
+.page { display: grid; gap: 1.25rem; min-width: 0; }
+.layout { display: grid; grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.list { display: grid; gap: .5rem; }
+.list button { display: flex; flex-direction: column; align-items: start; white-space: normal; height: auto; padding: 1rem; text-align: left; overflow-wrap: anywhere; }
+.list span, .list small { color: var(--muted-foreground); }
+.content { min-width: 0; display: grid; gap: 1.25rem; }
+.instructions { padding: 1.25rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); overflow-wrap: anywhere; }
+.instructions h2 { font-size: 1.25rem; font-weight: 600; }
+.instructions p { margin-top: .5rem; white-space: pre-wrap; }
+.instructions a { display: inline-block; margin-top: .75rem; color: var(--primary); text-decoration: underline; }
+@media (max-width: 1050px) { .layout { grid-template-columns: minmax(0, 1fr); } .list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); } }

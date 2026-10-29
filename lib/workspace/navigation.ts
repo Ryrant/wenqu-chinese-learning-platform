@@ -2,10 +2,10 @@ import type { Role, WorkspaceSection } from "../platform-types";
 
 export const workspacePages = {
   student: [
-    ["overview", "学习总览"], ["tutor", "AI 课堂"], ["tasks", "学习任务"], ["journeys", "主题闯关"], ["writing", "汉字书写"], ["reading", "交互阅读"], ["vocabulary", "生词复习"], ["dictation", "听写实验室"], ["dialogue", "情境闯关"], ["portfolio", "成长档案"],
+    ["overview", "学习总览"], ["tutor", "AI 课堂"], ["tasks", "学习任务"], ["practice", "教师练习"], ["journeys", "主题闯关"], ["writing", "汉字书写"], ["reading", "交互阅读"], ["vocabulary", "生词复习"], ["dictation", "听写实验室"], ["dialogue", "情境闯关"], ["portfolio", "成长档案"],
   ],
   teacher: [
-    ["overview", "教学总览"], ["lessons", "来源化备课"], ["classes", "班级管理"], ["readings", "课文工作台"], ["scenarios", "情境任务"], ["reviews", "作业批阅"],
+    ["overview", "教学总览"], ["lessons", "来源化备课"], ["classes", "班级管理"], ["readings", "课文工作台"], ["scenarios", "情境任务"], ["practice", "班级练习"], ["reviews", "作业批阅"],
   ],
   guardian: [
     ["overview", "孩子概览"], ["reports", "成长报告"], ["tasks", "家庭任务"], ["consents", "授权管理"],
@@ -39,7 +39,7 @@ export function pageSections(route: WorkspaceRoute): WorkspaceSection[] {
   if (role === "student") return ["teaching", "progress", ...(page === "tasks" ? ["curriculum" as const] : [])];
   if (role === "teacher") {
     const sections: WorkspaceSection[] = ["teaching", "progress"];
-    if (page === "scenarios" || page === "readings") return sections;
+    if (page === "scenarios" || page === "readings" || page === "practice") return sections;
     if (page === "lessons") return [...sections, "lessons", "content"];
     if (page === "overview") return [...sections, "curriculum"];
     return [...sections, "curriculum", "trials"];

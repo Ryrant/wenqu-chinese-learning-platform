@@ -1,4 +1,6 @@
 import { auditStatement } from "./audit";
+import { activityPracticeTask, boundTaskGuard, taskCompletionStatements, taskAvailableSql } from "./practice-task-support";
+import { journeyLessonAvailableSql } from "./journey-service";
 import { createOpenAiProvider } from "./ai/openai-provider";
 import type { AiGenerationResult } from "./ai/provider";
 import { aiProviderSettings, loadPlatformSettings } from "./platform-settings";
@@ -9,9 +11,9 @@ import type { PlatformContext } from "./platform-store";
 import { matchedDialogueExpression, normalizeDialogueText, publicDialogueScenario, type DialogueCatalog, type DialogueContent, type DialogueScenario, type DialogueSession, type DialogueTurn } from "./dialogue-types";
 
 type ScenarioRow = { id: string; title: string; class_id: string; className: string; authorName: string; content_json: string; revision: number; status: "published" | "archived" };
-type SessionRow = { id: string; user_id: string; class_id: string; scenario_id: string; snapshot_json: string; turns_json: string; step: number; hint_count: number; revision: number; pending_request_id: string | null; pending_text: string | null; pending_at: string | null; created_at: string; studentName: string; journeyStage: number | null };
+type SessionRow = { id: string; user_id: string; class_id: string; scenario_id: string; snapshot_json: string; turns_json: string; step: number; hint_count: number; revision: number; pending_request_id: string | null; pending_text: string | null; pending_at: string | null; created_at: string; studentName: string; journeyStage: number | null; taskAvailable: number };
 const scenarioSelect = `SELECT d.*,c.name AS className,u.display_name AS authorName FROM dialogue_scenarios d JOIN classes c ON c.id=d.class_id AND c.tenant_id=d.tenant_id JOIN users u ON u.id=d.created_by`;
-const sessionSelect = `SELECT s.*,u.display_name AS studentName,j.stage AS journeyStage FROM dialogue_sessions s JOIN users u ON u.id=s.user_id LEFT JOIN classes c ON c.id=s.class_id AND c.tenant_id=s.tenant_id LEFT JOIN journey_runs j ON j.dialogue_session_id=s.id AND j.tenant_id=s.tenant_id AND j.user_id=s.user_id`;
+const sessionSelect = `SELECT s.*,u.display_name AS studentName,j.stage AS journeyStage,CASE WHEN NOT EXISTS (SELECT 1 FROM practice_task_activities pa JOIN practice_tasks t ON t.id=pa.task_id AND t.tenant_id=pa.tenant_id JOIN learning_recommendations r ON r.id=t.id AND r.tenant_id=t.tenant_id WHERE pa.tenant_id=s.tenant_id AND pa.user_id=s.user_id AND pa.activity_kind='journey' AND pa.activity_id=j.id AND NOT (${taskAvailableSql()})) AND (j.id IS NULL OR ${journeyLessonAvailableSql()}) THEN 1 ELSE 0 END AS taskAvailable FROM dialogue_sessions s JOIN users u ON u.id=s.user_id LEFT JOIN classes c ON c.id=s.class_id AND c.tenant_id=s.tenant_id LEFT JOIN journey_runs j ON j.dialogue_session_id=s.id AND j.tenant_id=s.tenant_id AND j.user_id=s.user_id`;
 const leaseAvailable = "(pending_request_id IS NULL OR julianday(pending_at)<=julianday('now','-2 minutes'))";
 const isAdmin = (context: PlatformContext) => context.roles.includes("admin");
 function teacher(context: PlatformContext) { if (!context.roles.some((role) => role === "teacher" || role === "admin")) throw new Error("forbidden"); }
@@ -24,7 +26,7 @@ function pending(row: SessionRow) { return !!row.pending_request_id && !!row.pen
 function session(row: SessionRow, visible: DialogueScenario[]): DialogueSession {
   const snapshot = JSON.parse(row.snapshot_json) as DialogueScenario;
   return { id: row.id, scenario: publicDialogueScenario(snapshot), turns: JSON.parse(row.turns_json) as DialogueTurn[], step: row.step, hintCount: row.hint_count, revision: row.revision,
-    complete: row.step >= snapshot.goals.length, pending: pending(row), canContinue: (row.journeyStage === null || row.journeyStage >= 2) && visible.some((item) => item.id === row.scenario_id && item.classId === row.class_id && item.status === "published"), ...(row.journeyStage !== null ? { journeyLocked: row.journeyStage < 2 } : {}), studentName: row.studentName, createdAt: row.created_at };
+    complete: row.step >= snapshot.goals.length, pending: pending(row), canContinue: !!row.taskAvailable && (row.journeyStage === null || row.journeyStage >= 2) && visible.some((item) => item.id === row.scenario_id && item.classId === row.class_id && item.status === "published"), ...(row.journeyStage !== null ? { journeyLocked: row.journeyStage < 2 } : {}), studentName: row.studentName, createdAt: row.created_at };
 }
 
 async function scenarioRow(context: PlatformContext, id: string, staff: boolean) {
@@ -174,14 +176,18 @@ export async function continueDialogue(context: PlatformContext, body: Record<st
     if (previous.kind !== (hint ? "hint" : "student") || (!hint && previous.text !== input)) throw new Error("dialogue_turn_conflict");
     return readDialogueCatalog(context, false, id);
   }
+  const journey = await context.db.prepare("SELECT id FROM journey_runs WHERE dialogue_session_id=? AND tenant_id=? AND user_id=?").bind(id, context.tenantId, context.userId).first<{ id: string }>();
+  const task = journey ? await activityPracticeTask(context, "journey", journey.id, body.practiceTaskId) : null;
+  if (!journey && body.practiceTaskId !== undefined) throw new Error("invalid_practice_task_target");
   if (row.pending_request_id === requestId && row.pending_text !== input) throw new Error("dialogue_turn_conflict");
   if (row.revision !== expected) throw new Error("dialogue_session_changed");
   if (row.journeyStage !== null && row.journeyStage < 2) throw new Error("journey_stage_locked");
   if (row.step >= snapshot.goals.length) throw new Error("invalid_dialogue_complete");
   if (turns.length >= 40) throw new Error("invalid_dialogue_turn_limit");
   const goal = snapshot.goals[row.step]; const guard = sourceGuard(context, row.scenario_id, row.class_id); const now = new Date().toISOString();
-  guard.sql += " AND NOT EXISTS (SELECT 1 FROM journey_runs WHERE dialogue_session_id=? AND tenant_id=? AND user_id=? AND stage<2)";
+  guard.sql += ` AND NOT EXISTS (SELECT 1 FROM journey_runs j WHERE dialogue_session_id=? AND tenant_id=? AND user_id=? AND (stage<2 OR NOT ${journeyLessonAvailableSql()}))`;
   guard.args.push(id, context.tenantId, context.userId);
+  if (journey) { const taskScope = boundTaskGuard(context, "journey", journey.id); guard.sql += " AND " + taskScope.sql; guard.args.push(...taskScope.args); }
   if (hint) {
     const next: DialogueTurn[] = [...turns, { id: requestId, kind: "hint", text: goal.hint, step: row.step, at: now }];
     const [result] = await context.db.batch([
@@ -215,6 +221,7 @@ export async function continueDialogue(context: PlatformContext, body: Record<st
     if (step >= snapshot.goals.length) {
       statements.push(context.db.prepare("UPDATE journey_runs SET stage=3 WHERE tenant_id=? AND user_id=? AND dialogue_session_id=? AND stage=2 AND EXISTS (SELECT 1 FROM dialogue_sessions WHERE id=? AND tenant_id=? AND user_id=? AND step>=?)").bind(context.tenantId, context.userId, id, id, context.tenantId, context.userId, snapshot.goals.length));
       statements.push(auditStatement(context.db, context.tenantId, context.userId, "journey.completed", "dialogue-session", id, {}, true));
+      if (task) statements.push(...taskCompletionStatements(context, task.id));
     }
     const [result] = await context.db.batch(statements);
     if (!result.meta.changes) throw new Error("dialogue_scenario_unavailable");

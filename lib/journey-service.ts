@@ -1,4 +1,5 @@
 import { auditStatement } from "./audit";
+import { activityPracticeTask, ownPracticeTask, taskActivityStatement, taskGuard } from "./practice-task-support";
 import type { PlatformContext } from "./platform-store";
 import type { ReadingLesson } from "./reading-lessons";
 import { resolveReadingLesson } from "./reading-content-service";
@@ -7,6 +8,9 @@ import type { JourneyCatalog, JourneyRun, PracticeRecord } from "./practice-type
 
 export function practiceStudent(context: PlatformContext) { if (!context.roles.includes("student")) throw new Error("forbidden"); }
 export function practiceId(value: unknown) { if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new Error("invalid_practice_id"); return value; }
+export function journeyLessonAvailableSql(alias = "j") {
+  return `(json_extract(${alias}.snapshot_json,'$.lesson.source.classId') IS NULL OR EXISTS (SELECT 1 FROM teacher_reading_lessons lesson WHERE lesson.id=json_extract(${alias}.snapshot_json,'$.lesson.id') AND lesson.tenant_id=${alias}.tenant_id AND lesson.class_id=${alias}.class_id AND lesson.status='published'))`;
+}
 export function journeySourceGuard(context: PlatformContext, scenarioId: string, classId: string) {
   return { sql: `EXISTS (SELECT 1 FROM dialogue_scenarios d JOIN enrollments e ON e.tenant_id=d.tenant_id AND e.class_id=d.class_id WHERE d.id=? AND d.tenant_id=? AND d.class_id=? AND d.status='published' AND e.student_user_id=? AND e.status='active')
     AND EXISTS (SELECT 1 FROM users u JOIN role_memberships rm ON rm.user_id=u.id JOIN tenants t ON t.id=rm.tenant_id WHERE u.id=? AND u.status='active' AND u.must_change_password=0 AND rm.tenant_id=? AND rm.role='student' AND rm.status='active' AND t.status='active')`,
@@ -15,17 +19,22 @@ export function journeySourceGuard(context: PlatformContext, scenarioId: string,
 type JourneySnapshot = { title: string; className: string; lesson: ReadingLesson; characters: string[] };
 export type JourneyRow = { id: string; scenario_id: string; class_id: string; snapshot_json: string; dialogue_session_id: string; stage: number; created_at: string; available: number; dialogueStep: number; dialogueHints: number; dialogueSnapshot: string };
 const selectRun = `SELECT j.*,s.step AS dialogueStep,s.hint_count AS dialogueHints,s.snapshot_json AS dialogueSnapshot,
-  CASE WHEN d.status='published' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.tenant_id=j.tenant_id AND e.class_id=j.class_id AND e.student_user_id=j.user_id AND e.status='active') THEN 1 ELSE 0 END AS available
+  CASE WHEN d.status='published' AND ${journeyLessonAvailableSql()} AND EXISTS (SELECT 1 FROM enrollments e WHERE e.tenant_id=j.tenant_id AND e.class_id=j.class_id AND e.student_user_id=j.user_id AND e.status='active') THEN 1 ELSE 0 END AS available
   FROM journey_runs j JOIN dialogue_sessions s ON s.id=j.dialogue_session_id AND s.tenant_id=j.tenant_id AND s.user_id=j.user_id LEFT JOIN dialogue_scenarios d ON d.id=j.scenario_id AND d.tenant_id=j.tenant_id AND d.class_id=j.class_id`;
 
 export async function ownJourneyRow(context: PlatformContext, id: string) {
   practiceStudent(context);
   const row = await context.db.prepare(`${selectRun} WHERE j.id=? AND j.tenant_id=? AND j.user_id=?`).bind(id, context.tenantId, context.userId).first<JourneyRow>();
-  if (!row) throw new Error("journey_run_not_found"); return row;
+  if (!row) throw new Error("journey_run_not_found");
+  const task = await activityPracticeTask(context, "journey", id, undefined, false);
+  if (task && !task.available) row.available = 0;
+  return row;
 }
 export function journeySnapshot(row: JourneyRow) { return JSON.parse(row.snapshot_json) as JourneySnapshot; }
 async function run(context: PlatformContext, row: JourneyRow): Promise<JourneyRun> {
   const snapshot = journeySnapshot(row);
+  const task = await activityPracticeTask(context, "journey", row.id, undefined, false);
+  if (task && !task.available) row.available = 0;
   const records = await context.db.prepare("SELECT id,kind,reference_id AS referenceId,journey_run_id AS journeyRunId,title,result_json AS resultJson,created_at AS createdAt FROM practice_records WHERE rowid IN (SELECT MAX(rowid) FROM practice_records WHERE tenant_id=? AND user_id=? AND journey_run_id=? GROUP BY kind,reference_id) ORDER BY created_at DESC,rowid DESC").bind(context.tenantId, context.userId, row.id).all<Omit<PracticeRecord, "result"> & { resultJson: string }>();
   return { id: row.id, scenarioId: row.scenario_id, ...snapshot, stage: row.stage, dialogueSessionId: row.dialogue_session_id, available: !!row.available,
     records: records.results.map(({ resultJson, ...record }) => ({ ...record, result: JSON.parse(resultJson) as PracticeRecord["result"] })),
@@ -52,29 +61,33 @@ export async function readJourneyCatalog(context: PlatformContext, focusId = "")
 export async function startJourney(context: PlatformContext, body: Record<string, unknown>) {
   practiceStudent(context); const id = practiceId(body.id); const scenarioId = practiceId(body.scenarioId);
   const existing = await context.db.prepare("SELECT scenario_id FROM journey_runs WHERE id=? AND tenant_id=? AND user_id=?").bind(id, context.tenantId, context.userId).first<{ scenario_id: string }>();
-  if (existing) { if (existing.scenario_id !== scenarioId) throw new Error("practice_record_conflict"); return readJourneyCatalog(context, id); }
+  if (existing) { if (existing.scenario_id !== scenarioId) throw new Error("practice_record_conflict"); await activityPracticeTask(context, "journey", id, body.practiceTaskId, false); return readJourneyCatalog(context, id); }
+  const task = body.practiceTaskId === undefined ? null : await ownPracticeTask(context, body.practiceTaskId, "journey");
+  if (task && task.snapshot.scenario?.id !== scenarioId) throw new Error("invalid_practice_task_target");
   const source = await context.db.prepare(`SELECT d.*,c.name AS className,u.display_name AS authorName FROM dialogue_scenarios d JOIN classes c ON c.id=d.class_id AND c.tenant_id=d.tenant_id JOIN users u ON u.id=d.created_by WHERE d.id=? AND d.tenant_id=?`).bind(scenarioId, context.tenantId).first<{ id: string; class_id: string; title: string; content_json: string; className: string; authorName: string; revision: number }>();
   if (!source) throw new Error("journey_unavailable");
-  const content = JSON.parse(source.content_json) as DialogueContent; const definition = content.journey;
+  const content = task?.snapshot.scenario ?? JSON.parse(source.content_json) as DialogueContent; const definition = content.journey;
   if (!definition) throw new Error("journey_unavailable");
-  const lesson = await resolveReadingLesson(context, definition.lessonId, false, source.class_id);
+  const lesson = task?.snapshot.lesson ?? await resolveReadingLesson(context, definition.lessonId, false, source.class_id);
   if (!definition.characters.every((value) => lesson.sentences.join("").includes(value))) throw new Error("journey_unavailable");
-  const snapshot: JourneySnapshot = { title: source.title, className: source.className, lesson, characters: definition.characters };
-  const dialogue: DialogueScenario = { ...content, id: source.id, title: source.title, classId: source.class_id, className: source.className, authorName: source.authorName, revision: source.revision, status: "published" };
-  const sessionId = crypto.randomUUID(); const guard = journeySourceGuard(context, source.id, source.class_id);
-  if (lesson.source) {
+  const snapshot: JourneySnapshot = { title: task?.snapshot.scenario?.title ?? source.title, className: source.className, lesson, characters: task?.snapshot.characters ?? definition.characters };
+  const dialogue: DialogueScenario = task?.snapshot.scenario ?? { ...content, id: source.id, title: source.title, classId: source.class_id, className: source.className, authorName: source.authorName, revision: source.revision, status: "published" };
+  const sessionId = crypto.randomUUID(); const guard = task ? taskGuard(context, task.id) : journeySourceGuard(context, source.id, source.class_id);
+  if (lesson.source && !task) {
     guard.sql += " AND EXISTS (SELECT 1 FROM teacher_reading_lessons WHERE id=? AND tenant_id=? AND class_id=? AND revision=? AND status='published')";
     guard.args.push(lesson.id, context.tenantId, source.class_id, lesson.source.revision);
   }
-  const turns: DialogueTurn[] = [{ id: crypto.randomUUID(), kind: "role", text: content.opening, step: 0, at: new Date().toISOString(), provider: "script" }];
+  const turns: DialogueTurn[] = [{ id: crypto.randomUUID(), kind: "role", text: dialogue.opening, step: 0, at: new Date().toISOString(), provider: "script" }];
   const [result] = await context.db.batch([
     context.db.prepare(`INSERT OR IGNORE INTO journey_runs (id,tenant_id,user_id,scenario_id,class_id,snapshot_json,dialogue_session_id) SELECT ?,?,?,?,?,?,? WHERE ${guard.sql} AND EXISTS (SELECT 1 FROM dialogue_scenarios WHERE id=? AND tenant_id=? AND revision=?)`).bind(id, context.tenantId, context.userId, source.id, source.class_id, JSON.stringify(snapshot), sessionId, ...guard.args, source.id, context.tenantId, source.revision),
     context.db.prepare("INSERT INTO dialogue_sessions (id,tenant_id,user_id,class_id,scenario_id,snapshot_json,turns_json) SELECT ?,?,?,?,?,?,? WHERE changes()>0").bind(sessionId, context.tenantId, context.userId, source.class_id, source.id, JSON.stringify(dialogue), JSON.stringify(turns)),
     auditStatement(context.db, context.tenantId, context.userId, "journey.started", "journey-run", id, { scenarioId }, true),
+    ...(task ? [taskActivityStatement(context, task.id, "journey", id)] : []),
   ]);
   if (!result.meta.changes) {
     const replay = await context.db.prepare("SELECT scenario_id FROM journey_runs WHERE id=? AND tenant_id=? AND user_id=?").bind(id, context.tenantId, context.userId).first<{ scenario_id: string }>();
     if (!replay || replay.scenario_id !== scenarioId) throw new Error("journey_unavailable");
+    await activityPracticeTask(context, "journey", id, body.practiceTaskId, false);
   }
   return readJourneyCatalog(context, id);
 }

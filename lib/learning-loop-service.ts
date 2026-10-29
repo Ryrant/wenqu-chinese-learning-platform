@@ -372,10 +372,11 @@ export async function updateRecommendationStatus(db: PlatformDatabase, context: 
       throw new Error("forbidden");
     }
   }
+  if (await db.prepare("SELECT id FROM practice_tasks WHERE id=? AND tenant_id=?").bind(input.id, context.tenantId).first()) throw new Error("practice_task_required");
   const [result] = await db.batch([
     db.prepare(`UPDATE learning_recommendations SET status=?,updated_at=CURRENT_TIMESTAMP,
     completed_at=CASE WHEN ?='completed' THEN CURRENT_TIMESTAMP ELSE NULL END
-    WHERE id=? AND tenant_id=? AND archived_at IS NULL`)
+    WHERE id=? AND tenant_id=? AND archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM practice_tasks t WHERE t.id=learning_recommendations.id AND t.tenant_id=learning_recommendations.tenant_id)`)
       .bind(input.status, input.status, input.id, context.tenantId),
     auditStatement(db, context.tenantId, context.userId, "recommendation.status_updated", "learning_recommendation", input.id, { status: input.status }, true),
   ]);

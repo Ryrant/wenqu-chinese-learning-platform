@@ -1,4 +1,5 @@
 import { auditStatement } from "./audit";
+import { activityPracticeTask, ownPracticeTask, taskActivityStatement, taskCompletionStatements, taskGuard } from "./practice-task-support";
 import { practiceId, practiceStudent } from "./journey-service";
 import { readReadingCatalog, resolveReadingLesson } from "./reading-content-service";
 import { readReadingVocabulary } from "./reading-vocabulary-service";
@@ -47,9 +48,9 @@ async function retries(context: PlatformContext) {
   }
   return { rows, pending };
 }
-function session(row: Row, lessons: ReadingLesson[], retryCount: number): DictationSession {
+function session(row: Row, lessons: ReadingLesson[], retryCount: number, taskAvailable = true): DictationSession {
   const source = JSON.parse(row.source_json) as Source; const items = JSON.parse(row.snapshot_json) as Item[]; const state = JSON.parse(row.state_json) as State;
-  const item = items[state.index]; const canContinue = available(source, lessons);
+  const item = items[state.index]; const canContinue = available(source, lessons) && taskAvailable;
   return { id: row.id, kind: source.kind, sourceTitle: `${source.retryOf ? "错项重练 · " : ""}${source.title}`, revision: row.revision, total: items.length, retryCount, index: state.index, complete: !!row.completed_at, available: canContinue,
     question: item && !row.completed_at && canContinue ? { id: `${row.id}:${state.index}`, speechText: item.expected, sourceTitle: item.sourceTitle, pinyin: state.hints[state.index] ? item.pinyin : "", referenceVisible: !!state.hints[state.index] } : null, answers: state.answers, createdAt: row.created_at };
 }
@@ -60,7 +61,7 @@ export async function readDictation(context: PlatformContext, focusId = ""): Pro
   const retrySessionId = retryState.rows.toReversed().find((row) => retryState.pending.get(row.id)?.size && available(JSON.parse(row.sourceJson) as Source, catalog.lessons))?.id ?? null;
   const count = await context.db.prepare("SELECT COUNT(*) AS count FROM student_vocabulary WHERE tenant_id=? AND user_id=?").bind(context.tenantId, context.userId).first<{ count: number }>();
   const rows = await context.db.prepare("SELECT * FROM dictation_sessions WHERE tenant_id=? AND user_id=? ORDER BY CASE WHEN completed_at IS NULL THEN 0 WHEN id=? THEN 1 WHEN id=? THEN 2 ELSE 3 END,created_at DESC,rowid DESC LIMIT 10").bind(context.tenantId, context.userId, focusId, retrySessionId).all<Row>();
-  const recent = rows.results.map((row) => session(row, catalog.lessons, retryState.pending.get(row.id)?.size ?? 0));
+  const recent = await Promise.all(rows.results.map(async (row) => session(row, catalog.lessons, retryState.pending.get(row.id)?.size ?? 0, (await activityPracticeTask(context, "dictation", row.id, undefined, false))?.available !== 0)));
   return { lessons: catalog.lessons.map(({ id, title, level, source }) => ({ id, title, level, ...(source ? { source } : {}) })), wordCount: count?.count ?? 0, retrySessionId, active: recent.find((item) => !item.complete) ?? null, recent };
 }
 
@@ -71,11 +72,15 @@ export async function startDictation(context: PlatformContext, body: Record<stri
   const parentId = retry ? practiceId(body.sessionId) : "";
   if (!retry && body.kind !== "vocabulary" && (typeof body.lessonId !== "string" || !body.lessonId || body.lessonId.length > 120)) throw new Error("invalid_dictation_source");
   const sourceRevision = !retry && body.kind !== "vocabulary" ? integer(body.sourceRevision ?? 0, 1000000) : 0;
-  const payload = JSON.stringify(retry ? { action: "retry", sessionId: parentId } : { action: "start", kind: body.kind, ...(body.kind !== "vocabulary" ? { lessonId: body.lessonId, sourceRevision } : {}) });
+  const taskId = body.practiceTaskId === undefined ? null : practiceId(body.practiceTaskId);
+  if (retry && taskId) throw new Error("invalid_practice_task_target");
+  const payload = JSON.stringify(retry ? { action: "retry", sessionId: parentId } : { action: "start", kind: body.kind, ...(body.kind !== "vocabulary" ? { lessonId: body.lessonId, sourceRevision } : {}), ...(taskId ? { practiceTaskId: taskId } : {}) });
   const existing = await context.db.prepare("SELECT payload_json FROM dictation_sessions WHERE id=? AND tenant_id=? AND user_id=?").bind(id, context.tenantId, context.userId).first<{ payload_json: string }>();
   if (existing) { if (existing.payload_json !== payload) throw new Error("dictation_conflict"); return readDictation(context, id); }
   const active = await context.db.prepare("SELECT id,payload_json FROM dictation_sessions WHERE tenant_id=? AND user_id=? AND completed_at IS NULL").bind(context.tenantId, context.userId).first<{ id: string; payload_json: string }>();
   if (active) { if (active.id !== id) throw new Error("dictation_in_progress"); if (active.payload_json !== payload) throw new Error("dictation_conflict"); return readDictation(context, id); }
+  const task = taskId ? await ownPracticeTask(context, taskId, "dictation") : null;
+  if (task && (body.kind !== task.snapshot.dictationKind || body.lessonId !== task.snapshot.lesson?.id || sourceRevision !== (task.snapshot.lesson?.source?.revision ?? 0))) throw new Error("invalid_practice_task_target");
   let source: Source; let items: Item[];
   if (retry) {
     const parent = await ownSession(context, parentId); if (!parent.completed_at) throw new Error("invalid_dictation_incomplete");
@@ -88,7 +93,7 @@ export async function startDictation(context: PlatformContext, body: Record<stri
     source = { kind: "vocabulary", title: "我的生词本" };
     items = (await readReadingVocabulary(context)).map((word) => ({ expected: word.word, sourceTitle: word.lessonTitle, pinyin: word.pinyin }));
   } else {
-    const lesson = await resolveReadingLesson(context, String(body.lessonId));
+    const lesson = task?.snapshot.lesson ?? await resolveReadingLesson(context, String(body.lessonId));
     if ((lesson.source?.revision ?? 0) !== sourceRevision) throw new Error("reading_lesson_changed");
     source = { kind: body.kind as "words" | "sentences", title: lesson.title, lessonId: lesson.id, ...(lesson.source ? { classId: lesson.source.classId, revision: lesson.source.revision } : {}) };
     items = body.kind === "sentences" ? lesson.sentences.map((expected) => ({ expected, sourceTitle: lesson.title, pinyin: "" })) : lesson.focusWords.map((word) => ({ expected: word, sourceTitle: lesson.title, pinyin: lesson.terms.find((term) => term.word === word)!.pinyin }));
@@ -96,13 +101,14 @@ export async function startDictation(context: PlatformContext, body: Record<stri
   const byText = new Map<string, Item>();
   for (const item of items) { const key = normalizeDictation(item.expected); if (key && !byText.has(key)) byText.set(key, item); }
   const unique = [...byText.values()];
-  items = shuffle(unique).slice(0, 5);
+  items = task?.snapshot.items ?? shuffle(unique).slice(0, 5);
   if (!items.length) throw new Error("dictation_empty");
-  const guard = sourceGuard(context, source, !retry);
+  const guard = task ? taskGuard(context, task.id) : sourceGuard(context, source, !retry);
   const state: State = { index: 0, hints: {}, answers: [], receipts: [] };
   await context.db.batch([
     context.db.prepare(`INSERT OR IGNORE INTO dictation_sessions (id,tenant_id,user_id,source_json,snapshot_json,payload_json,state_json) SELECT ?,?,?,?,?,?,? WHERE ${guard.sql}`).bind(id, context.tenantId, context.userId, JSON.stringify(source), JSON.stringify(items), payload, JSON.stringify(state), ...guard.args),
     auditStatement(context.db, context.tenantId, context.userId, "dictation.started", "dictation-session", id, { kind: source.kind, count: items.length, ...(retry ? { retryOf: parentId } : {}) }, true),
+    ...(task ? [taskActivityStatement(context, task.id, "dictation", id)] : []),
   ]);
   const saved = await context.db.prepare("SELECT id,payload_json FROM dictation_sessions WHERE tenant_id=? AND user_id=? AND (id=? OR completed_at IS NULL) ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END LIMIT 1").bind(context.tenantId, context.userId, id, id).first<{ id: string; payload_json: string }>();
   if (!saved) throw new Error("dictation_source_unavailable");
@@ -123,6 +129,7 @@ export async function changeDictation(context: PlatformContext, body: Record<str
     if (previous.kind !== body.action || previous.revision !== revision || (body.action === "answer" && (previous.answer !== input || previous.playCount !== playCount))) throw new Error("dictation_conflict");
     return readDictation(context, id);
   }
+  const task = await activityPracticeTask(context, "dictation", id, body.practiceTaskId, body.action !== "finish");
   if (row.completed_at && body.action === "finish") return readDictation(context, id);
   if (row.revision !== revision) throw new Error("dictation_changed");
   if (row.completed_at) throw new Error("invalid_dictation_complete");
@@ -137,10 +144,11 @@ export async function changeDictation(context: PlatformContext, body: Record<str
     next.index++;
   }
   const done = body.action === "finish" || next.index >= items.length;
-  const guard = body.action === "finish" ? { sql: "1=1", args: [] } : sourceGuard(context, source);
+  const guard = body.action === "finish" ? { sql: "1=1", args: [] } : task ? taskGuard(context, task.id) : sourceGuard(context, source);
   const [saved] = await context.db.batch([
     context.db.prepare(`UPDATE dictation_sessions SET state_json=?,revision=revision+1,completed_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=? AND tenant_id=? AND user_id=? AND revision=? AND completed_at IS NULL AND ${guard.sql}`).bind(JSON.stringify(next), done ? 1 : 0, id, context.tenantId, context.userId, revision, ...guard.args),
     auditStatement(context.db, context.tenantId, context.userId, `dictation.${body.action}`, "dictation-session", id, { requestId, index: state.index }, true),
+    ...(task ? taskCompletionStatements(context, task.id) : []),
   ]);
   if (!saved.meta.changes) {
     const latest = JSON.parse((await ownSession(context, id)).state_json) as State;

@@ -3,7 +3,7 @@ import { readPracticeHistory, savePractice } from "../../../../lib/practice-serv
 
 const headers = { "Cache-Control": "private, no-store" };
 export async function GET(request: Request) {
-  try { const context = await platformContext(request); const query = new URL(request.url).searchParams; return Response.json(await readPracticeHistory(context, query.get("kind") ?? "", (query.get("referenceId") ?? "").slice(0, 120), query.get("journeyRunId") ?? ""), { headers }); }
+  try { const context = await platformContext(request); const query = new URL(request.url).searchParams; return Response.json(await readPracticeHistory(context, query.get("kind") ?? "", (query.get("referenceId") ?? "").slice(0, 120), query.get("journeyRunId") ?? "", query.get("practiceTaskId") ?? ""), { headers }); }
   catch (reason) { return platformApiError(reason); }
 }
 export async function POST(request: Request) {

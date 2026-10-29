@@ -8,23 +8,24 @@ import type { DialogueTurn } from "./dialogue-types";
 
 export const practiceKinds: PracticeKind[] = ["writing", "reading", "vocabulary", "dictation", "journey"];
 export type ActivityRow = { id: string; kind: PracticeKind; title: string; createdAt: string; status: PracticeTimelineEntry["status"]; sourceJson: string; resultJson: string; stateJson: string; classId: string | null; userId: string; sequence: number };
-type Markers = { p: number; v: number; d: number; j: number };
-type Position = { at: string; kind: PracticeKind; id: string };
-type Cursor = { period: 7 | 30; asOf: string; markers: Markers; after: Position | null };
+export type Markers = { p: number; v: number; d: number; j: number };
+export type Position = { at: string; kind: PracticeKind; id: string };
+export type PracticeCursor = { period: 7 | 30; asOf: string; markers: Markers; after: Position | null };
 
 // 时间线按保存/开始时间排序，进度仍展示读取时最新保存结果。行号边界防止同秒新记录挤入后续页。
-export const practiceActivitySql = `WITH activities AS (
+export function practiceActivitiesSql(owner = true) { return `WITH activities AS (
  SELECT p.id,p.kind,p.title,strftime('%Y-%m-%dT%H:%M:%fZ',p.created_at) AS createdAt,'finished' AS status,p.snapshot_json AS sourceJson,p.result_json AS resultJson,'{}' AS stateJson,
- COALESCE((SELECT j.class_id FROM journey_runs j WHERE j.id=p.journey_run_id AND j.tenant_id=p.tenant_id AND j.user_id=p.user_id),CASE WHEN p.kind='reading' THEN json_extract(p.snapshot_json,'$.source.classId') END) AS classId,p.user_id AS userId,p.rowid AS sequence
- FROM practice_records p WHERE p.tenant_id=? AND p.user_id=?
+ COALESCE((SELECT t.class_id FROM practice_task_activities pa JOIN practice_tasks t ON t.id=pa.task_id AND t.tenant_id=pa.tenant_id WHERE pa.tenant_id=p.tenant_id AND pa.user_id=p.user_id AND pa.activity_kind=p.kind AND pa.activity_id=p.id),(SELECT j.class_id FROM journey_runs j WHERE j.id=p.journey_run_id AND j.tenant_id=p.tenant_id AND j.user_id=p.user_id),CASE WHEN p.kind='reading' THEN json_extract(p.snapshot_json,'$.source.classId') END) AS classId,p.user_id AS userId,p.rowid AS sequence
+ FROM practice_records p WHERE p.tenant_id=? ${owner ? "AND p.user_id=?" : ""}
  UNION ALL
- SELECT v.id,'vocabulary','生词复习',strftime('%Y-%m-%dT%H:%M:%fZ',v.created_at),CASE WHEN v.completed_at IS NULL THEN 'active' WHEN json_extract(v.state_json,'$.position')>=json_array_length(v.state_json,'$.queue') THEN 'finished' ELSE 'ended' END,v.snapshot_json,'{}',v.state_json,NULL,v.user_id,v.rowid FROM vocabulary_review_sessions v WHERE v.tenant_id=? AND v.user_id=?
+ SELECT v.id,'vocabulary','生词复习',strftime('%Y-%m-%dT%H:%M:%fZ',v.created_at),CASE WHEN v.completed_at IS NULL THEN 'active' WHEN json_extract(v.state_json,'$.position')>=json_array_length(v.state_json,'$.queue') THEN 'finished' ELSE 'ended' END,v.snapshot_json,'{}',v.state_json,NULL,v.user_id,v.rowid FROM vocabulary_review_sessions v WHERE v.tenant_id=? ${owner ? "AND v.user_id=?" : ""}
  UNION ALL
- SELECT d.id,'dictation',json_extract(d.source_json,'$.title'),strftime('%Y-%m-%dT%H:%M:%fZ',d.created_at),CASE WHEN d.completed_at IS NULL THEN 'active' WHEN json_extract(d.state_json,'$.index')>=json_array_length(d.snapshot_json) THEN 'finished' ELSE 'ended' END,d.snapshot_json,d.source_json,d.state_json,json_extract(d.source_json,'$.classId'),d.user_id,d.rowid FROM dictation_sessions d WHERE d.tenant_id=? AND d.user_id=?
+ SELECT d.id,'dictation',json_extract(d.source_json,'$.title'),strftime('%Y-%m-%dT%H:%M:%fZ',d.created_at),CASE WHEN d.completed_at IS NULL THEN 'active' WHEN json_extract(d.state_json,'$.index')>=json_array_length(d.snapshot_json) THEN 'finished' ELSE 'ended' END,d.snapshot_json,d.source_json,d.state_json,COALESCE((SELECT t.class_id FROM practice_task_activities pa JOIN practice_tasks t ON t.id=pa.task_id AND t.tenant_id=pa.tenant_id WHERE pa.tenant_id=d.tenant_id AND pa.user_id=d.user_id AND pa.activity_kind='dictation' AND pa.activity_id=d.id),json_extract(d.source_json,'$.classId')),d.user_id,d.rowid FROM dictation_sessions d WHERE d.tenant_id=? ${owner ? "AND d.user_id=?" : ""}
  UNION ALL
  SELECT j.id,'journey',json_extract(j.snapshot_json,'$.title'),strftime('%Y-%m-%dT%H:%M:%fZ',j.created_at),CASE WHEN j.stage=3 THEN 'finished' ELSE 'active' END,j.snapshot_json,json_object('stage',j.stage,'steps',s.step,'hints',s.hint_count,'turns',json(s.turns_json)),'{}',j.class_id,j.user_id,j.rowid
- FROM journey_runs j JOIN dialogue_sessions s ON s.id=j.dialogue_session_id AND s.tenant_id=j.tenant_id AND s.user_id=j.user_id WHERE j.tenant_id=? AND j.user_id=?
-)`;
+ FROM journey_runs j JOIN dialogue_sessions s ON s.id=j.dialogue_session_id AND s.tenant_id=j.tenant_id AND s.user_id=j.user_id WHERE j.tenant_id=? ${owner ? "AND j.user_id=?" : ""}
+)`; }
+export const practiceActivitySql = practiceActivitiesSql();
 
 export function activityArgs(tenantId: string, userId: string) { return [tenantId, userId, tenantId, userId, tenantId, userId, tenantId, userId]; }
 export function activityEntry(row: ActivityRow): PracticeTimelineEntry {
@@ -74,11 +75,11 @@ export function activityDetail(row: ActivityRow): PracticeDetail {
   return detail;
 }
 
-function encodeCursor(cursor: Cursor) { return btoa(JSON.stringify(cursor)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", ""); }
-function decodeCursor(value: string, period: 7 | 30): Cursor {
+export function encodeCursor(cursor: PracticeCursor) { return btoa(JSON.stringify(cursor)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", ""); }
+export function decodeCursor(value: string, period: 7 | 30): PracticeCursor {
   try {
     if (value.length > 2048) throw new Error();
-    const data = JSON.parse(atob(value.replaceAll("-", "+").replaceAll("_", "/"))) as Cursor;
+    const data = JSON.parse(atob(value.replaceAll("-", "+").replaceAll("_", "/"))) as PracticeCursor;
     if (data.period !== period || new Date(data.asOf).toISOString() !== data.asOf || Date.parse(data.asOf) > Date.now() + 1000 || !data.markers || ["p", "v", "d", "j"].some((key) => !Number.isSafeInteger(data.markers[key as keyof Markers]) || data.markers[key as keyof Markers] < 0)) throw new Error();
     if (data.after && (!practiceKinds.includes(data.after.kind) || new Date(data.after.at).toISOString() !== data.after.at || practiceId(data.after.id) !== data.after.id)) throw new Error();
     return data;
@@ -89,7 +90,7 @@ export async function readPracticeArchive(context: PlatformContext, query: URLSe
   practiceStudent(context);
   const value = query.get("period") ?? "30"; if (value !== "7" && value !== "30") throw new Error("invalid_practice_period");
   const period = Number(value) as 7 | 30; const { db, tenantId, userId } = context;
-  let cursor: Cursor;
+  let cursor: PracticeCursor;
   if (query.get("cursor")) cursor = decodeCursor(query.get("cursor")!, period);
   else {
     const markers = await db.prepare("SELECT COALESCE((SELECT MAX(rowid) FROM practice_records WHERE tenant_id=? AND user_id=?),0) AS p,COALESCE((SELECT MAX(rowid) FROM vocabulary_review_sessions WHERE tenant_id=? AND user_id=?),0) AS v,COALESCE((SELECT MAX(rowid) FROM dictation_sessions WHERE tenant_id=? AND user_id=?),0) AS d,COALESCE((SELECT MAX(rowid) FROM journey_runs WHERE tenant_id=? AND user_id=?),0) AS j").bind(...activityArgs(tenantId, userId)).first<Markers>();

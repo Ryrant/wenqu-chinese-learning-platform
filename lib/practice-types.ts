@@ -1,3 +1,4 @@
+import { practiceTaskError } from "./practice-task-types";
 import type { ReadingLesson } from "./reading-lessons";
 import type { EvidencePlanItem } from "./learning-plan-types";
 import type { LearningAnalyticsState } from "./learning-analytics";
@@ -20,6 +21,7 @@ export type JourneyCatalog = { journeys: JourneySummary[]; runs: JourneyRun[] };
 
 export function practiceError(reason: unknown) {
   const code = reason instanceof Error ? reason.message : "";
+  if (code.startsWith("practice_task_")) return practiceTaskError(reason);
   if (code === "journey_unavailable") return "任务已归档或班级权限有变化，已有练习仍可回看。";
   if (code === "journey_stage_locked") return "请先完成前一关，再继续当前练习。";
   if (code === "practice_record_conflict") return "本次记录与已有内容不一致，请重新读取后再开始一轮。";

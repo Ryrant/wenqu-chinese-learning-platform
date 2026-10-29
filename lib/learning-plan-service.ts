@@ -1,5 +1,6 @@
 import { readAbilityProfile } from "./ability-profile-service";
 import { readPracticeNextActions } from "./practice-overview-service";
+import { readAssignedPracticePlan } from "./practice-task-service";
 import { ABILITY_LABELS, type Ability } from "./diagnostic-types";
 import { measureIntervention } from "./intervention-support";
 import { isRecommendationDue, rankLearningPlan } from "./learning-loop";
@@ -13,14 +14,15 @@ const text = (value: unknown) => typeof value === "string" ? value : "";
 
 export async function readLearningPlan(context: PlatformContext, studentId: string | null, sequences: LearningSequence[], objectives: Row[]): Promise<EvidencePlanItem[]> {
   if (!studentId) return [];
+  const assigned = await readAssignedPracticePlan(context, studentId);
   let profile;
   try { profile = await readAbilityProfile(context, studentId); }
   catch (error) {
     // 无有效学生身份或授权时不生成个人计划；数据库等真实错误仍向上抛出。
-    if (error instanceof Error && error.message === "ability_profile_not_found") return [];
+    if (error instanceof Error && error.message === "ability_profile_not_found") return rankLearningPlan(assigned);
     throw error;
   }
-  if (profile.available === false) return [];
+  if (profile.available === false) return rankLearningPlan(assigned);
   const { db, tenantId } = context;
   const [assignments, recommendations] = await Promise.all([
     db.prepare(`SELECT a.*,group_concat(DISTINCT ao.objective_id) AS objectiveIds,
@@ -38,6 +40,7 @@ export async function readLearningPlan(context: PlatformContext, studentId: stri
         ORDER BY latest.created_at DESC,latest.rowid DESC LIMIT 1)
       WHERE lr.tenant_id=? AND lr.student_user_id=? AND lr.status='pending' AND lr.archived_at IS NULL
         AND lr.source_type IN ('teacher','family','diagnostic')
+        AND NOT EXISTS (SELECT 1 FROM practice_tasks pt WHERE pt.id=lr.id AND pt.tenant_id=lr.tenant_id)
         AND (lr.source_type!='diagnostic' OR lr.objective_id=di.objective_id)`).bind(tenantId, studentId).all<Row>(),
   ]);
   const eligible = new Map(assignments.results.map((item) => [text(item.id), item]));
@@ -63,7 +66,7 @@ export async function readLearningPlan(context: PlatformContext, studentId: stri
     return { basis, supportMatch };
   };
   const now = new Date();
-  const candidates: EvidencePlanItem[] = await readPracticeNextActions(context, studentId);
+  const candidates: EvidencePlanItem[] = [...assigned, ...await readPracticeNextActions(context, studentId)];
   for (const item of recommendations.results) {
     const dueAt = text(item.due_at) || null;
     const family = item.source_type === "family";

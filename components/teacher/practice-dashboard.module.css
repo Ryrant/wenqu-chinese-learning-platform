@@ -1,0 +1,23 @@
+.page { display: grid; gap: 1.5rem; min-width: 0; }
+.filters { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; }
+.filters label { flex: 1 1 11rem; }
+.page label { display: grid; gap: .5rem; min-width: 0; }
+.page select { width: 100%; }
+.panel { padding: 1.5rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); min-width: 0; }
+.panel > p { margin-top: .75rem; }
+.note, .row small, .form small { color: var(--muted-foreground); font-size: .875rem; line-height: 1.6; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 1rem; margin-top: 1rem; }
+.metrics dt { font-weight: 600; }
+.metrics dd { margin-top: .5rem; color: var(--muted-foreground); }
+.form fieldset { display: grid; gap: 1rem; margin-top: 1rem; min-width: 0; }
+.form button[type=submit] { justify-self: start; }
+.row { display: flex; justify-content: space-between; align-items: start; gap: 1rem; padding: 1.25rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.row h3 { font-weight: 600; }
+.row p { white-space: pre-wrap; margin-top: .35rem; }
+.row small { display: block; margin-top: .35rem; }
+.row button { flex-shrink: 0; }
+.wrongWords { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+.wrongWords button { white-space: normal; height: auto; max-width: 100%; overflow-wrap: anywhere; }
+.detail { padding: 1rem; margin-top: 1rem; border: 1px solid var(--border); border-radius: var(--radius); }
+.pagination { display: flex; gap: 1rem; align-items: center; justify-content: end; margin-top: 1.25rem; }
+@media (max-width: 640px) { .panel { padding: 1rem; } .row { flex-direction: column; } .pagination { justify-content: space-between; } }

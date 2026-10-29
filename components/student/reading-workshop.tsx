@@ -12,7 +12,7 @@ import type { ReadingCatalog } from "@/lib/reading-content-service";
 import { usePracticeSelection } from "@/lib/workspace/use-practice-selection";
 import styles from "./reading-workshop.module.css";
 
-function WordQuiz({ lesson, journeyRunId, onSaved }: { lesson: ReadingLesson; journeyRunId?: string; onSaved?: () => void }) {
+function WordQuiz({ lesson, journeyRunId, practiceTaskId, onSaved }: { lesson: ReadingLesson; journeyRunId?: string; practiceTaskId?: string; onSaved?: () => void }) {
   const [questions, setQuestions] = useState(() => createReadingQuiz(lesson));
   const [answers, setAnswers] = useState<Record<number, number>>({});
   const [checked, setChecked] = useState(false);
@@ -23,21 +23,21 @@ function WordQuiz({ lesson, journeyRunId, onSaved }: { lesson: ReadingLesson; jo
   const changed = useRef(0);
   useEffect(() => {
     const controller = new AbortController(); const version = changed.current;
-    void requestJson<PracticeHistory>(`/api/v1/practice?kind=reading&referenceId=${encodeURIComponent(lesson.id)}${journeyRunId ? `&journeyRunId=${journeyRunId}` : ""}`, { signal: controller.signal, cache: "no-store" }).then((data) => {
+    void requestJson<PracticeHistory>(`/api/v1/practice?kind=reading&referenceId=${encodeURIComponent(lesson.id)}${journeyRunId ? `&journeyRunId=${journeyRunId}` : ""}${practiceTaskId ? `&practiceTaskId=${practiceTaskId}` : ""}`, { signal: controller.signal, cache: "no-store" }).then((data) => {
       if (!controller.signal.aborted && version === changed.current) setLast(data.records[0] ?? null);
     }).catch(() => { if (!controller.signal.aborted && version === changed.current) setError("历史自测暂时没有读取成功，本轮仍可作答并保存。"); });
     return () => controller.abort();
-  }, [lesson.id, journeyRunId]);
+  }, [lesson.id, journeyRunId, practiceTaskId]);
   async function submit(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); changed.current++;
     try {
-      const data = await postJson<{ record: PracticeRecord }>("/api/v1/practice", { id, kind: "reading", referenceId: lesson.id, sourceRevision: lesson.source?.revision ?? 0, journeyRunId, answers: questions.map((question, index) => ({ word: question.word, meaning: question.options[answers[index]] })) });
+      const data = await postJson<{ record: PracticeRecord }>("/api/v1/practice", { id, kind: "reading", referenceId: lesson.id, sourceRevision: lesson.source?.revision ?? 0, journeyRunId, practiceTaskId, answers: questions.map((question, index) => ({ word: question.word, meaning: question.options[answers[index]] })) });
       setLast(data.record); setChecked(true); onSaved?.();
     } catch (reason) { setError(practiceError(reason)); }
     finally { setBusy(false); }
   }
   return <section className={styles.quiz} aria-label="词语小练习">
-    <div className={styles.sectionHeading}><div><h2>读完，试试这三个词</h2><p>自测结果保存到本人账号，不计入课程成绩。</p></div><Button variant="ghost" disabled={busy} onClick={() => { setQuestions(createReadingQuiz(lesson)); setAnswers({}); setChecked(false); setId(crypto.randomUUID()); setError(""); }}><RefreshCw/>换一组</Button></div>
+    <div className={styles.sectionHeading}><div><h2>读完，试试这三个词</h2><p>{practiceTaskId || journeyRunId ? "结果保存到本班关联练习，老师可回看；不计入课程成绩。" : "自测结果保存到本人账号，不计入课程成绩。"}</p></div><Button variant="ghost" disabled={busy} onClick={() => { setQuestions(createReadingQuiz(lesson)); setAnswers({}); setChecked(false); setId(crypto.randomUUID()); setError(""); }}><RefreshCw/>换一组</Button></div>
     <form onSubmit={submit}>
       {questions.map((question, index) => <fieldset key={`${index}:${question.word}`} disabled={checked || busy}><legend>{index + 1}. “{question.word}”在课文里是什么意思？</legend>
         {question.options.map((option, optionIndex) => <label key={option}><input type="radio" name={`reading-question-${index}`} required checked={answers[index] === optionIndex} onChange={() => { setAnswers({ ...answers, [index]: optionIndex }); setId(crypto.randomUUID()); }}/><span>{option}</span></label>)}
@@ -50,8 +50,8 @@ function WordQuiz({ lesson, journeyRunId, onSaved }: { lesson: ReadingLesson; jo
   </section>;
 }
 
-function ReadingSession({ lesson, vocabulary, busy, save, notify, journeyRunId, onSaved, preview = false }: {
-  lesson: ReadingLesson; vocabulary: SavedReadingWord[] | null; busy: boolean; save: (term: ReadingTerm) => void; notify: Notify; journeyRunId?: string; onSaved?: () => void; preview?: boolean;
+function ReadingSession({ lesson, vocabulary, busy, save, notify, journeyRunId, practiceTaskId, onSaved, preview = false }: {
+  lesson: ReadingLesson; vocabulary: SavedReadingWord[] | null; busy: boolean; save: (term: ReadingTerm) => void; notify: Notify; journeyRunId?: string; practiceTaskId?: string; onSaved?: () => void; preview?: boolean;
 }) {
   const [showPinyin, setShowPinyin] = useState(true);
   const [selected, setSelected] = useState<ReadingTerm | null>(null);
@@ -107,13 +107,13 @@ function ReadingSession({ lesson, vocabulary, busy, save, notify, journeyRunId, 
       </aside>
     </div>
     <Sheet open={definitionOpen} onOpenChange={setDefinitionOpen}><SheetContent side="bottom" className="max-h-[80dvh] overflow-y-auto" onCloseAutoFocus={(event) => { event.preventDefault(); definitionTrigger.current?.focus(); }}><SheetHeader><SheetTitle>{selected?.word ?? "词语释义"}</SheetTitle><SheetDescription>{selected?.pinyin}</SheetDescription></SheetHeader><div className={`${styles.definitionContent} px-4 pb-6`}>{definitionDetails}</div></SheetContent></Sheet>
-    {!preview && <WordQuiz lesson={lesson} journeyRunId={journeyRunId} onSaved={onSaved}/>}
+    {!preview && <WordQuiz lesson={lesson} journeyRunId={journeyRunId} practiceTaskId={practiceTaskId} onSaved={onSaved}/>}
   </>;
 }
 
 export function ReadingPreview({ lesson, notify }: { lesson: ReadingLesson; notify: Notify }) { return <ReadingSession lesson={lesson} notify={notify} vocabulary={[]} busy save={() => undefined} preview/>; }
 
-export default function ReadingWorkshop({ notify, fixedLesson, journeyRunId, onSaved, embedded = false }: { notify: Notify; fixedLesson?: ReadingLesson; journeyRunId?: string; onSaved?: () => void; embedded?: boolean }) {
+export default function ReadingWorkshop({ notify, fixedLesson, journeyRunId, practiceTaskId, onSaved, embedded = false }: { notify: Notify; fixedLesson?: ReadingLesson; journeyRunId?: string; practiceTaskId?: string; onSaved?: () => void; embedded?: boolean }) {
   const [lessonId, setLessonId] = usePracticeSelection("/student/reading", "lessonId", readingLessons[0].id, !embedded);
   const [lessons, setLessons] = useState<ReadingLesson[]>(readingLessons);
   const [pinnedLesson, setPinnedLesson] = useState<ReadingLesson | null>(null);
@@ -162,7 +162,7 @@ export default function ReadingWorkshop({ notify, fixedLesson, journeyRunId, onS
     {lessonError && <p role="alert">{lessonError}</p>}
     {updated && <div className={styles.error} role="status"><p>老师已发布课文新版本，当前保留原页面。加载新版本后再进行新的自测或收藏。</p><Button variant="outline" onClick={() => setPinnedLesson(currentLesson!)}>加载新版本</Button></div>}
     {error && <div className={styles.error} role="alert"><p>{error}</p><Button variant="outline" disabled={busy} onClick={() => setReload((value) => value + 1)}>重新读取生词本</Button></div>}
-    {unavailable ? <p role="status">这篇课文已归档或班级权限有变化，请选择其他课文。已经保存的练习和生词仍可回看。</p> : <ReadingSession key={`${lesson.id}:${lesson.source?.revision ?? 0}:${journeyRunId ?? ""}`} lesson={lesson} vocabulary={vocabulary} busy={busy} notify={notify} journeyRunId={journeyRunId} onSaved={onSaved} save={(term) => { void change({ action: "save", lessonId: lesson.id, sourceRevision: lesson.source?.revision ?? 0, journeyRunId, word: term.word }, `收藏“${term.word}”失败`); }}/>}
+    {unavailable ? <p role="status">这篇课文已归档或班级权限有变化，请选择其他课文。已经保存的练习和生词仍可回看。</p> : <ReadingSession key={`${lesson.id}:${lesson.source?.revision ?? 0}:${journeyRunId ?? ""}`} lesson={lesson} vocabulary={vocabulary} busy={busy} notify={notify} journeyRunId={journeyRunId} practiceTaskId={practiceTaskId} onSaved={onSaved} save={(term) => { void change({ action: "save", lessonId: lesson.id, sourceRevision: lesson.source?.revision ?? 0, journeyRunId, word: term.word }, `收藏“${term.word}”失败`); }}/>}
     {!embedded && <section id="reading-vocabulary" className={styles.vocabulary} aria-label="我的生词本">
       <div className={styles.sectionHeading}><div><h2>我的生词本</h2><p>保留课文里的读音、释义和例句，重新登录后也能回看。</p></div><Button variant="ghost" disabled={busy} onClick={() => setReload((value) => value + 1)}><RefreshCw/>重新读取</Button></div>
       {vocabulary === null ? <p className={styles.hint}>{error ? "生词本读取失败，可点击上方按钮重试。" : "正在读取生词本…"}</p> : vocabulary.length ? <ul>{vocabulary.map((item) => <li key={item.id}><div><strong>{item.word}</strong><span>{item.pinyin}</span><p>{item.meaning}</p><blockquote>{item.example}</blockquote><small>来自《{item.lessonTitle}》</small></div><Button variant="ghost" size="icon" disabled={busy} aria-label={`移除生词“${item.word}”`} onClick={() => { void change({ action: "remove", id: item.id }, `移除“${item.word}”失败`); }}><Trash2/></Button></li>)}</ul> : <p className={styles.hint}>还没有收藏的词。点课文中的词，把想复习的词收进来。</p>}

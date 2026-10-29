@@ -1,5 +1,6 @@
 import { readDictation } from "./dictation-service";
-import { practiceStudent } from "./journey-service";
+import { journeyLessonAvailableSql, practiceStudent } from "./journey-service";
+import { activityPracticeTask } from "./practice-task-support";
 import { readLearningAnalyticsState } from "./learning-analytics";
 import { rankLearningPlan } from "./learning-loop";
 import type { EvidencePlanItem } from "./learning-plan-types";
@@ -17,7 +18,7 @@ export async function readPracticeNextActions(context: PlatformContext, studentI
   if (!(await readLearningAnalyticsState(context.db, context.tenantId, studentId)).available) return [];
   const { db, tenantId } = context;
   const [journey, vocabulary, due, dictation] = await Promise.all([
-    db.prepare("SELECT j.id,j.stage,json_extract(j.snapshot_json,'$.title') AS title FROM journey_runs j JOIN dialogue_scenarios s ON s.id=j.scenario_id AND s.tenant_id=j.tenant_id AND s.class_id=j.class_id WHERE j.tenant_id=? AND j.user_id=? AND j.stage<3 AND s.status='published' AND EXISTS (SELECT 1 FROM enrollments e WHERE e.tenant_id=j.tenant_id AND e.class_id=j.class_id AND e.student_user_id=j.user_id AND e.status='active') ORDER BY j.created_at DESC,j.rowid DESC LIMIT 1")
+    db.prepare(`SELECT j.id,j.stage,json_extract(j.snapshot_json,'$.title') AS title FROM journey_runs j JOIN dialogue_scenarios s ON s.id=j.scenario_id AND s.tenant_id=j.tenant_id AND s.class_id=j.class_id WHERE j.tenant_id=? AND j.user_id=? AND j.stage<3 AND s.status='published' AND ${journeyLessonAvailableSql()} AND NOT EXISTS (SELECT 1 FROM practice_task_activities pa WHERE pa.tenant_id=j.tenant_id AND pa.user_id=j.user_id AND pa.activity_kind='journey' AND pa.activity_id=j.id) AND EXISTS (SELECT 1 FROM enrollments e WHERE e.tenant_id=j.tenant_id AND e.class_id=j.class_id AND e.student_user_id=j.user_id AND e.status='active') ORDER BY j.created_at DESC,j.rowid DESC LIMIT 1`)
       .bind(tenantId, studentId).first<{ id: string; stage: number; title: string }>(),
     db.prepare("SELECT id FROM vocabulary_review_sessions WHERE tenant_id=? AND user_id=? AND completed_at IS NULL").bind(tenantId, studentId).first<{ id: string }>(),
     db.prepare("SELECT COUNT(*) AS count FROM student_vocabulary v LEFT JOIN vocabulary_review_state s ON s.tenant_id=v.tenant_id AND s.user_id=v.user_id AND s.vocabulary_id=v.id WHERE v.tenant_id=? AND v.user_id=? AND (s.due_at IS NULL OR s.due_at<=?)")
@@ -28,7 +29,7 @@ export async function readPracticeNextActions(context: PlatformContext, studentI
   if (journey) items.push(action(studentId, journey.id, "继续主题：" + journey.title, "本轮已保存 " + journey.stage + "/3 关，继续当前关卡。", "/student/journeys?run=" + encodeURIComponent(journey.id), "resume"));
   if (vocabulary) items.push(action(studentId, vocabulary.id, "继续生词复习", "本人有一轮未完成的生词练习，继续已保存的题目。", "/student/vocabulary?sessionId=" + encodeURIComponent(vocabulary.id), "resume"));
   else if (due?.count) items.push(action(studentId, "vocabulary-due", "复习到期生词", "有 " + due.count + " 个收藏词语已到复习时间，每轮最多安排 5 个。", "/student/vocabulary", "due"));
-  if (dictation.active?.available) items.push(action(studentId, dictation.active.id, "继续听写：" + dictation.active.sourceTitle, "本轮已保存 " + dictation.active.answers.length + "/" + dictation.active.total + " 项，可以继续。", "/student/dictation?sessionId=" + encodeURIComponent(dictation.active.id), "resume"));
+  if (dictation.active?.available && !await activityPracticeTask(context, "dictation", dictation.active.id, undefined, false)) items.push(action(studentId, dictation.active.id, "继续听写：" + dictation.active.sourceTitle, "本轮已保存 " + dictation.active.answers.length + "/" + dictation.active.total + " 项，可以继续。", "/student/dictation?sessionId=" + encodeURIComponent(dictation.active.id), "resume"));
   else if (!dictation.active) {
     const last = dictation.recent.find((item) => item.id === dictation.retrySessionId);
     const wrong = last?.retryCount ?? 0;
