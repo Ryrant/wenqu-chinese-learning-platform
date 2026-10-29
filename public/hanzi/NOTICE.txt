@@ -1,6 +1,6 @@
 汉字笔顺数据来源与许可
 
-本目录中的 12 个 JSON 文件选自 hanzi-writer-data 2.0.1：
+本目录中的 161 个 JSON 文件选自 hanzi-writer-data 2.0.1：
 https://www.npmjs.com/package/hanzi-writer-data/v/2.0.1
 https://github.com/chanind/hanzi-writer-data
 

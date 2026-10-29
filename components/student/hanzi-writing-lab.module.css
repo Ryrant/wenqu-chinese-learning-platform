@@ -4,6 +4,11 @@
 .selection { display: grid; gap: 1.5rem; padding: 1.5rem 0; }
 .selectionHeading h2 { font-size: 1.1rem; font-weight: 600; line-height: 1.5; }
 .selectionHeading p { margin-top: .4rem; font-size: .875rem; color: var(--muted-foreground); }
+.filters { grid-column: 1 / -1; display: grid; gap: .75rem; min-width: 0; }
+.filters label { display: grid; gap: .35rem; min-width: 0; font-size: .875rem; }
+.filters select { width: 100%; }
+.filters p { color: var(--muted-foreground); font-size: .8rem; line-height: 1.6; }
+.library { max-height: 25rem; overflow-y: auto; align-content: start; padding: .2rem; }
 .characters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; }
 .characters button { position: relative; display: grid; justify-items: center; gap: .3rem; padding: .75rem .25rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); transition: background-color .15s, border-color .15s; }
 .characters button:hover { background: var(--secondary); border-color: var(--ring); }
@@ -56,6 +61,7 @@
   .page { gap: 1.1rem; }
   .selection { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   .characters { gap: .35rem; }
+  .library { max-height: 14rem; }
   .characters button { padding: .55rem .1rem; }
   .characters button > span { font-size: 1.4rem; }
   .characters small { font-size: .65rem; }

@@ -2,8 +2,11 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import HanziWriter, { type CharacterJson } from "hanzi-writer";
 import { ArrowRight, Check, Lightbulb, Play, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { PageHeader } from "@/components/workspace/workspace-ui";
-import { practiceCharacters, type PracticeCharacter } from "@/lib/hanzi-practice";
+import { filterPracticeCharacters, practiceCharacters, type PracticeCharacter } from "@/lib/hanzi-practice";
+import { readingLessons } from "@/lib/reading-lessons";
 import { postJson, requestJson } from "@/lib/workspace/api";
 import { practiceError, type PracticeHistory, type PracticeRecord, type WritingResult } from "@/lib/practice-types";
 import { usePracticeSelection } from "@/lib/workspace/use-practice-selection";
@@ -13,7 +16,7 @@ type Mode = "trace" | "recall";
 type Phase = "loading" | "writing" | "playing" | "ready" | "complete" | "error";
 
 function WritingBoard({ item, onComplete, onNext }: {
-  item: PracticeCharacter; onComplete: (character: string, result: WritingResult) => void; onNext: () => void;
+  item: PracticeCharacter; onComplete: (character: string, result: WritingResult) => void; onNext?: () => void;
 }) {
   const [mode, setMode] = useState<Mode>("trace");
   const [phase, setPhase] = useState<Phase>("loading");
@@ -184,7 +187,7 @@ function WritingBoard({ item, onComplete, onNext }: {
           <Button variant="outline" disabled={unavailable || phase === "playing"} onClick={() => { void demonstrate(); }}><Play/>看笔顺</Button>
           <Button variant="outline" disabled={phase !== "writing"} onClick={() => { void hint(); }}><Lightbulb/>提示这一笔</Button>
           <Button variant={phase === "ready" ? "default" : "outline"} disabled={unavailable} onClick={() => setRound((value) => value + 1)}><RotateCcw/>{phase === "ready" || phase === "playing" ? "开始练习" : "重新练习"}</Button>
-          {phase === "complete" && <Button onClick={onNext}>练下一个字<ArrowRight/></Button>}
+          {phase === "complete" && onNext && <Button onClick={onNext}>练下一个字<ArrowRight/></Button>}
         </>}
     </div>
   </section>;
@@ -193,7 +196,11 @@ function WritingBoard({ item, onComplete, onNext }: {
 type CompletedWriting = { id: string; character: string; result: WritingResult };
 export default function HanziWritingLab({ characters = practiceCharacters, journeyRunId, practiceTaskId, onSaved, embedded = false }: { characters?: readonly PracticeCharacter[]; journeyRunId?: string; practiceTaskId?: string; onSaved?: () => void; embedded?: boolean }) {
   const [character, setCharacter] = usePracticeSelection("/student/writing", "character", characters[0].character, !embedded);
+  const [query, setQuery] = useState("");
+  const [lessonId, setLessonId] = useState("");
+  const visibleCharacters = filterPracticeCharacters(characters, query, lessonId);
   const selected = characters.find((item) => item.character === character) ?? characters[0];
+  const hasNext = visibleCharacters.some((item) => item.character !== selected.character);
   const setSelected = (item: PracticeCharacter) => setCharacter(item.character);
   const [completed, setCompleted] = useState<string[]>([]);
   const [history, setHistory] = useState<PracticeRecord[]>([]);
@@ -223,7 +230,7 @@ export default function HanziWritingLab({ characters = practiceCharacters, journ
   const complete = useCallback((character: string, result: WritingResult) => {
     const entry = { id: crypto.randomUUID(), character, result }; setPending(entry); void save(entry);
   }, [save]);
-  const next = () => setSelected(characters[(characters.indexOf(selected) + 1) % characters.length]);
+  const next = () => { if (visibleCharacters.length) setSelected(visibleCharacters[(visibleCharacters.indexOf(selected) + 1) % visibleCharacters.length]); };
 
   if (!characters.some((item) => item.character === character)) return <section className={styles.page}><PageHeader title="汉字书写实验室" description="指定的字不在当前可练习字库中。"/><Button onClick={() => setCharacter(characters[0].character)}>选择可练习的字</Button></section>;
   return <section className={styles.page}>
@@ -232,18 +239,20 @@ export default function HanziWritingLab({ characters = practiceCharacters, journ
     {saving && <p role="status">正在保存本轮书写记录…</p>}
     <div className={styles.layout}>
       <aside className={styles.selection} aria-label="练习字表">
-        <div className={styles.selectionHeading}><h2>今天，写好一个字</h2><p>选一个字，从描红开始。</p></div>
-        <div className={styles.characters}>
-          {characters.map((item) => <button key={item.character} type="button" disabled={saving || !!pending} aria-pressed={selected.character === item.character} aria-label={`${item.character}，${item.pinyin}${completed.includes(item.character) ? "，已有练习记录" : ""}`} onClick={() => setSelected(item)}>
+        <div className={styles.selectionHeading}><h2>今天，写好一个字</h2><p>选一个字，从描红开始；读音以当前组词为例。</p></div>
+        {!embedded && <div className={styles.filters}><label>搜索字库<Input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="汉字、拼音或组词"/></label><label>按平台课文筛选<NativeSelect value={lessonId} onChange={(event) => setLessonId(event.target.value)}><option value="">全部 {characters.length} 字</option>{readingLessons.map((lesson) => <option key={lesson.id} value={lesson.id}>{lesson.title}</option>)}</NativeSelect></label><p role="status">找到 {visibleCharacters.length} / {characters.length} 字{!visibleCharacters.some((item) => item.character === selected.character) ? "；画板保留当前练习“" + selected.character + "”。" : ""}</p></div>}
+        <div className={`${styles.characters} ${!embedded ? styles.library : ""}`}>
+          {visibleCharacters.map((item) => <button key={item.character} type="button" disabled={saving || !!pending} aria-pressed={selected.character === item.character} aria-label={`${item.character}，${item.pinyin}${completed.includes(item.character) ? "，已有练习记录" : ""}`} onClick={() => setSelected(item)}>
             <span lang="zh-CN">{item.character}</span><small>{item.pinyin}</small>{completed.includes(item.character) && <Check aria-hidden="true"/>}
           </button>)}
         </div>
+        {!visibleCharacters.length && <p className={styles.sessionNote}>没有匹配的字，请调整搜索或课文筛选。</p>}
         <div className={styles.wordNote}>
           <p className={styles.pinyin}>{selected.pinyin}</p><h3>{selected.word}</h3><p>{selected.example}</p>
         </div>
         <p className={styles.sessionNote}>{completed.length ? `已有 ${characters.filter((item) => completed.includes(item.character)).length} 个字的保存记录，换一个继续吧。` : "鼠标或手指都可以写，按笔顺慢慢来。"}</p>
       </aside>
-      <div inert={saving || !!pending}><WritingBoard item={selected} onComplete={complete} onNext={next}/></div>
+      <div inert={saving || !!pending}><WritingBoard item={selected} onComplete={complete} onNext={hasNext ? next : undefined}/></div>
     </div>
     {!embedded && history.length > 0 && <section className={styles.history} aria-label="书写练习记录"><h2>最近的书写练习</h2>{history.slice(0, 6).map((item) => <p key={item.id}><strong>{item.title}</strong> · {(item.result as WritingResult).mode === "trace" ? "描红" : "独立书写"} · 重试 {(item.result as WritingResult).mistakes} 次 · 主动提示 {(item.result as WritingResult).hints} 次 · 本轮 {Math.max(1, Math.round((item.result as WritingResult).elapsedMs / 1000))} 秒</p>)}</section>}
     <footer className={styles.footer}><p>练习结果保存到本人账号，刷新后可回看。逐笔反馈为练习记录，不作为课程成绩。</p><a href="/hanzi/NOTICE.txt" target="_blank" rel="noreferrer">笔顺数据来源与许可</a></footer>

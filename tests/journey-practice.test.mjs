@@ -29,6 +29,17 @@ test("teacher journey definitions validate available reading characters and publ
   assert.equal(JSON.stringify(catalog).includes("expressions"), false);
 });
 
+test("expanded reading characters can be assigned to a journey and saved through its writing gate", async (t) => {
+  const f = await practiceFixture(t);
+  await f.publish({ content: { ...f.scenario.content, journey: { lessonId: "park-morning", characters: ["树", "公"] } } });
+  const run = await f.start(); assert.deepEqual(run.characters, ["树", "公"]);
+  await f.request("student", "/practice", f.reading(run));
+  for (const character of run.characters) await f.request("student", "/practice", f.writing(run, character));
+  const saved = (await f.request("student", "/journeys")).runs[0];
+  assert.equal(saved.stage, 2);
+  assert.deepEqual(saved.records.filter((record) => record.kind === "writing").map((record) => record.referenceId).sort(), ["公", "树"]);
+});
+
 test("journey starts are retry safe snapshots and allocate one bound dialogue round", async (t) => {
   const f = await practiceFixture(t); await f.publish(); const run = await f.start();
   assert.deepEqual(await f.start(run.id), run);
