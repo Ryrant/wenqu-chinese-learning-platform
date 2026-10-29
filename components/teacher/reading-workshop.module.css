@@ -6,9 +6,12 @@
 .layout { display: grid; grid-template-columns: minmax(12rem, .6fr) minmax(0, 1.8fr); gap: 1.75rem; align-items: start; }
 .library { display: grid; gap: .75rem; }
 .library h2 { font-size: 1rem; font-weight: 600; }
-.library button { display: grid; gap: .4rem; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); text-align: left; overflow-wrap: anywhere; }
-.library button[aria-pressed="true"] { border-color: var(--primary); background: var(--accent); }
-.library button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.library label { display: grid; gap: .35rem; min-width: 0; font-size: .85rem; }
+.library select { width: 100%; }
+.lessonList { display: grid; gap: .75rem; max-height: 28rem; overflow-y: auto; padding: .2rem; }
+.lessonButton { display: grid; gap: .4rem; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); text-align: left; overflow-wrap: anywhere; }
+.lessonButton[aria-pressed="true"] { border-color: var(--primary); background: var(--accent); }
+.lessonButton:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .library small, .library > p, .note, .fields small { color: var(--muted-foreground); font-size: .75rem; line-height: 1.8; }
 .editor, .fields { display: grid; gap: 1.25rem; min-width: 0; }
 .fields label { display: grid; gap: .5rem; font-size: .85rem; line-height: 1.7; min-width: 0; }
@@ -17,5 +20,18 @@
 .fields :global([data-slot="native-select-wrapper"]) { max-width: 100%; }
 .preview { display: grid; gap: 1.5rem; border-top: 1px solid var(--border); padding-top: 1.5rem; }
 .error { color: var(--destructive); font-size: .85rem; line-height: 1.9; }
-@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } .library { grid-template-columns: repeat(2, minmax(0, 1fr)); } .library h2 { grid-column: 1 / -1; } }
-@media (max-width: 600px) { .pair, .library { grid-template-columns: minmax(0, 1fr); } .toolbar label { width: 100%; } }
+.annotations { display: grid; gap: .75rem; min-width: 0; }
+.annotations h3 { font-size: 1rem; font-weight: 600; }
+.termList { display: grid; gap: 1rem; max-height: 38rem; overflow-y: auto; padding: .25rem; min-width: 0; }
+.termRow { display: grid; gap: .75rem; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.termRow legend { padding-inline: .3rem; font-size: .85rem; color: var(--muted-foreground); }
+.termRow > button { justify-self: end; }
+.annotations > button { justify-self: start; }
+.recovery, .conflict { padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); line-height: 1.8; min-width: 0; overflow-wrap: anywhere; }
+.recovery summary { font-weight: 600; cursor: pointer; }
+.recovery > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem 1rem; padding-top: 1rem; margin-top: 1rem; border-top: 1px solid var(--border); }
+.recovery small { grid-column: 1; color: var(--muted-foreground); }
+.recovery button { grid-column: 2; grid-row: 1 / 3; align-self: center; white-space: normal; height: auto; }
+.conflict .actions { margin-top: .75rem; }
+@media (max-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr); } .lessonList { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .pair, .lessonList { grid-template-columns: minmax(0, 1fr); } .toolbar label { width: 100%; } .recovery > div { grid-template-columns: minmax(0, 1fr); } .recovery button { grid-column: 1; grid-row: auto; justify-self: start; } }
